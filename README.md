@@ -5,11 +5,12 @@
 
 A Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
 
-> [!WARNING] > **Alpha software:** this project is under heavy active development.
-> Expect breaking changes between commits, missing features, and partial behavior parity.
-> Do not rely on it as your only way to access production vault data yet.
-> This code was not audited for security.
-> **Use at your own risk**
+  ⚠️ **WARNING** ⚠️ **Alpha software:** 
+  This project is under heavy active development.
+  Expect breaking changes between commits, missing features, and partial behavior parity.
+  Do not rely on it as your only way to access production vault data yet.
+  This code was not audited for security.
+  **Use at your own risk**
 
 ## Status
 
