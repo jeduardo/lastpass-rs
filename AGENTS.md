@@ -13,6 +13,9 @@
 - Ensure code always compiles and tests always run.
 - If there are no tests for new functionality, add tests.
 - Aim for at least 80% test coverage.
+- Every new feature implementation must include unit tests in the same change.
+- Do not consider a feature complete unless tests are added/updated and passing.
+- Keep project test coverage at or above 80%; if a change risks dropping below this, add coverage before finishing.
 
 ## UI/UX behavior
 - If the C CLI has colored output, mirror that behavior.

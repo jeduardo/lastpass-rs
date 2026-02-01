@@ -17,6 +17,15 @@ fn version_flag_prints_version() {
     let (status, stdout, stderr) = run(&["--version"]);
     assert_eq!(status, 0, "stderr: {stderr}");
     assert!(stdout.starts_with("LastPass CLI v"));
+    assert!(stdout.contains("based on lastpass-cli"));
+}
+
+#[test]
+fn version_command_prints_version() {
+    let (status, stdout, stderr) = run(&["version"]);
+    assert_eq!(status, 0, "stderr: {stderr}");
+    assert!(stdout.starts_with("LastPass CLI v"));
+    assert!(stdout.contains("based on lastpass-cli"));
 }
 
 #[test]
@@ -25,6 +34,7 @@ fn help_flag_prints_version_and_usage() {
     assert_eq!(status, 0, "stderr: {stderr}");
     assert!(stdout.contains("LastPass CLI v"));
     assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("lpass version"));
     assert!(stdout.contains("lpass login"));
     assert!(stdout.contains("lpass show"));
 }

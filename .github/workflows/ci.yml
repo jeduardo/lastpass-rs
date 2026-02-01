@@ -49,6 +49,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+      - name: Run upstream shell tests
+        run: cargo test-upstream
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

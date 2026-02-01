@@ -169,12 +169,29 @@ cargo run -- show "personal/example"
 
 ## Environment
 
-Compatibility with the C client is a core requirement. Existing behavior around config/env is being preserved, including support for common variables such as:
+Implementation status for environment variables (source audited from `lastpass-cli/` plus Rust-only additions):
 
-- `LPASS_HOME`
-- `LPASS_ASKPASS`
-- `LPASS_AGENT_DISABLE`
-- `LPASS_AGENT_TIMEOUT`
+| Variable | Purpose | Rust status |
+| --- | --- | --- |
+| `LPASS_HOME` | Override base config/data/runtime path root. | ✅ Implemented |
+| `XDG_DATA_HOME` | XDG data base dir for `lpass` data files. | ✅ Implemented |
+| `XDG_CONFIG_HOME` | XDG config base dir for aliases/config. | ✅ Implemented |
+| `XDG_RUNTIME_DIR` | XDG runtime dir for sockets/locks/runtime state. | ✅ Implemented |
+| `HOME` | Fallback home directory for config path resolution. | ✅ Implemented |
+| `LPASS_AGENT_TIMEOUT` | Agent key timeout in seconds (`0` = no timeout). | ✅ Implemented |
+| `LPASS_AGENT_DISABLE` | Disable use of the background agent when set to `1`. | ✅ Implemented |
+| `LPASS_ASKPASS` | External askpass helper command for password input. | ✅ Implemented |
+| `LPASS_AUTO_SYNC_TIME` | Auto-sync freshness window (seconds) for blob cache. | ❌ Not implemented yet |
+| `LPASS_PINENTRY` | Pinentry executable override. | ❌ Not implemented yet |
+| `LPASS_DISABLE_PINENTRY` | Disable pinentry fallback and use tty prompt path. | ❌ Not implemented yet |
+| `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ❌ Not implemented yet |
+| `LPASS_LOG_LEVEL` | Debug logging verbosity level. | ❌ Not implemented yet |
+| `SECURE_TMPDIR` | Secure temp dir override used by editor workflows. | ❌ Not implemented yet |
+| `TMPDIR` | Fallback temp dir for secure editing path. | ❌ Not implemented yet |
+| `SHELL` | Shell used to execute clipboard command wrappers. | ❌ Not implemented yet |
+| `TERM` | TTY type passed to pinentry integration. | ❌ Not implemented yet |
+| `DISPLAY` | Display target passed to pinentry integration. | ❌ Not implemented yet |
+| `LPASS_HTTP_MOCK` | Rust-only mock HTTP/test mode toggle (`1` enables mock). | ✅ Implemented (Rust extension) |
 
 ## Testing
 
