@@ -3,6 +3,7 @@ name = "lastpass-cli"
 version = "0.0.0-dev"
 edition = "2024"
 license = "GPL-2.0-or-later"
+default-run = "lpass"
 
 [[bin]]
 name = "lpass"
@@ -27,6 +28,7 @@ pbkdf2 = "0.12"
 rand = { version = "0.8", features = ["getrandom"] }
 quick-xml = "0.38"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip"] }
+rpassword = "7"
 rsa = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
