@@ -1,5 +1,8 @@
 # lastpass-rs
 
+[![CI](https://github.com/jeduardo/lastpass-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jeduardo/lastpass-rs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jeduardo/lastpass-rs/branch/main/graph/badge.svg)](https://codecov.io/gh/jeduardo/lastpass-rs)
+
 A Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
 
 > [!WARNING]
@@ -96,6 +99,20 @@ Rust tests:
 
 ```bash
 cargo test
+```
+
+Coverage report (Codecov-compatible LCOV):
+
+```bash
+cargo coverage
+```
+
+This uses `cargo-llvm-cov` and writes `coverage/lcov.info`, which can be uploaded to Codecov.
+
+Optional local HTML report:
+
+```bash
+cargo coverage-html
 ```
 
 Upstream compatibility shell tests:

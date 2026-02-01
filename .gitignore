@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+/coverage/*
+!/coverage/.gitkeep
 
 # Cargo lockfile for libraries (keep for binaries if desired)
 # Cargo.lock
