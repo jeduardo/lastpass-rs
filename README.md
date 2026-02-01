@@ -1,0 +1,131 @@
+# lastpass-rs
+
+A Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
+
+> [!WARNING]
+> **Alpha software:** this project is under heavy active development.
+> Expect breaking changes between commits, missing features, and partial behavior parity.
+> Do not rely on it as your only way to access production vault data yet.
+
+## Status
+
+This project is in active development. The goal is:
+
+- full feature parity with `lastpass-cli`
+- same command interface (flags/options)
+- same config and environment variable behavior
+- safe Rust only (`#![forbid(unsafe_code)]`)
+- Cargo-only build and test workflow
+
+The original C implementation is kept in `lastpass-cli/` and is used as the reference for compatibility.
+
+## Current command coverage
+
+Implemented (working, with ongoing parity improvements):
+
+- `login`
+- `status`
+- `ls`
+- `show`
+- `add`
+- `edit`
+- `duplicate`
+- `generate`
+- `export`
+
+Planned / not fully implemented yet:
+
+- `logout`
+- `passwd`
+- `mv`
+- `rm`
+- `sync`
+- `import`
+- `share`
+
+## Build
+
+Requires the latest stable Rust toolchain.
+
+```bash
+cargo build
+```
+
+Release build:
+
+```bash
+cargo build --release
+```
+
+Binary path:
+
+- debug: `target/debug/lpass`
+- release: `target/release/lpass`
+
+## Usage
+
+```bash
+# Show help
+cargo run -- --help
+
+# Login
+cargo run -- login you@example.com
+
+# Vault status
+cargo run -- status
+
+# List entries
+cargo run -- ls
+
+# Show entry
+cargo run -- show "personal/example"
+```
+
+## Environment
+
+Compatibility with the C client is a core requirement. Existing behavior around config/env is being preserved, including support for common variables such as:
+
+- `LPASS_HOME`
+- `LPASS_ASKPASS`
+- `LPASS_AGENT_DISABLE`
+- `LPASS_AGENT_TIMEOUT`
+
+## Testing
+
+Rust tests:
+
+```bash
+cargo test
+```
+
+Upstream compatibility shell tests:
+
+```bash
+cargo test-upstream
+```
+
+You can pass individual test names to run a subset:
+
+```bash
+cargo test-upstream -- test_login test_ls
+```
+
+## Project goals and fidelity rules
+
+- Commands should match the C client behavior before being considered complete.
+- Colors, output shape, flags, and side effects should follow the reference implementation.
+- Any intentional deviation should be documented.
+
+## AI-assisted development
+
+This project is built with support from AI tooling as part of the development workflow. All generated changes are reviewed and validated with compilation and tests.
+
+## Credits
+
+- [dynacylabs/lastpass-py](https://github.com/dynacylabs/lastpass-py) for inspiration.
+- [Michael-F-Bryan/lastpass](https://github.com/Michael-F-Bryan/lastpass) for inspiration.
+- [LastPass/lastpass-cli](http://github.com/Lastpass/lastpass-cli/) for crashing so much (and motivating this rewrite).
+
+## License
+
+GPL-2.0-or-later. See `LICENSE`.
