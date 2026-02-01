@@ -77,4 +77,5 @@ jobs:
         with:
           files: coverage/lcov.info
           fail_ci_if_error: true
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: jeduardo/lastpass-rs

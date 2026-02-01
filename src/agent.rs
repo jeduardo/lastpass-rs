@@ -264,9 +264,8 @@ fn peer_allowed(stream: &std::os::unix::net::UnixStream) -> Result<bool> {
 
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
     {
-        use std::os::unix::prelude::AsRawFd;
         use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
-        let creds = getsockopt(stream.as_raw_fd(), PeerCredentials)
+        let creds = getsockopt(stream, PeerCredentials)
             .map_err(|err| LpassError::io("peer credentials", err.into()))?;
         let uid = creds.uid();
         let gid = creds.gid();
