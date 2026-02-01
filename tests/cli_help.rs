@@ -16,23 +16,27 @@ fn run(args: &[&str]) -> (i32, String, String) {
 fn version_flag_prints_version() {
     let (status, stdout, stderr) = run(&["--version"]);
     assert_eq!(status, 0, "stderr: {stderr}");
-    assert!(stdout.starts_with("LastPass CLI v"));
+    assert!(stdout.starts_with("LastPass CLI (Rust) v"));
     assert!(stdout.contains("based on lastpass-cli"));
+    assert!(stdout.contains("rustc "));
+    assert!(stdout.contains("https://github.com/jeduardo/lastpass-rs"));
 }
 
 #[test]
 fn version_command_prints_version() {
     let (status, stdout, stderr) = run(&["version"]);
     assert_eq!(status, 0, "stderr: {stderr}");
-    assert!(stdout.starts_with("LastPass CLI v"));
+    assert!(stdout.starts_with("LastPass CLI (Rust) v"));
     assert!(stdout.contains("based on lastpass-cli"));
+    assert!(stdout.contains("rustc "));
+    assert!(stdout.contains("https://github.com/jeduardo/lastpass-rs"));
 }
 
 #[test]
 fn help_flag_prints_version_and_usage() {
     let (status, stdout, stderr) = run(&["--help"]);
     assert_eq!(status, 0, "stderr: {stderr}");
-    assert!(stdout.contains("LastPass CLI v"));
+    assert!(stdout.contains("LastPass CLI (Rust) v"));
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("lpass version"));
     assert!(stdout.contains("lpass login"));

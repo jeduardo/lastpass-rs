@@ -3,6 +3,7 @@ name = "lastpass-cli"
 version = "0.0.0-dev"
 edition = "2024"
 license = "GPL-2.0-or-later"
+repository = "https://github.com/jeduardo/lastpass-rs"
 default-run = "lpass"
 
 [[bin]]
