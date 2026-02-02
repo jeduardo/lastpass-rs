@@ -43,31 +43,31 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         }
         if arg == "--json" || arg == "-j" {
             json = true;
-        } else if arg == "--username" {
+        } else if arg == "--username" || arg == "-u" {
             choice = ShowChoice::Username;
-        } else if arg == "--password" {
+        } else if arg == "--password" || arg == "-p" {
             choice = ShowChoice::Password;
-        } else if arg == "--url" {
+        } else if arg == "--url" || arg == "-L" {
             choice = ShowChoice::Url;
-        } else if arg == "--id" {
+        } else if arg == "--id" || arg == "-I" {
             choice = ShowChoice::Id;
-        } else if arg == "--name" {
+        } else if arg == "--name" || arg == "-N" {
             choice = ShowChoice::Name;
-        } else if arg == "--notes" || arg == "--note" {
+        } else if arg == "--notes" || arg == "--note" || arg == "-O" {
             choice = ShowChoice::Notes;
         } else if arg.starts_with("--field=") {
             choice = ShowChoice::Field;
             field_name = Some(arg.trim_start_matches("--field=").to_string());
-        } else if arg == "--field" {
+        } else if arg == "--field" || arg == "-f" {
             choice = ShowChoice::Field;
             if let Some(next) = iter.next() {
                 field_name = Some(next.clone());
             }
         } else if arg.starts_with("--sync=") {
             // ignored
-        } else if arg == "--sync" {
+        } else if arg == "--sync" || arg == "-S" {
             let _ = iter.next();
-        } else if arg == "--all" {
+        } else if arg == "--all" || arg == "-A" {
             choice = ShowChoice::All;
         } else if arg == "--basic-regexp" || arg == "-G" {
             // not implemented
@@ -82,7 +82,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             // not implemented
         } else if arg.starts_with("--attach=") {
             // not implemented
-        } else if arg == "--color" {
+        } else if arg == "--color" || arg == "-C" {
             let value = iter.next().ok_or_else(|| usage.to_string())?;
             let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
