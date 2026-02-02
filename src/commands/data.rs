@@ -23,7 +23,14 @@ pub(crate) fn load_blob() -> Result<Blob> {
         return load_mock_blob();
     }
 
-    let key = agent_get_decryption_key()?;
+    let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
+    let session = crate::session::session_load(&key).map_err(map_decryption_key_error)?;
+    if session.is_none() {
+        return Err(LpassError::User(
+            "Could not find session. Perhaps you need to login with `lpass login`.",
+        ));
+    }
+
     if let Some(buffer) = config_read_encrypted_buffer(BLOB_JSON_NAME, &key)? {
         let blob = serde_json::from_slice::<Blob>(&buffer)
             .map_err(|_| LpassError::Crypto("invalid blob"))?;
@@ -49,6 +56,17 @@ pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
     let key = agent_get_decryption_key()?;
     let buffer = serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
     config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key)
+}
+
+fn map_decryption_key_error(err: LpassError) -> LpassError {
+    match err {
+        LpassError::Crypto("missing iterations")
+        | LpassError::Crypto("missing username")
+        | LpassError::Crypto("missing verify") => LpassError::User(
+            "Could not find decryption key. Perhaps you need to login with `lpass login`.",
+        ),
+        _ => err,
+    }
 }
 
 pub(crate) fn ensure_mock_blob() -> Result<()> {

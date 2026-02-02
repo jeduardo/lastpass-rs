@@ -31,7 +31,10 @@ fn show_accepts_password_short_option_after_name() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "test-account-password\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "test-account-password\n"
+    );
 
     let _ = fs::remove_dir_all(&test_home);
 }
@@ -79,7 +82,10 @@ fn show_password_short_option_works_with_shared_style_fullname() {
         "show stderr: {}",
         String::from_utf8_lossy(&show_output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&show_output.stdout), format!("{password}\n"));
+    assert_eq!(
+        String::from_utf8_lossy(&show_output.stdout),
+        format!("{password}\n")
+    );
 
     let _ = fs::remove_dir_all(&test_home);
 }

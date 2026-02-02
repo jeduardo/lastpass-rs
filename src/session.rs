@@ -105,6 +105,11 @@ pub fn session_kill() -> Result<()> {
     let _ = store.unlink("session_privatekeyenc");
     let _ = store.unlink("session_server");
     let _ = store.unlink("plaintext_key");
+    let _ = store.unlink("uploader.pid");
+    let _ = store.unlink("session_ff_url_encryption");
+    let _ = store.unlink("session_ff_url_logging");
+    let _ = crate::agent::agent_kill();
+    let _ = store.unlink("agent.sock");
 
     Ok(())
 }

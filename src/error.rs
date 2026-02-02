@@ -20,6 +20,8 @@ pub enum LpassError {
     MissingHome,
     #[error("invalid utf-8 data")]
     InvalidUtf8,
+    #[error("{0}")]
+    User(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, LpassError>;

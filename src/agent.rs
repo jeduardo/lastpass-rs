@@ -74,6 +74,71 @@ pub fn agent_is_available() -> bool {
     }
 }
 
+pub fn agent_kill() -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::fs;
+        use std::io::ErrorKind;
+        use std::os::unix::net::UnixStream;
+
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+
+        let path = agent_socket_path()?;
+        let mut stream = match UnixStream::connect(&path) {
+            Ok(stream) => stream,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::Other
+                ) =>
+            {
+                let _ = fs::remove_file(&path);
+                return Ok(());
+            }
+            Err(err) => return Err(LpassError::io("connect", err)),
+        };
+
+        let pid = if socket_send_pid() {
+            let this_pid = std::process::id();
+            stream
+                .write_all(&this_pid.to_ne_bytes())
+                .map_err(|err| LpassError::io("write pid", err))?;
+            let mut buf = [0u8; 4];
+            stream
+                .read_exact(&mut buf)
+                .map_err(|err| LpassError::io("read pid", err))?;
+            Some(u32::from_ne_bytes(buf))
+        } else {
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
+            {
+                use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
+                let creds = getsockopt(&stream, PeerCredentials)
+                    .map_err(|err| LpassError::io("peer credentials", err.into()))?;
+                Some(creds.pid() as u32)
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+            {
+                None
+            }
+        };
+
+        if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
+            if pid > 0 {
+                let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+            }
+        }
+
+        let _ = fs::remove_file(&path);
+        return Ok(());
+    }
+
+    #[cfg(not(unix))]
+    {
+        Ok(())
+    }
+}
+
 fn verify_key(key: &[u8; KDF_HASH_LEN]) -> Result<bool> {
     match config_read_encrypted_string("verify", key)? {
         Some(value) => Ok(value == VERIFY_STRING),
@@ -103,6 +168,8 @@ fn agent_load_key() -> Result<[u8; KDF_HASH_LEN]> {
 }
 
 fn agent_start(key: &[u8; KDF_HASH_LEN]) -> Result<()> {
+    let _ = agent_kill();
+
     if config_exists("plaintext_key") {
         return Ok(());
     }

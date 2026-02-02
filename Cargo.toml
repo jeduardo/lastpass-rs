@@ -39,6 +39,6 @@ tempfile = "3"
 thiserror = "1"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 zeroize = "1.7"
-nix = { version = "0.29", features = ["process", "socket", "user"] }
+nix = { version = "0.29", features = ["process", "signal", "socket", "user"] }
 
 [dev-dependencies]

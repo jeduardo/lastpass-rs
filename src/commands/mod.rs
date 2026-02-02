@@ -7,6 +7,7 @@ mod edit;
 mod export;
 mod generate;
 mod login;
+mod logout;
 mod ls;
 mod show;
 mod status;
@@ -19,10 +20,11 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "export" => export::run(args),
         "generate" => generate::run(args),
         "login" => login::run(args),
+        "logout" => logout::run(args),
         "show" => show::run(args),
         "ls" => ls::run(args),
         "status" => status::run(args),
-        "logout" | "passwd" | "mv" | "rm" | "sync" | "import" | "share" => not_implemented(command),
+        "passwd" | "mv" | "rm" | "sync" | "import" | "share" => not_implemented(command),
         _ => 1,
     }
 }
