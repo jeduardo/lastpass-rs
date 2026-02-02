@@ -7,7 +7,7 @@ use crate::error::{LpassError, Result};
 
 pub fn prompt_password(username: &str) -> Result<String> {
     let prompt = "Master Password";
-    if let Ok(askpass) = env::var("LPASS_ASKPASS") {
+    if let Some(askpass) = askpass_program_from_env() {
         let output = Command::new(askpass)
             .arg(prompt)
             .output()
@@ -26,6 +26,14 @@ pub fn prompt_password(username: &str) -> Result<String> {
         .map_err(|err| LpassError::io("password prompt", err))
 }
 
+fn askpass_program_from_env() -> Option<String> {
+    askpass_program_from_value(env::var("LPASS_ASKPASS").ok())
+}
+
+fn askpass_program_from_value(value: Option<String>) -> Option<String> {
+    value.filter(|item| !item.trim().is_empty())
+}
+
 fn decode_password_output(mut bytes: Vec<u8>) -> String {
     while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
         bytes.pop();
@@ -41,5 +49,17 @@ mod tests {
     fn decode_password_output_trims_trailing_newlines() {
         let raw = b"passphrase with spaces\r\n".to_vec();
         assert_eq!(decode_password_output(raw), "passphrase with spaces");
+    }
+
+    #[test]
+    fn askpass_uses_non_empty_value() {
+        let value = super::askpass_program_from_value(Some("/tmp/lpass-askpass.sh".to_string()));
+        assert_eq!(value.as_deref(), Some("/tmp/lpass-askpass.sh"));
+    }
+
+    #[test]
+    fn askpass_ignores_empty_values() {
+        let value = super::askpass_program_from_value(Some("   ".to_string()));
+        assert!(value.is_none());
     }
 }

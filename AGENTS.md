@@ -33,6 +33,7 @@
   - environment variable handling
   - config file names/locations and side effects
 - Use `lastpass-cli/` in this repository as the primary reference implementation when validating parity.
+- Enforce strict parity: do not add new flags, aliases, environment variable names, or fallback behaviors unless they exist in the C client.
 - For any command that supports colors in the C client, ensure Rust output uses the same color semantics and formatting defaults.
 - Treat the C source as the source of truth for CLI compatibility when behavior is ambiguous.
 - If behavior is intentionally different, document the deviation clearly in the change notes.
