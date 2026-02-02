@@ -160,6 +160,8 @@ Available targets:
 - `lpass-linux-arm64.tar.gz`
 - `lpass-macos-x86_64.tar.gz`
 - `lpass-macos-arm64.tar.gz`
+- `lpass-windows-x86_64.zip`
+- `lpass-windows-arm64.zip`
 
 ## Usage
 

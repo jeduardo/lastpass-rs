@@ -106,6 +106,12 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             asset_name: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: windows-x86_64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            asset_name: windows-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,10 +134,19 @@ jobs:
         run: cargo build --locked --release --bin lpass --target ${{ matrix.target }}
 
       - name: Package artifact
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/lpass" "dist/lpass-${{ matrix.asset_name }}"
           tar -C dist -czf "dist/lpass-${{ matrix.asset_name }}.tar.gz" "lpass-${{ matrix.asset_name }}"
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/lpass.exe" "dist/lpass-${{ matrix.asset_name }}.exe"
+          Compress-Archive -Path "dist/lpass-${{ matrix.asset_name }}.exe" -DestinationPath "dist/lpass-${{ matrix.asset_name }}.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
