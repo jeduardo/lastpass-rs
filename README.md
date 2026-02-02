@@ -148,6 +148,19 @@ Binary path:
 - debug: `target/debug/lpass`
 - release: `target/release/lpass`
 
+## Prebuilt binaries
+
+Every push to `main` updates a rolling GitHub release tagged `latest` with fresh cross-compiled binaries.
+
+- Release page: [latest](https://github.com/jeduardo/lastpass-rs/releases/tag/latest)
+
+Available targets:
+
+- `lpass-linux-x86_64.tar.gz`
+- `lpass-linux-arm64.tar.gz`
+- `lpass-macos-x86_64.tar.gz`
+- `lpass-macos-arm64.tar.gz`
+
 ## Usage
 
 ```bash
