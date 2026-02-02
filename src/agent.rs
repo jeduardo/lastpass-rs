@@ -65,6 +65,18 @@ pub fn agent_save(username: &str, iterations: u32, key: &[u8; KDF_HASH_LEN]) -> 
 }
 
 pub fn agent_is_available() -> bool {
+    if let Ok(Some(buffer)) = config_read_buffer("plaintext_key") {
+        if buffer.len() == KDF_HASH_LEN {
+            let mut key = [0u8; KDF_HASH_LEN];
+            key.copy_from_slice(&buffer);
+            let valid = verify_key(&key).unwrap_or(false);
+            key.zeroize();
+            if valid {
+                return true;
+            }
+        }
+    }
+
     match agent_ask() {
         Ok(mut key) => {
             key.zeroize();
@@ -362,4 +374,33 @@ fn read_pid(stream: &mut std::os::unix::net::UnixStream) -> Result<u32> {
         .read_exact(&mut buf)
         .map_err(|err| LpassError::io("read pid", err))?;
     Ok(u32::from_ne_bytes(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maybe_run_agent_returns_none_for_non_agent_commands() {
+        assert_eq!(maybe_run_agent(&[]), None);
+        assert_eq!(maybe_run_agent(&["lpass".to_string()]), None);
+        assert_eq!(
+            maybe_run_agent(&["lpass".to_string(), "status".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn socket_send_pid_matches_platform_contract() {
+        if cfg!(any(target_os = "linux", target_os = "android", target_os = "cygwin")) {
+            assert!(!socket_send_pid());
+        } else {
+            assert!(socket_send_pid());
+        }
+    }
+
+    #[test]
+    fn agent_timeout_has_default_when_env_missing() {
+        assert_eq!(agent_timeout(), Some(Duration::from_secs(60 * 60)));
+    }
 }

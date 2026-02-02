@@ -349,3 +349,112 @@ fn parse_yes_no(value: &str) -> Option<bool> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_entry_input_reads_standard_fields_and_notes() {
+        let parsed = parse_entry_input(
+            "Username: alice\nPassword: top-secret\nURL: https://example.com\nReprompt: yes\nNotes: line1\nline2",
+            NoteType::None,
+        );
+        assert_eq!(parsed.username.as_deref(), Some("alice"));
+        assert_eq!(parsed.password.as_deref(), Some("top-secret"));
+        assert_eq!(parsed.url.as_deref(), Some("https://example.com"));
+        assert_eq!(parsed.reprompt, Some(true));
+        assert_eq!(parsed.note.as_deref(), Some("line1\nline2"));
+    }
+
+    #[test]
+    fn parse_entry_input_supports_multiline_ssh_private_key() {
+        let parsed = parse_entry_input(
+            "NoteType: SSH Key\nPrivate Key: line1\nline2\nHostname: host.example.com",
+            NoteType::SshKey,
+        );
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|field| field.name == "Private Key" && field.value == "line1\nline2")
+        );
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|field| field.name == "Hostname" && field.value == "host.example.com")
+        );
+    }
+
+    #[test]
+    fn build_account_assigns_fullname_and_reprompt() {
+        let parsed = parse_entry_input(
+            "Username: alice\nPassword: p\nReprompt: No\nNotes: hello",
+            NoteType::None,
+        );
+        let account = build_account(&parsed, "team/entry");
+        assert_eq!(account.group, "team");
+        assert_eq!(account.name, "entry");
+        assert_eq!(account.fullname, "team/entry");
+        assert_eq!(account.username, "alice");
+        assert_eq!(account.password, "p");
+        assert!(!account.pwprotect);
+        assert_eq!(account.note, "hello");
+    }
+
+    #[test]
+    fn split_group_splits_last_slash_only() {
+        assert_eq!(
+            split_group("a/b/c"),
+            ("a/b".to_string(), "c".to_string())
+        );
+        assert_eq!(split_group("single"), ("".to_string(), "single".to_string()));
+    }
+
+    #[test]
+    fn next_id_ignores_non_numeric_ids() {
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            accounts: vec![
+                Account {
+                    id: "0009".to_string(),
+                    ..Account::default()
+                },
+                Account {
+                    id: "abc".to_string(),
+                    ..Account::default()
+                },
+            ],
+        };
+        assert_eq!(next_id(&blob), "0010");
+    }
+
+    #[test]
+    fn is_valid_field_name_honors_note_templates() {
+        assert!(is_valid_field_name(NoteType::None, "Anything"));
+        assert!(is_valid_field_name(NoteType::SshKey, "Private Key"));
+        assert!(!is_valid_field_name(NoteType::SshKey, "Not A Field"));
+    }
+
+    #[test]
+    fn parse_yes_no_accepts_only_yes_or_no() {
+        assert_eq!(parse_yes_no("Yes"), Some(true));
+        assert_eq!(parse_yes_no("no"), Some(false));
+        assert_eq!(parse_yes_no("n/a"), None);
+    }
+
+    #[test]
+    fn run_inner_validates_arguments_before_io() {
+        let err = run_inner(&[]).expect_err("missing name");
+        assert!(err.contains("usage: add"));
+
+        let err = run_inner(&["--bogus".to_string(), "name".to_string()]).expect_err("bad flag");
+        assert!(err.contains("usage: add"));
+
+        let err = run_inner(&["--note-type=unknown".to_string(), "name".to_string()])
+            .expect_err("invalid note type");
+        assert!(err.contains("--note-type=TYPE"));
+    }
+}

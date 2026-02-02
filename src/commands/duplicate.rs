@@ -89,3 +89,85 @@ fn next_id(blob: &Blob) -> String {
     }
     format!("{:04}", max_id.saturating_add(1))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blob::Account;
+
+    fn account(id: &str, name: &str, group: &str) -> Account {
+        let fullname = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}/{name}")
+        };
+        Account {
+            id: id.to_string(),
+            share_name: None,
+            name: name.to_string(),
+            name_encrypted: None,
+            group: group.to_string(),
+            group_encrypted: None,
+            fullname,
+            url: String::new(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        }
+    }
+
+    fn blob_with_accounts() -> Blob {
+        Blob {
+            version: 1,
+            local_version: false,
+            accounts: vec![
+                account("0001", "alpha", "team"),
+                account("0002", "beta", ""),
+                account("0007", "gamma", "team"),
+            ],
+        }
+    }
+
+    #[test]
+    fn find_account_index_matches_id_first() {
+        let blob = blob_with_accounts();
+        assert_eq!(find_account_index(&blob, "0002"), Some(1));
+    }
+
+    #[test]
+    fn find_account_index_matches_fullname_and_name() {
+        let blob = blob_with_accounts();
+        assert_eq!(find_account_index(&blob, "team/alpha"), Some(0));
+        assert_eq!(find_account_index(&blob, "beta"), Some(1));
+    }
+
+    #[test]
+    fn next_id_uses_highest_numeric_value() {
+        let blob = blob_with_accounts();
+        assert_eq!(next_id(&blob), "0008");
+    }
+
+    #[test]
+    fn run_inner_requires_target_argument() {
+        let err = run_inner(&[]).expect_err("missing argument must fail");
+        assert!(err.contains("usage: duplicate"));
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_color_mode() {
+        let err = run_inner(&["--color=rainbow".to_string()]).expect_err("bad color");
+        assert!(err.contains("usage: duplicate"));
+    }
+}

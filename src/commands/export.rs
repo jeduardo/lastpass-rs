@@ -149,3 +149,91 @@ fn csv_cell(value: &str) -> String {
     out.push('"');
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blob::Account;
+
+    fn account() -> Account {
+        Account {
+            id: "42".to_string(),
+            share_name: None,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "team".to_string(),
+            group_encrypted: None,
+            fullname: "team/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "alice".to_string(),
+            username_encrypted: None,
+            password: "secret".to_string(),
+            password_encrypted: None,
+            note: "line1\nline2".to_string(),
+            note_encrypted: None,
+            last_touch: "yesterday".to_string(),
+            last_modified_gmt: "now".to_string(),
+            fav: true,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: true,
+            fields: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn parse_fields_ignores_empty_segments() {
+        let fields = parse_fields("url,,username,password,");
+        assert_eq!(fields, vec!["url", "username", "password"]);
+    }
+
+    #[test]
+    fn export_value_maps_known_fields() {
+        let account = account();
+        assert_eq!(export_value(&account, "url"), "https://example.com");
+        assert_eq!(export_value(&account, "username"), "alice");
+        assert_eq!(export_value(&account, "password"), "secret");
+        assert_eq!(export_value(&account, "extra"), "line1\nline2");
+        assert_eq!(export_value(&account, "name"), "entry");
+        assert_eq!(export_value(&account, "grouping"), "team");
+        assert_eq!(export_value(&account, "fav"), "1");
+        assert_eq!(export_value(&account, "attachpresent"), "1");
+        assert_eq!(export_value(&account, "id"), "42");
+        assert_eq!(export_value(&account, "unknown"), "");
+    }
+
+    #[test]
+    fn write_row_quotes_special_cells() {
+        let mut out = String::new();
+        write_row(
+            &[
+                "plain".to_string(),
+                "a,b".to_string(),
+                "quote\"inside".to_string(),
+            ],
+            &mut out,
+        );
+        assert_eq!(out, "plain,\"a,b\",\"quote\"\"inside\"\n");
+    }
+
+    #[test]
+    fn csv_cell_quotes_newlines_and_crlf() {
+        assert_eq!(csv_cell("hello"), "hello");
+        assert_eq!(csv_cell("a\nb"), "\"a\nb\"");
+        assert_eq!(csv_cell("a\rb"), "\"a\rb\"");
+    }
+
+    #[test]
+    fn run_inner_rejects_positional_arguments() {
+        let err = run_inner(&["unexpected".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: export"));
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_color_mode() {
+        let err = run_inner(&["--color=rainbow".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: export"));
+    }
+}

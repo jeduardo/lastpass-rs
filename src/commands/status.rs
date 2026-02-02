@@ -63,3 +63,20 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
 
     Ok(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_inner_rejects_positional_args() {
+        let err = run_inner(&["unexpected".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: status"));
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_color_mode() {
+        let err = run_inner(&["--color=rainbow".to_string()]).expect_err("must fail");
+        assert!(err.contains("--color=auto|never|always"));
+    }
+}

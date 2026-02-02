@@ -315,3 +315,77 @@ fn escape_json(value: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, name: &str, group: &str) -> Account {
+        let fullname = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}/{name}")
+        };
+        Account {
+            id: id.to_string(),
+            share_name: None,
+            name: name.to_string(),
+            name_encrypted: None,
+            group: group.to_string(),
+            group_encrypted: None,
+            fullname,
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "alice".to_string(),
+            username_encrypted: None,
+            password: "secret".to_string(),
+            password_encrypted: None,
+            note: "note".to_string(),
+            note_encrypted: None,
+            last_touch: "touch".to_string(),
+            last_modified_gmt: "gmt".to_string(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn find_matches_prefers_id_and_supports_names() {
+        let accounts = vec![account("0001", "alpha", "team"), account("0002", "beta", "")];
+        let by_id = find_matches(&accounts, &["0002".to_string()]);
+        assert_eq!(by_id.len(), 1);
+        assert_eq!(by_id[0].name, "beta");
+
+        let by_fullname = find_matches(&accounts, &["team/alpha".to_string()]);
+        assert_eq!(by_fullname.len(), 1);
+        assert_eq!(by_fullname[0].id, "0001");
+    }
+
+    #[test]
+    fn format_json_escapes_quoted_fields() {
+        let mut acct = account("0003", "quoted", "team");
+        acct.note = "line1\n\"line2\"".to_string();
+        let json = format_json(&[&acct]);
+        assert!(json.contains("\"id\": \"0003\""));
+        assert!(json.contains("\\n"));
+        assert!(json.contains("\\\"line2\\\""));
+    }
+
+    #[test]
+    fn escape_json_escapes_backslash_quote_and_newline() {
+        assert_eq!(escape_json("a\\b"), "a\\\\b");
+        assert_eq!(escape_json("\"x\""), "\\\"x\\\"");
+        assert_eq!(escape_json("a\nb"), "a\\nb");
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_invocations() {
+        assert!(run_inner(&[]).is_err());
+        assert!(run_inner(&["--bogus".to_string()]).is_err());
+        assert!(run_inner(&["--field".to_string()]).is_err());
+    }
+}

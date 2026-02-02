@@ -222,4 +222,44 @@ mod tests {
         let output = format_account("%/aN", &account);
         assert_eq!(output, "group/test/");
     }
+
+    #[test]
+    fn format_timestamp_handles_empty_invalid_and_zero_values() {
+        assert_eq!(format_timestamp("", true), "");
+        assert_eq!(format_timestamp("not-a-number", true), "");
+        assert_eq!(format_timestamp("0", true), "");
+    }
+
+    #[test]
+    fn format_timestamp_formats_valid_unix_seconds() {
+        let utc = format_timestamp("1", true);
+        assert!(!utc.is_empty());
+        assert!(utc.contains('-'));
+        assert!(utc.contains(':'));
+
+        let local = format_timestamp("1", false);
+        assert!(!local.is_empty());
+    }
+
+    #[test]
+    fn format_field_handles_escape_and_unknown_specifiers() {
+        let account = sample_account();
+        assert_eq!(format_field("%%", &account, None, None), "%");
+        assert_eq!(format_field("%x", &account, None, None), "%x");
+        assert_eq!(format_field("%fZ", &account, None, None), "%fZ");
+        assert_eq!(format_field("%aZ", &account, None, None), "");
+        assert_eq!(format_field("%f", &account, None, None), "%f");
+        assert_eq!(format_field("%a", &account, None, None), "%a");
+    }
+
+    #[test]
+    fn format_account_supports_all_known_account_items() {
+        let mut account = sample_account();
+        account.share_name = Some("shared".to_string());
+        account.last_touch = "1".to_string();
+        account.last_modified_gmt = "1".to_string();
+        let output = format_account("%ai|%an|%aN|%au|%ap|%am|%aU|%ag|%al|%as", &account);
+        assert!(output.contains("0001|test|group/test|user|pass|"));
+        assert!(output.contains("|group|https://example.com|shared"));
+    }
 }

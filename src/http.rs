@@ -283,4 +283,51 @@ mod tests {
             .expect("response");
         assert!(response.body.contains("invalid password"));
     }
+
+    #[test]
+    fn mock_login_check_and_unknown_page_responses() {
+        let client = HttpClient::mock();
+        let ok = client
+            .post_lastpass(None, "login_check.php", None, &[])
+            .expect("response");
+        assert!(ok.body.contains("accts_version"));
+
+        let unknown = client
+            .post_lastpass(None, "unknown.php", None, &[])
+            .expect("response");
+        assert!(unknown.body.contains("unimplemented"));
+    }
+
+    #[test]
+    fn post_lastpass_bytes_returns_raw_body() {
+        let client = HttpClient::mock();
+        let response = client
+            .post_lastpass_bytes(None, "iterations.php", None, &[("email", "u@example.com")])
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"1000".to_vec());
+    }
+
+    #[test]
+    fn params_to_map_keeps_all_pairs() {
+        let map = params_to_map(&[("a", "1"), ("b", "2")]);
+        assert_eq!(map.get("a").map(String::as_str), Some("1"));
+        assert_eq!(map.get("b").map(String::as_str), Some("2"));
+    }
+
+    #[test]
+    fn user_agent_contains_crate_version() {
+        let ua = user_agent();
+        assert!(ua.starts_with("LastPass-CLI/"));
+        assert!(ua.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn real_client_can_be_constructed() {
+        let client = HttpClient::real().expect("client");
+        match client.transport {
+            Transport::Real(_) => {}
+            Transport::Mock(_) => panic!("expected real transport"),
+        }
+    }
 }

@@ -284,3 +284,87 @@ fn mock_account(
         fields: Vec::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::Compression;
+    use flate2::write::{DeflateEncoder, GzEncoder, ZlibEncoder};
+    use std::io::Write;
+
+    fn blob_bytes() -> Vec<u8> {
+        b"LPAVtest-blob".to_vec()
+    }
+
+    #[test]
+    fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
+        let mapped = map_decryption_key_error(LpassError::Crypto("missing iterations"));
+        assert!(matches!(mapped, LpassError::User(_)));
+        let mapped = map_decryption_key_error(LpassError::Crypto("missing username"));
+        assert!(matches!(mapped, LpassError::User(_)));
+        let mapped = map_decryption_key_error(LpassError::Crypto("missing verify"));
+        assert!(matches!(mapped, LpassError::User(_)));
+
+        let passthrough = map_decryption_key_error(LpassError::Crypto("other"));
+        assert!(matches!(passthrough, LpassError::Crypto("other")));
+    }
+
+    #[test]
+    fn looks_like_blob_detects_signature() {
+        assert!(looks_like_blob(b"LPAVabc"));
+        assert!(!looks_like_blob(b"XXXXabc"));
+    }
+
+    #[test]
+    fn maybe_decompress_blob_handles_gzip_zlib_deflate_and_brotli() {
+        let source = blob_bytes();
+
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(&source).expect("gzip write");
+        let gzip = gz.finish().expect("gzip finish");
+        assert_eq!(maybe_decompress_blob(gzip).expect("gzip decode"), source);
+
+        let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
+        z.write_all(&source).expect("zlib write");
+        let zlib = z.finish().expect("zlib finish");
+        assert_eq!(maybe_decompress_blob(zlib).expect("zlib decode"), source);
+
+        let mut d = DeflateEncoder::new(Vec::new(), Compression::default());
+        d.write_all(&source).expect("deflate write");
+        let deflate = d.finish().expect("deflate finish");
+        assert_eq!(maybe_decompress_blob(deflate).expect("deflate decode"), source);
+
+        let mut brotli = Vec::new();
+        {
+            let mut writer = brotli::CompressorWriter::new(&mut brotli, 4096, 5, 20);
+            writer.write_all(&source).expect("brotli write");
+            writer.flush().expect("brotli flush");
+        }
+        assert_eq!(maybe_decompress_blob(brotli).expect("brotli decode"), source);
+    }
+
+    #[test]
+    fn maybe_decompress_blob_returns_original_for_unknown_data() {
+        let input = b"not-a-compressed-blob".to_vec();
+        assert_eq!(
+            maybe_decompress_blob(input.clone()).expect("decode"),
+            input
+        );
+    }
+
+    #[test]
+    fn mock_blob_contains_expected_sample_entries() {
+        let blob = mock_blob();
+        assert_eq!(blob.accounts.len(), 4);
+        assert!(
+            blob.accounts
+                .iter()
+                .any(|account| account.fullname == "test-group/test-account")
+        );
+        assert!(
+            blob.accounts
+                .iter()
+                .any(|account| account.pwprotect && account.name == "test-reprompt-account")
+        );
+    }
+}

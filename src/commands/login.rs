@@ -182,3 +182,37 @@ fn fetch_blob(session: &Session) -> std::result::Result<Vec<u8>, String> {
     }
     Ok(response.body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_inner_requires_username() {
+        let err = run_inner(&[]).expect_err("missing username must fail");
+        assert!(err.contains("usage: login"));
+    }
+
+    #[test]
+    fn run_inner_rejects_unknown_flags() {
+        let err = run_inner(&["--nope".to_string()]).expect_err("unknown flag must fail");
+        assert!(err.contains("usage: login"));
+    }
+
+    #[test]
+    fn run_inner_rejects_extra_positional_args() {
+        let err = run_inner(&["a@example.com".to_string(), "extra".to_string()])
+            .expect_err("extra positional must fail");
+        assert!(err.contains("usage: login"));
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_color_mode() {
+        let err = run_inner(&[
+            "--color=rainbow".to_string(),
+            "a@example.com".to_string(),
+        ])
+        .expect_err("invalid color mode must fail");
+        assert!(err.contains("usage: login"));
+    }
+}

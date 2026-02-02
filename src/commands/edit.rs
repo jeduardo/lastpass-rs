@@ -317,3 +317,186 @@ fn parse_yes_no(value: &str) -> Option<bool> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account() -> Account {
+        Account {
+            id: "100".to_string(),
+            share_name: None,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "team".to_string(),
+            group_encrypted: None,
+            fullname: "team/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "alice".to_string(),
+            username_encrypted: None,
+            password: "secret".to_string(),
+            password_encrypted: None,
+            note: "note".to_string(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: vec![Field {
+                name: "Hostname".to_string(),
+                field_type: "text".to_string(),
+                value: "old-host".to_string(),
+                value_encrypted: None,
+                checked: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn set_choice_rejects_multiple_choice_flags() {
+        let mut choice = EditChoice::Any;
+        set_choice(&mut choice, EditChoice::Username).expect("first choice");
+        let err = set_choice(&mut choice, EditChoice::Password).expect_err("conflict");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn trim_trailing_newlines_removes_crlf_suffix() {
+        let mut value = "line\r\n\r\n".to_string();
+        trim_trailing_newlines(&mut value);
+        assert_eq!(value, "line");
+    }
+
+    #[test]
+    fn find_account_index_matches_by_id_and_name() {
+        let accounts = vec![account()];
+        assert_eq!(find_account_index(&accounts, "100"), Some(0));
+        assert_eq!(find_account_index(&accounts, "entry"), Some(0));
+        assert_eq!(find_account_index(&accounts, "team/entry"), Some(0));
+        assert_eq!(find_account_index(&accounts, "missing"), None);
+    }
+
+    #[test]
+    fn apply_fullname_updates_group_and_name() {
+        let mut acct = account();
+        apply_fullname(&mut acct, "new-group/new-name");
+        assert_eq!(acct.group, "new-group");
+        assert_eq!(acct.name, "new-name");
+        assert_eq!(acct.fullname, "new-group/new-name");
+
+        apply_fullname(&mut acct, "single");
+        assert_eq!(acct.group, "");
+        assert_eq!(acct.name, "single");
+        assert_eq!(acct.fullname, "single");
+    }
+
+    #[test]
+    fn apply_field_updates_known_and_custom_fields() {
+        let mut acct = account();
+        apply_field(&mut acct, "Username", "bob");
+        apply_field(&mut acct, "Password", "new-secret");
+        apply_field(&mut acct, "URL", "https://new.example.com");
+        apply_field(&mut acct, "Hostname", "new-host");
+        apply_field(&mut acct, "Port", "443");
+
+        assert_eq!(acct.username, "bob");
+        assert_eq!(acct.password, "new-secret");
+        assert_eq!(acct.url, "https://new.example.com");
+        let hostname = acct
+            .fields
+            .iter()
+            .find(|field| field.name == "Hostname")
+            .expect("hostname field");
+        assert_eq!(hostname.value, "new-host");
+        assert!(acct.fields.iter().any(|field| field.name == "Port"));
+    }
+
+    #[test]
+    fn parse_update_input_parses_standard_and_notes_payloads() {
+        let parsed = parse_update_input(
+            "Username: bob\nPassword: p\nURL: https://u\nName: grp/item\nReprompt: yes\nNoteType: Server\nHostname: srv\nNotes: line1\nline2",
+        );
+        assert_eq!(parsed.username.as_deref(), Some("bob"));
+        assert_eq!(parsed.password.as_deref(), Some("p"));
+        assert_eq!(parsed.url.as_deref(), Some("https://u"));
+        assert_eq!(parsed.fullname.as_deref(), Some("grp/item"));
+        assert_eq!(parsed.reprompt, Some(true));
+        assert_eq!(parsed.note_type_name.as_deref(), Some("Server"));
+        assert_eq!(parsed.note.as_deref(), Some("line1\nline2"));
+        assert_eq!(parsed.fields, vec![("Hostname".to_string(), "srv".to_string())]);
+    }
+
+    #[test]
+    fn apply_update_applies_fields_for_secure_notes_only() {
+        let mut acct_secure = account();
+        let mut update = ParsedUpdate {
+            username: Some("bob".to_string()),
+            password: Some("new-pass".to_string()),
+            url: Some("https://new.example.com".to_string()),
+            note: Some("updated".to_string()),
+            fullname: Some("ops/db".to_string()),
+            reprompt: Some(true),
+            fields: vec![("Hostname".to_string(), "db.example.com".to_string())],
+            note_type_name: Some("Server".to_string()),
+        };
+
+        apply_update(&mut acct_secure, &update, true);
+        assert_eq!(acct_secure.username, "bob");
+        assert_eq!(acct_secure.password, "new-pass");
+        assert_eq!(acct_secure.url, "https://new.example.com");
+        assert_eq!(acct_secure.note, "updated");
+        assert_eq!(acct_secure.fullname, "ops/db");
+        assert!(acct_secure.pwprotect);
+        assert!(
+            acct_secure
+                .fields
+                .iter()
+                .any(|field| field.name == "NoteType" && field.value == "Server")
+        );
+        assert!(
+            acct_secure
+                .fields
+                .iter()
+                .any(|field| field.name == "Hostname" && field.value == "db.example.com")
+        );
+
+        let mut acct_non_secure = account();
+        update.fields = vec![("Hostname".to_string(), "ignored".to_string())];
+        apply_update(&mut acct_non_secure, &update, false);
+        assert!(
+            !acct_non_secure
+                .fields
+                .iter()
+                .any(|field| field.value == "ignored")
+        );
+    }
+
+    #[test]
+    fn parse_yes_no_supports_yes_no_only() {
+        assert_eq!(parse_yes_no("yes"), Some(true));
+        assert_eq!(parse_yes_no("No"), Some(false));
+        assert_eq!(parse_yes_no("maybe"), None);
+    }
+
+    #[test]
+    fn run_inner_validates_arguments_before_blob_access() {
+        let err = run_inner(&[]).expect_err("missing target");
+        assert!(err.contains("usage: edit"));
+
+        let err = run_inner(&["--username".to_string(), "--password".to_string(), "x".to_string()])
+            .expect_err("conflicting selectors");
+        assert!(err.contains("usage: edit"));
+
+        let err = run_inner(&[
+            "--non-interactive".to_string(),
+            "x".to_string(),
+            "--field".to_string(),
+        ])
+        .expect_err("missing field name");
+        assert!(err.contains("missing --field name"));
+    }
+}
