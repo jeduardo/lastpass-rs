@@ -26,10 +26,10 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             quiet = true;
             continue;
         }
-        if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
+        if arg == "--color" {
+            let value = iter
+                .next()
+                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
             let mode = terminal::parse_color_mode(value)
                 .ok_or_else(|| "... --color=auto|never|always".to_string())?;
             terminal::set_color_mode(mode);
@@ -57,9 +57,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             .ok()
             .flatten()
             .unwrap_or_else(|| "unknown".to_string());
-        let message = format!(
-            "{FG_GREEN}{BOLD}Logged in{RESET} as {UNDERLINE}{username}{RESET}."
-        );
+        let message = format!("{FG_GREEN}{BOLD}Logged in{RESET} as {UNDERLINE}{username}{RESET}.");
         println!("{}", terminal::render_stdout(&message));
     }
 

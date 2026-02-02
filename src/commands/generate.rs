@@ -1,12 +1,10 @@
 #![forbid(unsafe_code)]
 
 use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 
 use crate::blob::{Account, Blob};
 use crate::commands::data::{load_blob, save_blob};
-use crate::terminal;
-
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
@@ -31,7 +29,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         if arg.starts_with("--sync=") {
             continue;
         }
-        if arg == "--sync" || arg == "-S" {
+        if arg == "--sync" {
             let _ = iter.next();
             continue;
         }
@@ -59,21 +57,6 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         }
         if let Some(value) = arg.strip_prefix("--url=") {
             url = Some(value.to_string());
-            continue;
-        }
-        if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
-            terminal::set_color_mode(mode);
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
-            terminal::set_color_mode(mode);
             continue;
         }
         return Err("usage: generate [--sync=auto|now|no] [--clip, -c] [--username=USERNAME] [--url=URL] [--no-symbols] {NAME|UNIQUEID} LENGTH".to_string());

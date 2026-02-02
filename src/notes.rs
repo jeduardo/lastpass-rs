@@ -68,14 +68,7 @@ const NOTE_TEMPLATES: &[NoteTemplate] = &[
         shortname: "database",
         name: "Database",
         fields: &[
-            "Type",
-            "Hostname",
-            "Port",
-            "Database",
-            "Username",
-            "Password",
-            "SID",
-            "Alias",
+            "Type", "Hostname", "Port", "Database", "Username", "Password", "SID", "Alias",
         ],
     },
     NoteTemplate {
@@ -410,7 +403,10 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
 
             if !note_has_field(note_type, name)
                 && current_field.is_some()
-                && note_field_is_multiline(note_type, expanded.fields[current_field.unwrap()].name.as_str())
+                && note_field_is_multiline(
+                    note_type,
+                    expanded.fields[current_field.unwrap()].name.as_str(),
+                )
             {
                 let field = &mut expanded.fields[current_field.unwrap()];
                 field.value.push('\n');

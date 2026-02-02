@@ -113,21 +113,16 @@ fn post_real(
         }
     }
 
-    let response = request
-        .form(&params)
-        .send()
-        .map_err(|_| LpassError::Io {
-            context: "http post",
-            source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
-        })?;
+    let response = request.form(&params).send().map_err(|_| LpassError::Io {
+        context: "http post",
+        source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
+    })?;
 
     let status = response.status().as_u16();
-    let body = response
-        .text()
-        .map_err(|_| LpassError::Io {
-            context: "http read",
-            source: std::io::Error::new(std::io::ErrorKind::Other, "http response read failed"),
-        })?;
+    let body = response.text().map_err(|_| LpassError::Io {
+        context: "http read",
+        source: std::io::Error::new(std::io::ErrorKind::Other, "http response read failed"),
+    })?;
 
     Ok(HttpResponse { status, body })
 }
@@ -152,13 +147,10 @@ fn post_real_bytes(
         }
     }
 
-    let response = request
-        .form(&params)
-        .send()
-        .map_err(|_| LpassError::Io {
-            context: "http post",
-            source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
-        })?;
+    let response = request.form(&params).send().map_err(|_| LpassError::Io {
+        context: "http post",
+        source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
+    })?;
 
     let status = response.status().as_u16();
     let body = response
@@ -188,8 +180,8 @@ impl MockTransport {
         let username = "user@example.com".to_string();
         let password = "123456";
         let iterations = 1000;
-        let login_hash = kdf_login_key(&username, password, iterations)
-            .unwrap_or_else(|_| "".to_string());
+        let login_hash =
+            kdf_login_key(&username, password, iterations).unwrap_or_else(|_| "".to_string());
         let uid = "57747756".to_string();
         Self {
             username,
@@ -252,7 +244,12 @@ mod tests {
     fn mock_iterations() {
         let client = HttpClient::mock();
         let response = client
-            .post_lastpass(None, "iterations.php", None, &[("email", "user@example.com")])
+            .post_lastpass(
+                None,
+                "iterations.php",
+                None,
+                &[("email", "user@example.com")],
+            )
             .expect("response");
         assert_eq!(response.status, 200);
         assert_eq!(response.body.trim(), "1000");

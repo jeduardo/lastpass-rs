@@ -5,8 +5,8 @@ use std::io::{self, Read};
 use crate::blob::{Account, Blob, Field};
 use crate::commands::data::{load_blob, save_blob};
 use crate::notes::{
-    collapse_notes, note_field_is_multiline, note_has_field, note_type_by_name,
-    note_type_by_shortname, note_type_display_name, NoteType,
+    NoteType, collapse_notes, note_field_is_multiline, note_has_field, note_type_by_name,
+    note_type_by_shortname, note_type_display_name,
 };
 use crate::terminal;
 
@@ -34,6 +34,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage = "usage: add [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--username|--password|--url|--notes|--field=FIELD|--note-type=NOTETYPE} NAME";
     let mut non_interactive = false;
     let mut note_type = NoteType::None;
     let mut name: Option<String> = None;
@@ -44,9 +45,9 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             name = Some(arg.clone());
             continue;
         }
-        if arg == "--non-interactive" || arg == "-X" {
+        if arg == "--non-interactive" {
             non_interactive = true;
-        } else if arg == "--note-type" || arg == "-T" {
+        } else if arg == "--note-type" {
             if let Some(next) = iter.next() {
                 note_type = note_type_by_shortname(next);
                 if note_type == NoteType::None {
@@ -62,32 +63,29 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             }
         } else if arg.starts_with("--sync=") {
             // ignored
-        } else if arg == "--sync" || arg == "-S" {
+        } else if arg == "--sync" {
             let _ = iter.next();
-        } else if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        } else if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
         } else if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
-        } else if matches!(arg.as_str(), "--username" | "--password" | "--url" | "--notes" | "--field" | "-u" | "-p" | "-L" | "-O" | "-F") {
+        } else if matches!(
+            arg.as_str(),
+            "--username" | "--password" | "--url" | "--notes" | "--field"
+        ) {
             // interactive-only flags ignored for now
-            if arg == "--field" || arg == "-F" {
+            if arg == "--field" {
                 let _ = iter.next();
             }
-        } else if arg == "--app" || arg == "-a" {
-            // ignored
         } else {
-            return Err("usage: add [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--username|--password|--url|--notes|--field=FIELD|--note-type=NOTETYPE} NAME".to_string());
+            return Err(usage.to_string());
         }
     }
 
-    let name = name.ok_or_else(|| "usage: add [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--username|--password|--url|--notes|--field=FIELD|--note-type=NOTETYPE} NAME".to_string())?;
+    let name = name.ok_or_else(|| usage.to_string())?;
 
     if !non_interactive {
         return Err("interactive add not implemented; use --non-interactive".to_string());

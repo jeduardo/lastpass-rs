@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::session::Session;
 
@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn parse_ok_session_privatekey_fallback() {
-        let xml = "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" privatekey=\"enc\"/></response>";
+        let xml =
+            "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" privatekey=\"enc\"/></response>";
         let session = parse_ok_session(xml).expect("session");
         assert_eq!(session.private_key_enc.as_deref(), Some("enc"));
     }

@@ -3,12 +3,12 @@
 use std::env;
 use std::io::Read;
 
+use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
     config_read_buffer, config_read_encrypted_buffer, config_write_buffer,
     config_write_encrypted_buffer,
 };
-use crate::agent::agent_get_decryption_key;
 use crate::crypto::decrypt_private_key;
 use crate::error::{LpassError, Result};
 use crate::kdf::KDF_HASH_LEN;
@@ -30,8 +30,8 @@ pub(crate) fn load_blob() -> Result<Blob> {
         return Ok(blob);
     }
 
-    let blob_bytes = config_read_encrypted_buffer("blob", &key)?
-        .ok_or(LpassError::Crypto("missing blob"))?;
+    let blob_bytes =
+        config_read_encrypted_buffer("blob", &key)?.ok_or(LpassError::Crypto("missing blob"))?;
     let blob_bytes = maybe_decompress_blob(blob_bytes)?;
     if !looks_like_blob(&blob_bytes) {
         return Err(LpassError::Crypto(
@@ -47,8 +47,7 @@ pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
         return save_mock_blob(blob);
     }
     let key = agent_get_decryption_key()?;
-    let buffer =
-        serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
+    let buffer = serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
     config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key)
 }
 
@@ -109,7 +108,8 @@ fn load_private_key(key: &[u8; KDF_HASH_LEN]) -> Result<Option<Vec<u8>>> {
         return Ok(Some(private_key));
     }
 
-    let private_key_enc = crate::config::config_read_encrypted_string("session_privatekeyenc", key)?;
+    let private_key_enc =
+        crate::config::config_read_encrypted_string("session_privatekeyenc", key)?;
     let Some(private_key_enc) = private_key_enc else {
         return Ok(None);
     };
@@ -166,8 +166,7 @@ fn try_brotli(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
 }
 
 fn save_mock_blob(blob: &Blob) -> Result<()> {
-    let buffer =
-        serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
+    let buffer = serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
     config_write_buffer("blob", &buffer)
 }
 

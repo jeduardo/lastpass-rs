@@ -4,7 +4,7 @@ use std::io::{self, Read};
 
 use crate::blob::{Account, Field};
 use crate::commands::data::{load_blob, save_blob};
-use crate::notes::{collapse_notes, expand_notes, note_type_by_name, NoteType};
+use crate::notes::{NoteType, collapse_notes, expand_notes, note_type_by_name};
 use crate::terminal;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -29,6 +29,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage = "usage: edit [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--name|--username|--password|--url|--notes|--field=FIELD} {NAME|UNIQUEID}";
     let mut choice = EditChoice::Any;
     let mut field_name: Option<String> = None;
     let mut non_interactive = false;
@@ -41,19 +42,19 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             continue;
         }
 
-        if arg == "--non-interactive" || arg == "-X" {
+        if arg == "--non-interactive" {
             non_interactive = true;
-        } else if arg == "--username" || arg == "-u" {
+        } else if arg == "--username" {
             set_choice(&mut choice, EditChoice::Username)?;
-        } else if arg == "--password" || arg == "-p" {
+        } else if arg == "--password" {
             set_choice(&mut choice, EditChoice::Password)?;
-        } else if arg == "--url" || arg == "-L" {
+        } else if arg == "--url" {
             set_choice(&mut choice, EditChoice::Url)?;
-        } else if arg == "--notes" || arg == "--note" || arg == "-O" {
+        } else if arg == "--notes" {
             set_choice(&mut choice, EditChoice::Notes)?;
-        } else if arg == "--name" || arg == "-N" {
+        } else if arg == "--name" {
             set_choice(&mut choice, EditChoice::Name)?;
-        } else if arg == "--field" || arg == "-f" {
+        } else if arg == "--field" {
             set_choice(&mut choice, EditChoice::Field)?;
             if let Some(next) = iter.next() {
                 field_name = Some(next.clone());
@@ -63,25 +64,21 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             field_name = Some(value.to_string());
         } else if arg.starts_with("--sync=") {
             // ignored
-        } else if arg == "--sync" || arg == "-S" {
+        } else if arg == "--sync" {
             let _ = iter.next();
-        } else if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        } else if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
         } else if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
         } else {
-            return Err("usage: edit [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--name|--username|--password|--url|--notes|--field=FIELD} {NAME|UNIQUEID}".to_string());
+            return Err(usage.to_string());
         }
     }
 
-    let name = name.ok_or_else(|| "usage: edit [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--name|--username|--password|--url|--notes|--field=FIELD} {NAME|UNIQUEID}".to_string())?;
+    let name = name.ok_or_else(|| usage.to_string())?;
 
     if !non_interactive {
         return Err("interactive edit not implemented; use --non-interactive".to_string());

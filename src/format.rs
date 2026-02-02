@@ -37,7 +37,9 @@ pub fn format_timestamp(timestamp: &str, utc: bool) -> String {
     let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]");
     match format {
         Ok(desc) => dt.format(&desc).unwrap_or_default(),
-        Err(_) => dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
+        Err(_) => dt
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
     }
 }
 
@@ -128,8 +130,16 @@ fn format_account_item(out: &mut String, spec: char, account: &Account, add_slas
         'N' => append_str(out, &get_display_fullname(account), add_slash),
         'u' => append_str(out, &account.username, add_slash),
         'p' => append_str(out, &account.password, add_slash),
-        'm' => append_str(out, &format_timestamp(&account.last_modified_gmt, true), add_slash),
-        'U' => append_str(out, &format_timestamp(&account.last_touch, false), add_slash),
+        'm' => append_str(
+            out,
+            &format_timestamp(&account.last_modified_gmt, true),
+            add_slash,
+        ),
+        'U' => append_str(
+            out,
+            &format_timestamp(&account.last_touch, false),
+            add_slash,
+        ),
         'g' => append_str(out, &account.group, add_slash),
         'l' => append_str(out, &account.url, add_slash),
         's' => append_str(out, account.share_name.as_deref().unwrap_or(""), add_slash),

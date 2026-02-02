@@ -29,6 +29,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage = "usage: show [--sync=auto|now|no] [--clip, -c] [--quiet, -q] [--expand-multi, -x] [--json, -j] [--all|--username|--password|--url|--notes|--field=FIELD|--id|--name|--attach=ATTACHID] [--basic-regexp, -G|--fixed-strings, -F] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
     let mut choice = ShowChoice::All;
     let mut field_name: Option<String> = None;
     let mut json = false;
@@ -42,31 +43,31 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         }
         if arg == "--json" || arg == "-j" {
             json = true;
-        } else if arg == "--username" || arg == "-u" {
+        } else if arg == "--username" {
             choice = ShowChoice::Username;
-        } else if arg == "--password" || arg == "-p" {
+        } else if arg == "--password" {
             choice = ShowChoice::Password;
-        } else if arg == "--url" || arg == "-L" {
+        } else if arg == "--url" {
             choice = ShowChoice::Url;
-        } else if arg == "--id" || arg == "-I" {
+        } else if arg == "--id" {
             choice = ShowChoice::Id;
-        } else if arg == "--name" || arg == "-N" {
+        } else if arg == "--name" {
             choice = ShowChoice::Name;
-        } else if arg == "--notes" || arg == "--note" || arg == "-O" {
+        } else if arg == "--notes" || arg == "--note" {
             choice = ShowChoice::Notes;
         } else if arg.starts_with("--field=") {
             choice = ShowChoice::Field;
             field_name = Some(arg.trim_start_matches("--field=").to_string());
-        } else if arg == "--field" || arg == "-f" {
+        } else if arg == "--field" {
             choice = ShowChoice::Field;
             if let Some(next) = iter.next() {
                 field_name = Some(next.clone());
             }
         } else if arg.starts_with("--sync=") {
             // ignored
-        } else if arg == "--sync" || arg == "-S" {
+        } else if arg == "--sync" {
             let _ = iter.next();
-        } else if arg == "--all" || arg == "-A" {
+        } else if arg == "--all" {
             choice = ShowChoice::All;
         } else if arg == "--basic-regexp" || arg == "-G" {
             // not implemented
@@ -76,29 +77,31 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             // ignored
         } else if arg == "--clip" || arg == "-c" {
             // not implemented
-        } else if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        } else if arg == "--attach" {
+            let _ = iter.next();
+            // not implemented
+        } else if arg.starts_with("--attach=") {
+            // not implemented
+        } else if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
         } else if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
         } else if arg == "--quiet" || arg == "-q" {
             // ignored
+        } else {
+            return Err(usage.to_string());
         }
     }
 
     if names.is_empty() {
-        return Err("usage: show {UNIQUENAME|UNIQUEID}".to_string());
+        return Err(usage.to_string());
     }
 
-    let title_format = format!(
-        "{FG_CYAN}%/as{RESET}{FG_BLUE}%/ag{BOLD}%an{RESET}{FG_GREEN} [id: %ai]{RESET}"
-    );
+    let title_format =
+        format!("{FG_CYAN}%/as{RESET}{FG_BLUE}%/ag{BOLD}%an{RESET}{FG_GREEN} [id: %ai]{RESET}");
     let field_format = format!("{FG_YELLOW}%fn{RESET}: %fv");
 
     let blob = load_blob().map_err(|err| format!("{err}"))?;
@@ -259,15 +262,42 @@ fn format_json(matches: &[&Account]) -> String {
     for (idx, account) in matches.iter().enumerate() {
         out.push_str("  {\n");
         out.push_str(&format!("    \"id\": \"{}\",\n", escape_json(&account.id)));
-        out.push_str(&format!("    \"name\": \"{}\",\n", escape_json(&account.name)));
-        out.push_str(&format!("    \"fullname\": \"{}\",\n", escape_json(&account.fullname)));
-        out.push_str(&format!("    \"username\": \"{}\",\n", escape_json(&account.username)));
-        out.push_str(&format!("    \"password\": \"{}\",\n", escape_json(&account.password)));
-        out.push_str(&format!("    \"last_modified_gmt\": \"{}\",\n", escape_json(&account.last_modified_gmt)));
-        out.push_str(&format!("    \"last_touch\": \"{}\",\n", escape_json(&account.last_touch)));
-        out.push_str(&format!("    \"group\": \"{}\",\n", escape_json(&account.group)));
-        out.push_str(&format!("    \"url\": \"{}\",\n", escape_json(&account.url)));
-        out.push_str(&format!("    \"note\": \"{}\"\n", escape_json(&account.note)));
+        out.push_str(&format!(
+            "    \"name\": \"{}\",\n",
+            escape_json(&account.name)
+        ));
+        out.push_str(&format!(
+            "    \"fullname\": \"{}\",\n",
+            escape_json(&account.fullname)
+        ));
+        out.push_str(&format!(
+            "    \"username\": \"{}\",\n",
+            escape_json(&account.username)
+        ));
+        out.push_str(&format!(
+            "    \"password\": \"{}\",\n",
+            escape_json(&account.password)
+        ));
+        out.push_str(&format!(
+            "    \"last_modified_gmt\": \"{}\",\n",
+            escape_json(&account.last_modified_gmt)
+        ));
+        out.push_str(&format!(
+            "    \"last_touch\": \"{}\",\n",
+            escape_json(&account.last_touch)
+        ));
+        out.push_str(&format!(
+            "    \"group\": \"{}\",\n",
+            escape_json(&account.group)
+        ));
+        out.push_str(&format!(
+            "    \"url\": \"{}\",\n",
+            escape_json(&account.url)
+        ));
+        out.push_str(&format!(
+            "    \"note\": \"{}\"\n",
+            escape_json(&account.note)
+        ));
         out.push_str("  }");
         if idx + 1 != matches.len() {
             out.push_str(",\n");

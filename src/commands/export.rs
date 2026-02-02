@@ -5,13 +5,7 @@ use crate::commands::data::load_blob;
 use crate::terminal;
 
 const DEFAULT_FIELDS: &[&str] = &[
-    "url",
-    "username",
-    "password",
-    "extra",
-    "name",
-    "grouping",
-    "fav",
+    "url", "username", "password", "extra", "name", "grouping", "fav",
 ];
 
 pub fn run(args: &[String]) -> i32 {
@@ -25,36 +19,34 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage =
+        "usage: export [--sync=auto|now|no] [--color=auto|never|always] [--fields=FIELDLIST]";
     let mut fields: Vec<String> = Vec::new();
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         if !arg.starts_with('-') {
-            return Err("usage: export [--sync=auto|now|no] [--color=auto|never|always] [--fields=FIELDLIST]".to_string());
+            return Err(usage.to_string());
         }
         if arg.starts_with("--sync=") {
             continue;
         }
-        if arg == "--sync" || arg == "-S" {
+        if arg == "--sync" {
             let _ = iter.next();
             continue;
         }
-        if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
         if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
-        if arg == "--fields" || arg == "-f" {
+        if arg == "--fields" {
             if let Some(next) = iter.next() {
                 fields.extend(parse_fields(next));
             }
@@ -64,7 +56,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             fields.extend(parse_fields(value));
             continue;
         }
-        return Err("usage: export [--sync=auto|now|no] [--color=auto|never|always] [--fields=FIELDLIST]".to_string());
+        return Err(usage.to_string());
     }
 
     if fields.is_empty() {
@@ -119,7 +111,11 @@ fn export_value(account: &Account, field: &str) -> String {
 }
 
 fn bool_str(value: bool) -> String {
-    if value { "1".to_string() } else { "0".to_string() }
+    if value {
+        "1".to_string()
+    } else {
+        "0".to_string()
+    }
 }
 
 fn write_row(fields: &[String], out: &mut String) {
@@ -135,7 +131,9 @@ fn write_row(fields: &[String], out: &mut String) {
 }
 
 fn csv_cell(value: &str) -> String {
-    let needs_quote = value.chars().any(|ch| ch == '"' || ch == ',' || ch == '\n' || ch == '\r');
+    let needs_quote = value
+        .chars()
+        .any(|ch| ch == '"' || ch == ',' || ch == '\n' || ch == '\r');
     if !needs_quote {
         return value.to_string();
     }

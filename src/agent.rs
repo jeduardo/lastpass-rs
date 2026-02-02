@@ -12,7 +12,7 @@ use crate::config::{
     config_read_string, config_unlink, config_write_encrypted_string, config_write_string,
 };
 use crate::error::{LpassError, Result};
-use crate::kdf::{kdf_decryption_key, KDF_HASH_LEN};
+use crate::kdf::{KDF_HASH_LEN, kdf_decryption_key};
 use crate::password::prompt_password;
 use zeroize::Zeroize;
 
@@ -86,8 +86,7 @@ fn agent_load_key() -> Result<[u8; KDF_HASH_LEN]> {
         .and_then(|value| value.trim().parse::<u32>().ok())
         .ok_or(LpassError::Crypto("missing iterations"))?;
 
-    let username = config_read_string("username")?
-        .ok_or(LpassError::Crypto("missing username"))?;
+    let username = config_read_string("username")?.ok_or(LpassError::Crypto("missing username"))?;
 
     if !config_exists("verify") {
         return Err(LpassError::Crypto("missing verify"));
@@ -202,7 +201,11 @@ fn agent_timeout() -> Option<Duration> {
 }
 
 fn socket_send_pid() -> bool {
-    !(cfg!(any(target_os = "linux", target_os = "android", target_os = "cygwin")))
+    !(cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "cygwin"
+    )))
 }
 
 fn agent_ask() -> Result<[u8; KDF_HASH_LEN]> {
@@ -211,7 +214,8 @@ fn agent_ask() -> Result<[u8; KDF_HASH_LEN]> {
         use std::os::unix::net::UnixStream;
 
         let path = agent_socket_path()?;
-        let mut stream = UnixStream::connect(&path).map_err(|err| LpassError::io("connect", err))?;
+        let mut stream =
+            UnixStream::connect(&path).map_err(|err| LpassError::io("connect", err))?;
 
         if socket_send_pid() {
             let pid = std::process::id();
@@ -239,7 +243,10 @@ fn agent_ask() -> Result<[u8; KDF_HASH_LEN]> {
 }
 
 #[cfg(unix)]
-fn handle_client(mut stream: std::os::unix::net::UnixStream, key: &[u8; KDF_HASH_LEN]) -> Result<()> {
+fn handle_client(
+    mut stream: std::os::unix::net::UnixStream,
+    key: &[u8; KDF_HASH_LEN],
+) -> Result<()> {
     if !peer_allowed(&stream)? {
         return Ok(());
     }
@@ -275,8 +282,8 @@ fn peer_allowed(stream: &std::os::unix::net::UnixStream) -> Result<bool> {
     #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
     {
         use nix::unistd::getpeereid;
-        let (uid, gid) = getpeereid(stream)
-            .map_err(|err| LpassError::io("peer credentials", err.into()))?;
+        let (uid, gid) =
+            getpeereid(stream).map_err(|err| LpassError::io("peer credentials", err.into()))?;
         return Ok(uid == getuid() && gid == getgid());
     }
 }

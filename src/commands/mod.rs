@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-mod data;
 mod add;
-mod edit;
+mod data;
 mod duplicate;
+mod edit;
 mod export;
 mod generate;
 mod login;
@@ -22,13 +22,7 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "show" => show::run(args),
         "ls" => ls::run(args),
         "status" => status::run(args),
-        "logout"
-        | "passwd"
-        | "mv"
-        | "rm"
-        | "sync"
-        | "import"
-        | "share" => not_implemented(command),
+        "logout" | "passwd" | "mv" | "rm" | "sync" | "import" | "share" => not_implemented(command),
         _ => 1,
     }
 }

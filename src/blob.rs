@@ -117,7 +117,10 @@ fn account_is_group(account: &Account) -> bool {
     account.url == "http://group"
 }
 
-fn parse_share(chunk: &mut ChunkCursor<'_>, private_key: Option<&[u8]>) -> Result<Option<ShareContext>> {
+fn parse_share(
+    chunk: &mut ChunkCursor<'_>,
+    private_key: Option<&[u8]>,
+) -> Result<Option<ShareContext>> {
     let Some(private_key) = private_key else {
         return Ok(None);
     };
@@ -365,11 +368,7 @@ impl<'a> ChunkCursor<'a> {
         if self.remaining() < 5 {
             return None;
         }
-        let len = u32::from_be_bytes(
-            self.data[self.pos..self.pos + 4]
-                .try_into()
-                .ok()?,
-        ) as usize;
+        let len = u32::from_be_bytes(self.data[self.pos..self.pos + 4].try_into().ok()?) as usize;
         if len == 0 || self.remaining() < 4 + len {
             return None;
         }

@@ -15,6 +15,8 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage =
+        "usage: duplicate [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
     let mut name: Option<String> = None;
 
     let mut iter = args.iter().peekable();
@@ -26,31 +28,25 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         if arg.starts_with("--sync=") {
             continue;
         }
-        if arg == "--sync" || arg == "-S" {
+        if arg == "--sync" {
             let _ = iter.next();
             continue;
         }
-        if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
         if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
-        return Err("usage: duplicate [--sync=auto|now|no] {UNIQUENAME|UNIQUEID}".to_string());
+        return Err(usage.to_string());
     }
 
-    let name = name.ok_or_else(|| {
-        "usage: duplicate [--sync=auto|now|no] {UNIQUENAME|UNIQUEID}".to_string()
-    })?;
+    let name = name.ok_or_else(|| usage.to_string())?;
 
     let mut blob = load_blob().map_err(|err| format!("{err}"))?;
     let idx = find_account_index(&blob, &name)

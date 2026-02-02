@@ -146,10 +146,7 @@ fn dispatch(args: &[String]) -> Dispatch {
 }
 
 fn program_names(args: &[String]) -> (String, String) {
-    let program_path = args
-        .get(0)
-        .cloned()
-        .unwrap_or_else(|| "lpass".to_string());
+    let program_path = args.get(0).cloned().unwrap_or_else(|| "lpass".to_string());
     let program_name = Path::new(&program_path)
         .file_name()
         .and_then(|name| name.to_str())

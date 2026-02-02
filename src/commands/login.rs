@@ -2,18 +2,18 @@
 
 use std::env;
 
+use super::data::ensure_mock_blob;
+use crate::agent::agent_save;
+use crate::config::config_unlink;
 use crate::config::{config_write_buffer, config_write_encrypted_buffer, config_write_string};
 use crate::crypto::decrypt_private_key;
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::kdf::{kdf_decryption_key, kdf_login_key};
 use crate::password::prompt_password;
-use crate::session::{session_save, Session};
-use crate::xml::{parse_error_cause, parse_ok_session};
-use super::data::ensure_mock_blob;
-use crate::agent::agent_save;
-use crate::config::config_unlink;
+use crate::session::{Session, session_save};
 use crate::terminal::{self, BOLD, FG_GREEN, RESET, UNDERLINE};
+use crate::xml::{parse_error_cause, parse_ok_session};
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -26,6 +26,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
+    let usage = "usage: login [--trust] [--plaintext-key [--force, -f]] [--color=auto|never|always] USERNAME";
     let mut trust = false;
     let mut plaintext_key = false;
     let mut force = false;
@@ -33,11 +34,11 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
-        if arg == "--trust" || arg == "-t" {
+        if arg == "--trust" {
             trust = true;
             continue;
         }
-        if arg == "--plaintext-key" || arg == "-P" {
+        if arg == "--plaintext-key" {
             plaintext_key = true;
             continue;
         }
@@ -45,36 +46,34 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
             force = true;
             continue;
         }
-        if arg == "--color" || arg == "-C" {
-            let value = iter.next().ok_or_else(|| {
-                "... --color=auto|never|always".to_string()
-            })?;
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+        if arg == "--color" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
         if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value)
-                .ok_or_else(|| "... --color=auto|never|always".to_string())?;
+            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
             terminal::set_color_mode(mode);
             continue;
         }
         if arg.starts_with('-') {
-            return Err("usage: login [--trust] [--plaintext-key [--force, -f]] USERNAME".to_string());
+            return Err(usage.to_string());
         }
         if username.is_none() {
             username = Some(arg.clone());
         } else {
-            return Err("usage: login [--trust] [--plaintext-key [--force, -f]] USERNAME".to_string());
+            return Err(usage.to_string());
         }
     }
 
-    let username = username.ok_or_else(|| "usage: login [--trust] [--plaintext-key [--force, -f]] USERNAME".to_string())?;
+    let username = username.ok_or_else(|| usage.to_string())?;
 
     if plaintext_key && !force {
         // keep behavior simple: allow but warn
-        eprintln!("warning: --plaintext-key reduces security; use --force to suppress this warning");
+        eprintln!(
+            "warning: --plaintext-key reduces security; use --force to suppress this warning"
+        );
     }
 
     let iterations = fetch_iterations(&username).map_err(|err| format!("{err}"))?;
@@ -83,13 +82,13 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
     }
 
     let password = prompt_password(&username).map_err(|err| format!("{err}"))?;
-    let login_hash = kdf_login_key(&username, &password, iterations)
-        .map_err(|err| format!("{err}"))?;
-    let key = kdf_decryption_key(&username, &password, iterations)
-        .map_err(|err| format!("{err}"))?;
+    let login_hash =
+        kdf_login_key(&username, &password, iterations).map_err(|err| format!("{err}"))?;
+    let key =
+        kdf_decryption_key(&username, &password, iterations).map_err(|err| format!("{err}"))?;
 
-    let mut session = lastpass_login(&username, &login_hash, iterations)
-        .map_err(|err| format!("{err}"))?;
+    let mut session =
+        lastpass_login(&username, &login_hash, iterations).map_err(|err| format!("{err}"))?;
     if session.private_key.is_none() {
         if let Some(private_key_enc) = session.private_key_enc.clone() {
             if let Ok(private_key) = decrypt_private_key(&private_key_enc, &key) {

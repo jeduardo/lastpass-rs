@@ -5,8 +5,8 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/modules/lastpass-cli/HEAD");
     println!("cargo:rerun-if-changed=lastpass-cli");
 
-    let repo_sha = git_value(&["rev-parse", "--short=12", "HEAD"])
-        .unwrap_or_else(|| "unknown".to_string());
+    let repo_sha =
+        git_value(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     let upstream_version = git_value(&[
         "-C",
         "lastpass-cli",

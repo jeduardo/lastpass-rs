@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 
 use crate::crypto::{decrypt_authenticated, encrypt_authenticated};
 use crate::error::{LpassError, Result};
@@ -448,10 +448,7 @@ mod tests {
         let path = config_path_for_type_with_env(&env, ConfigType::Data, "blob").expect("path");
         assert_eq!(
             path,
-            home.path()
-                .join(".local/share")
-                .join("lpass")
-                .join("blob")
+            home.path().join(".local/share").join("lpass").join("blob")
         );
     }
 
@@ -472,8 +469,8 @@ mod tests {
             ..ConfigEnv::default()
         };
 
-        let path = config_path_for_type_with_env(&env, ConfigType::Data, "nested/dir/item")
-            .expect("path");
+        let path =
+            config_path_for_type_with_env(&env, ConfigType::Data, "nested/dir/item").expect("path");
         assert_eq!(path, temp.path().join("nested/dir/item"));
         assert!(temp.path().join("nested").is_dir());
         assert!(temp.path().join("nested/dir").is_dir());
@@ -504,9 +501,7 @@ mod tests {
         store
             .write_encrypted_string("secret", "hunter2", &key)
             .expect("write");
-        let value = store
-            .read_encrypted_string("secret", &key)
-            .expect("read");
+        let value = store.read_encrypted_string("secret", &key).expect("read");
         assert_eq!(value.as_deref(), Some("hunter2"));
     }
 }

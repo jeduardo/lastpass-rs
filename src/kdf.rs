@@ -19,7 +19,12 @@ pub fn kdf_login_key(username: &str, password: &str, iterations: u32) -> Result<
     let mut user_lower = username.to_ascii_lowercase();
     let mut hash = [0u8; KDF_HASH_LEN];
 
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), user_lower.as_bytes(), iterations, &mut hash);
+    pbkdf2_hmac::<Sha256>(
+        password.as_bytes(),
+        user_lower.as_bytes(),
+        iterations,
+        &mut hash,
+    );
     let mut login_hash = [0u8; KDF_HASH_LEN];
     pbkdf2_hmac::<Sha256>(&hash, password.as_bytes(), 1, &mut login_hash);
 
@@ -42,7 +47,12 @@ pub fn kdf_decryption_key(
 
     let mut user_lower = username.to_ascii_lowercase();
     let mut hash = [0u8; KDF_HASH_LEN];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), user_lower.as_bytes(), iterations, &mut hash);
+    pbkdf2_hmac::<Sha256>(
+        password.as_bytes(),
+        user_lower.as_bytes(),
+        iterations,
+        &mut hash,
+    );
     user_lower.zeroize();
     Ok(hash)
 }
