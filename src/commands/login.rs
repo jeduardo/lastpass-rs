@@ -130,6 +130,10 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
 
 fn fetch_iterations(username: &str) -> Result<u32> {
     let client = HttpClient::from_env()?;
+    fetch_iterations_with_client(&client, username)
+}
+
+fn fetch_iterations_with_client(client: &HttpClient, username: &str) -> Result<u32> {
     let user_lower = username.to_ascii_lowercase();
     let response = client.post_lastpass(None, "iterations.php", None, &[("email", &user_lower)])?;
     response
@@ -141,6 +145,15 @@ fn fetch_iterations(username: &str) -> Result<u32> {
 
 fn lastpass_login(username: &str, hash: &str, iterations: u32) -> Result<Session> {
     let client = HttpClient::from_env()?;
+    lastpass_login_with_client(&client, username, hash, iterations)
+}
+
+fn lastpass_login_with_client(
+    client: &HttpClient,
+    username: &str,
+    hash: &str,
+    iterations: u32,
+) -> Result<Session> {
     let user_lower = username.to_ascii_lowercase();
     let iterations_str = iterations.to_string();
 
@@ -169,6 +182,10 @@ fn lastpass_login(username: &str, hash: &str, iterations: u32) -> Result<Session
 
 fn fetch_blob(session: &Session) -> std::result::Result<Vec<u8>, String> {
     let client = HttpClient::from_env().map_err(|err| format!("{err}"))?;
+    fetch_blob_with_client(&client, session)
+}
+
+fn fetch_blob_with_client(client: &HttpClient, session: &Session) -> std::result::Result<Vec<u8>, String> {
     let params = [
         ("mobile", "1"),
         ("requestsrc", "cli"),
@@ -186,6 +203,8 @@ fn fetch_blob(session: &Session) -> std::result::Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::HttpClient;
+    use crate::kdf::kdf_login_key;
 
     #[test]
     fn run_inner_requires_username() {
@@ -214,5 +233,43 @@ mod tests {
         ])
         .expect_err("invalid color mode must fail");
         assert!(err.contains("usage: login"));
+    }
+
+    #[test]
+    fn fetch_iterations_uses_mock_client() {
+        let client = HttpClient::mock();
+        let iterations = fetch_iterations_with_client(&client, "USER@example.com").expect("iters");
+        assert_eq!(iterations, 1000);
+    }
+
+    #[test]
+    fn lastpass_login_with_mock_client_supports_success_and_failure() {
+        let client = HttpClient::mock();
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let session =
+            lastpass_login_with_client(&client, "USER@example.com", &hash, 1000).expect("login");
+        assert_eq!(session.uid, "57747756");
+        assert_eq!(session.session_id, "1234");
+        assert_eq!(session.token, "abcd");
+        assert_eq!(session.server.as_deref(), Some(crate::http::LASTPASS_SERVER));
+
+        let err = lastpass_login_with_client(&client, "user@example.com", "bad", 1000)
+            .expect_err("bad login must fail");
+        assert!(matches!(err, crate::error::LpassError::Crypto("login failed")));
+    }
+
+    #[test]
+    fn fetch_blob_with_mock_client_rejects_empty_body() {
+        let client = HttpClient::mock();
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "t".to_string(),
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let err = fetch_blob_with_client(&client, &session).expect_err("empty blob must fail");
+        assert_eq!(err, "empty blob response");
     }
 }

@@ -259,4 +259,63 @@ mod tests {
         let decrypted = aes_decrypt_lastpass(&decoded, &key).expect("decrypt");
         assert_eq!(decrypted, plaintext);
     }
+
+    #[test]
+    fn decrypt_authenticated_rejects_short_ciphertext() {
+        let key = [7u8; 32];
+        let err = decrypt_authenticated(&key, b"short").expect_err("must fail");
+        assert!(matches!(err, LpassError::Crypto("ciphertext too short")));
+    }
+
+    #[test]
+    fn aes_lastpass_encrypt_decrypt_and_errors() {
+        let key = [9u8; 32];
+        let plaintext = b"payload";
+        let encrypted = aes_encrypt_lastpass(plaintext, &key).expect("encrypt");
+        let decrypted = aes_decrypt_lastpass(&encrypted, &key).expect("decrypt");
+        assert_eq!(decrypted, plaintext);
+
+        let err = aes_decrypt_lastpass(b"", &key).expect_err("empty must fail");
+        assert!(matches!(err, LpassError::Crypto("ciphertext empty")));
+
+        let err = aes_decrypt_lastpass(b"!", &key).expect_err("short must fail");
+        assert!(matches!(err, LpassError::Crypto("ciphertext too short")));
+    }
+
+    #[test]
+    fn base64_lastpass_decode_rejects_invalid_inputs() {
+        let err = base64_lastpass_decode("").expect_err("empty must fail");
+        assert!(matches!(err, LpassError::Crypto("base64 empty")));
+
+        let err = base64_lastpass_decode("!abc").expect_err("format must fail");
+        assert!(matches!(err, LpassError::Crypto("invalid base64 format")));
+
+        let err = base64_lastpass_decode("!!!|!!!").expect_err("decode must fail");
+        assert!(matches!(err, LpassError::Crypto("base64 decode failed")));
+    }
+
+    #[test]
+    fn aes_decrypt_base64_lastpass_roundtrip() {
+        let key = [11u8; 32];
+        let encrypted = aes_encrypt_lastpass(b"xyz", &key).expect("encrypt");
+        let encoded = base64_lastpass_encode(&encrypted);
+        let decrypted = aes_decrypt_base64_lastpass(&encoded, &key).expect("decrypt");
+        assert_eq!(decrypted, b"xyz");
+    }
+
+    #[test]
+    fn decrypt_private_key_rejects_invalid_formats() {
+        let key = [13u8; 32];
+        let err = decrypt_private_key("abc", &key).expect_err("odd hex must fail");
+        assert!(matches!(err, LpassError::Crypto("invalid private key format")));
+
+        let err = decrypt_private_key("zz", &key).expect_err("invalid hex must fail");
+        assert!(matches!(err, LpassError::Crypto("invalid private key")));
+    }
+
+    #[test]
+    fn rsa_decrypt_oaep_rejects_invalid_private_key() {
+        let err = rsa_decrypt_oaep(b"not-a-key", b"ciphertext").expect_err("must fail");
+        assert!(matches!(err, LpassError::Crypto("invalid rsa private key")));
+    }
 }

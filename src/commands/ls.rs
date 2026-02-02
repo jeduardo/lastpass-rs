@@ -309,4 +309,58 @@ mod tests {
         assert!(matches_group(&plain, Some("")));
         assert!(!matches_group(&grouped, Some("")));
     }
+
+    #[test]
+    fn matches_group_handles_prefix_and_separator_rules() {
+        let account = account("1", None, "team/sub", "entry", "team/sub/entry", "https://x");
+        assert!(matches_group(&account, Some("team")));
+        assert!(matches_group(&account, Some("team/sub")));
+        assert!(matches_group(&account, Some("team/sub/")));
+        assert!(!matches_group(&account, Some("tea")));
+        assert!(!matches_group(&account, Some("other")));
+        assert!(matches_group(&account, None));
+    }
+
+    #[test]
+    fn insert_account_skips_group_markers() {
+        let mut root = LsNode::default();
+        let group_marker = account("9", None, "team", "folder", "team/folder", "http://group");
+        insert_account(&mut root, &group_marker);
+        let lines = render_tree_lines(&root, "%an [id: %ai]");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], format!("{FG_BLUE}{BOLD}team{RESET}"));
+    }
+
+    #[test]
+    fn parse_path_components_ignores_empty_segments() {
+        let parts: Vec<&str> = parse_path_components("\\a\\\\b\\").collect();
+        assert_eq!(parts, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn get_or_insert_child_reuses_existing_node() {
+        let mut root = LsNode::default();
+        let first_ptr = {
+            let child = get_or_insert_child(&mut root, "team", false);
+            child as *mut LsNode
+        };
+        let second_ptr = {
+            let child = get_or_insert_child(&mut root, "team", false);
+            child as *mut LsNode
+        };
+        assert_eq!(first_ptr, second_ptr);
+        assert_eq!(root.children.len(), 1);
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_option_combinations() {
+        let err = run_inner(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: ls"));
+
+        let err = run_inner(&["--bogus".to_string()]).expect_err("unknown flag");
+        assert!(err.contains("usage: ls"));
+
+        let err = run_inner(&["a".to_string(), "b".to_string()]).expect_err("two groups");
+        assert!(err.contains("usage: ls"));
+    }
 }

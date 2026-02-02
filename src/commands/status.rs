@@ -79,4 +79,10 @@ mod tests {
         let err = run_inner(&["--color=rainbow".to_string()]).expect_err("must fail");
         assert!(err.contains("--color=auto|never|always"));
     }
+
+    #[test]
+    fn run_inner_rejects_missing_color_value() {
+        let err = run_inner(&["--color".to_string()]).expect_err("must fail");
+        assert!(err.contains("--color=auto|never|always"));
+    }
 }

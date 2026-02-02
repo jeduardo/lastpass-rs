@@ -121,7 +121,7 @@ fn parse_yes_no_response(input: &str, default_yes: bool) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_yes_no_response;
+    use super::{parse_yes_no_response, run_inner};
 
     #[test]
     fn parse_yes_no_accepts_yes_variants() {
@@ -146,5 +146,23 @@ mod tests {
     #[test]
     fn parse_yes_no_rejects_unknown_response() {
         assert_eq!(parse_yes_no_response("maybe", true), None);
+    }
+
+    #[test]
+    fn run_inner_rejects_unknown_options() {
+        let err = run_inner(&["--bogus".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: logout"));
+    }
+
+    #[test]
+    fn run_inner_rejects_missing_color_value() {
+        let err = run_inner(&["--color".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: logout"));
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_color_value() {
+        let err = run_inner(&["--color=rainbow".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: logout"));
     }
 }

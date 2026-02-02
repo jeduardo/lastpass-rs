@@ -610,4 +610,70 @@ mod tests {
         assert_eq!(lines[1], "Hostname:foo");
         assert_eq!(collapsed.url, "http://sn");
     }
+
+    #[test]
+    fn note_type_mappings_and_usage_are_consistent() {
+        assert_eq!(note_type_by_shortname("server"), NoteType::Server);
+        assert_eq!(note_type_by_shortname("SSH-KEY"), NoteType::SshKey);
+        assert_eq!(note_type_by_shortname("unknown"), NoteType::None);
+
+        assert_eq!(note_type_by_name("Server"), NoteType::Server);
+        assert_eq!(note_type_by_name(" social security "), NoteType::Ssn);
+        assert_eq!(note_type_by_name("missing"), NoteType::None);
+
+        assert_eq!(note_type_display_name(NoteType::Wifi), Some("Wi-Fi Password"));
+        assert_eq!(note_type_display_name(NoteType::None), None);
+
+        let usage = note_type_usage();
+        assert!(usage.contains("--note-type=TYPE"));
+        assert!(usage.contains("server"));
+        assert!(usage.contains("ssh-key"));
+    }
+
+    #[test]
+    fn note_field_metadata_matches_templates() {
+        assert!(note_has_field(NoteType::Server, "Hostname"));
+        assert!(!note_has_field(NoteType::Server, "NotAField"));
+        assert!(note_has_field(NoteType::None, "Anything"));
+
+        assert!(note_field_is_multiline(NoteType::SshKey, "Private Key"));
+        assert!(!note_field_is_multiline(NoteType::SshKey, "Public Key"));
+        assert!(!note_field_is_multiline(NoteType::Server, "Private Key"));
+    }
+
+    #[test]
+    fn secure_note_detection_and_passthrough_behavior() {
+        let mut non_secure = base_secure_note("plain text");
+        non_secure.url = "https://example.com".to_string();
+        assert!(!account_is_secure_note(&non_secure));
+        assert!(expand_notes(&non_secure).is_none());
+
+        let secure_plain = base_secure_note("not prefixed");
+        assert!(account_is_secure_note(&secure_plain));
+        assert!(expand_notes(&secure_plain).is_none());
+    }
+
+    #[test]
+    fn collapse_notes_includes_username_password_url_and_notes() {
+        let mut account = base_secure_note("ignored");
+        account.fields.push(Field {
+            name: "Hostname".to_string(),
+            field_type: "text".to_string(),
+            value: " app.example.com ".to_string(),
+            value_encrypted: None,
+            checked: false,
+        });
+        account.username = " alice ".to_string();
+        account.password = " secret ".to_string();
+        account.url = " https://example.com ".to_string();
+        account.note = " memo ".to_string();
+
+        let collapsed = collapse_notes(&account);
+        assert_eq!(collapsed.url, "http://sn");
+        assert!(collapsed.note.contains("Hostname:app.example.com"));
+        assert!(collapsed.note.contains("Username:alice"));
+        assert!(collapsed.note.contains("Password:secret"));
+        assert!(collapsed.note.contains("URL:https://example.com"));
+        assert!(collapsed.note.contains("Notes:memo"));
+    }
 }

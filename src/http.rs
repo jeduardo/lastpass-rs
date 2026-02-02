@@ -330,4 +330,38 @@ mod tests {
             Transport::Mock(_) => panic!("expected real transport"),
         }
     }
+
+    #[test]
+    fn post_real_returns_io_error_when_request_fails() {
+        let client = Client::builder()
+            .user_agent(user_agent())
+            .build()
+            .expect("client");
+        let err = post_real(
+            &client,
+            Some("127.0.0.1:1"),
+            "login.php",
+            None,
+            &[("k", "v")],
+        )
+        .expect_err("request must fail");
+        assert!(matches!(err, LpassError::Io { context: "http post", .. }));
+    }
+
+    #[test]
+    fn post_real_bytes_returns_io_error_when_request_fails() {
+        let client = Client::builder()
+            .user_agent(user_agent())
+            .build()
+            .expect("client");
+        let err = post_real_bytes(
+            &client,
+            Some("127.0.0.1:1"),
+            "login.php",
+            None,
+            &[("k", "v")],
+        )
+        .expect_err("request must fail");
+        assert!(matches!(err, LpassError::Io { context: "http post", .. }));
+    }
 }

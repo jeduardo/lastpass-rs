@@ -509,4 +509,143 @@ mod tests {
         assert_eq!(account.url, "https://example.com/");
         assert_eq!(account.fullname, "test-group/test-account");
     }
+
+    #[test]
+    fn blob_parse_rejects_missing_version_and_truncation() {
+        let key = [1u8; 32];
+        let err = blob_parse(b"", &key, None).expect_err("missing version must fail");
+        assert!(matches!(err, LpassError::Crypto("missing blob version")));
+
+        let mut broken = Vec::new();
+        broken.extend_from_slice(b"LPAV");
+        broken.extend_from_slice(&10u32.to_be_bytes());
+        broken.extend_from_slice(b"1");
+        let err = blob_parse(&broken, &key, None).expect_err("truncated blob must fail");
+        assert!(matches!(err, LpassError::Crypto("blob truncated")));
+    }
+
+    #[test]
+    fn primitive_readers_cover_edge_cases() {
+        let mut pos = 0usize;
+        let value = read_be_u32(&[0, 0, 0, 5], &mut pos).expect("read u32");
+        assert_eq!(value, 5);
+        assert_eq!(pos, 4);
+        let mut short_pos = 0usize;
+        let err = read_be_u32(&[0, 0], &mut short_pos).expect_err("short read must fail");
+        assert!(matches!(err, LpassError::Crypto("read past end")));
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"");
+        push_item(&mut body, b"313233");
+        push_item(&mut body, b"x");
+        push_item(&mut body, b"1");
+        push_item(&mut body, b"0");
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        assert_eq!(read_plain_string(&mut chunk).expect("empty"), "");
+        assert_eq!(read_hex_string(&mut chunk).expect("hex"), "123");
+        assert!(read_hex_string(&mut chunk).is_err());
+        assert!(read_boolean(&mut chunk).expect("bool true"));
+        assert!(!read_boolean(&mut chunk).expect("bool false"));
+    }
+
+    #[test]
+    fn crypt_helpers_cover_empty_and_detection_paths() {
+        let key = [3u8; 32];
+        let mut body = Vec::new();
+        push_item(&mut body, b"");
+        let encrypted = aes_encrypt_lastpass(b"value", &key).expect("encrypt");
+        push_item(&mut body, &encrypted);
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        let (empty, enc_empty) = read_crypt_string(&mut chunk, &key).expect("empty");
+        assert_eq!(empty, "");
+        assert!(enc_empty.is_some());
+        let (value, enc_value) = read_crypt_string(&mut chunk, &key).expect("value");
+        assert_eq!(value, "value");
+        assert!(enc_value.is_some());
+
+        let mut body2 = Vec::new();
+        push_item(&mut body2, b"!abc");
+        let chunk2 = ChunkCursor::new("TEST".to_string(), &body2);
+        assert!(check_next_entry_encrypted(&chunk2));
+    }
+
+    #[test]
+    fn parse_field_supports_encrypted_and_plain_types() {
+        let key = [5u8; 32];
+        let mut encrypted_body = Vec::new();
+        push_item(&mut encrypted_body, b"Hostname");
+        push_item(&mut encrypted_body, b"text");
+        let encrypted = aes_encrypt_lastpass(b"srv", &key).expect("encrypt");
+        push_item(&mut encrypted_body, &encrypted);
+        push_item(&mut encrypted_body, b"1");
+        let mut encrypted_chunk = ChunkCursor::new("ACFL".to_string(), &encrypted_body);
+        let field = parse_field(&mut encrypted_chunk, &key).expect("field");
+        assert_eq!(field.name, "Hostname");
+        assert_eq!(field.value, "srv");
+        assert!(field.checked);
+        assert!(field.value_encrypted.is_some());
+
+        let mut plain_body = Vec::new();
+        push_item(&mut plain_body, b"TOTP");
+        push_item(&mut plain_body, b"checkbox");
+        push_item(&mut plain_body, b"yes");
+        push_item(&mut plain_body, b"0");
+        let mut plain_chunk = ChunkCursor::new("ACOF".to_string(), &plain_body);
+        let field = parse_field(&mut plain_chunk, &key).expect("plain field");
+        assert_eq!(field.value, "yes");
+        assert_eq!(field.value_encrypted, None);
+        assert!(!field.checked);
+    }
+
+    #[test]
+    fn parse_account_decodes_legacy_hex_url() {
+        let key = [9u8; 32];
+        let mut acct = Vec::new();
+        push_item(&mut acct, b"0002");
+        push_item(
+            &mut acct,
+            &aes_encrypt_lastpass(b"legacy", &key).expect("name enc"),
+        );
+        push_item(
+            &mut acct,
+            &aes_encrypt_lastpass(b"group", &key).expect("group enc"),
+        );
+        push_item(&mut acct, b"68747470733a2f2f6578616d706c652e636f6d2f");
+        push_item(
+            &mut acct,
+            &aes_encrypt_lastpass(b"", &key).expect("note enc"),
+        );
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(
+            &mut acct,
+            &aes_encrypt_lastpass(b"user", &key).expect("user enc"),
+        );
+        push_item(
+            &mut acct,
+            &aes_encrypt_lastpass(b"pass", &key).expect("pass enc"),
+        );
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+
+        let mut chunk = ChunkCursor::new("ACCT".to_string(), &acct);
+        let account = parse_account(&mut chunk, &key).expect("account");
+        assert_eq!(account.url, "https://example.com/");
+        assert_eq!(account.fullname, "group/legacy");
+    }
 }
