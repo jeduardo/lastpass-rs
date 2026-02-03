@@ -102,7 +102,7 @@ jobs:
             asset_name: linux-arm64
           - os: macos-13
             target: x86_64-apple-darwin
-            asset_name: macos-x86_64
+            asset_name: macos-15-intel
           - os: macos-14
             target: aarch64-apple-darwin
             asset_name: macos-arm64
