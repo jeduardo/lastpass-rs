@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_test_home() -> PathBuf {
@@ -34,6 +35,27 @@ fn run(home: &Path, askpass: Option<&Path>, args: &[&str]) -> Output {
     command.output().expect("run command")
 }
 
+fn run_with_input(home: &Path, askpass: Option<&Path>, args: &[&str], input: &str) -> Output {
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let mut command = Command::new(exe);
+    command.env("LPASS_HOME", home);
+    command.env("LPASS_HTTP_MOCK", "1");
+    command.env("LPASS_AGENT_DISABLE", "0");
+    if let Some(askpass) = askpass {
+        command.env("LPASS_ASKPASS", askpass);
+    }
+    command.args(args);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn command");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin available");
+        stdin.write_all(input.as_bytes()).expect("write stdin");
+    }
+    child.wait_with_output().expect("wait output")
+}
+
 #[cfg(unix)]
 #[test]
 fn login_agent_status_ls_show_and_logout_cycle() {
@@ -44,7 +66,7 @@ fn login_agent_status_ls_show_and_logout_cycle() {
     let login = run(
         &home,
         Some(&askpass),
-        &["login", "--plaintext-key", "--force", "user@example.com"],
+        &["login", "--trust", "--plaintext-key", "--force", "user@example.com"],
     );
     assert_eq!(
         login.status.code().unwrap_or(-1),
@@ -52,6 +74,8 @@ fn login_agent_status_ls_show_and_logout_cycle() {
         "stderr: {}",
         String::from_utf8_lossy(&login.stderr)
     );
+    let trusted_id = fs::read_to_string(home.join("trusted_id")).expect("trusted_id");
+    assert_eq!(trusted_id.trim().len(), 32);
 
     let status_quiet = run(&home, None, &["status", "--quiet"]);
     assert_eq!(status_quiet.status.code().unwrap_or(-1), 0);
@@ -94,14 +118,16 @@ fn login_warning_failure_and_option_error_paths() {
     fs::create_dir_all(&home).expect("create home");
     let askpass_ok = write_askpass(&home, "#!/bin/sh\necho 123456\n");
 
-    let login_warn = run(
+    let login_warn = run_with_input(
         &home,
         Some(&askpass_ok),
         &["login", "--plaintext-key", "user@example.com"],
+        "n\n",
     );
-    assert_eq!(login_warn.status.code().unwrap_or(-1), 0);
+    assert_eq!(login_warn.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&login_warn.stderr).contains("--plaintext-key reduces security"),
+        String::from_utf8_lossy(&login_warn.stderr)
+            .contains("Login aborted. Try again without --plaintext-key."),
         "stderr: {}",
         String::from_utf8_lossy(&login_warn.stderr)
     );
@@ -144,11 +170,14 @@ fn login_warning_failure_and_option_error_paths() {
     let logout = run(&home, None, &["logout", "--force"]);
     assert_eq!(logout.status.code().unwrap_or(-1), 0);
 
-    let askpass_bad = write_askpass(&home, "#!/bin/sh\necho wrong\n");
+    let askpass_bad = write_askpass(
+        &home,
+        "#!/bin/sh\nif [ -e \"$LPASS_HOME/.askpass.lock\" ]; then exit 1; fi\ntouch \"$LPASS_HOME/.askpass.lock\"\necho wrong\n",
+    );
     let login_bad = run(&home, Some(&askpass_bad), &["login", "user@example.com"]);
     assert_eq!(login_bad.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&login_bad.stderr).contains("login failed"),
+        String::from_utf8_lossy(&login_bad.stderr).contains("askpass failed"),
         "stderr: {}",
         String::from_utf8_lossy(&login_bad.stderr)
     );

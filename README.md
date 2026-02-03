@@ -73,8 +73,8 @@ Per-command checklist:
 
   - default flow and success color output: :white_check_mark:
   - `--color`: :white_check_mark:
-  - `--trust`: TODO
-  - `--plaintext-key` confirmation UX parity (`--force` behavior): TODO
+  - `--trust` (trusted ID persistence + login/trust params): :white_check_mark: (basic parity)
+  - `--plaintext-key` confirmation UX parity (`--force` behavior): :white_check_mark:
 
 - `status`
 
