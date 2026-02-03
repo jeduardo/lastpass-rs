@@ -46,7 +46,10 @@ mod tests {
     #[test]
     fn script_path_points_to_runner_script() {
         let path = script_path(Path::new("/tmp/repo"));
-        assert_eq!(path, Path::new("/tmp/repo/scripts/run-upstream-shell-tests.sh"));
+        assert_eq!(
+            path,
+            Path::new("/tmp/repo/scripts/run-upstream-shell-tests.sh")
+        );
     }
 
     #[test]

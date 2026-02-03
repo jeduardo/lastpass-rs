@@ -108,17 +108,17 @@ Per-command checklist:
 
 - `add`
 
-  - `--non-interactive` path: :white_check_mark: (basic parity)
-  - interactive mode parity: TODO
-  - exact `--username|--password|--url|--notes|--field|--app` semantics: TODO
-  - `--note-type`: :white_check_mark: (basic parity)
+  - `--non-interactive` path: :white_check_mark:
+  - interactive mode parity: :white_check_mark:
+  - `--username|--password|--url|--notes|--field|--app`: :white_check_mark:
+  - `--note-type`: :white_check_mark:
 
 - `edit`
 
-  - `--non-interactive` path: :white_check_mark: (basic parity)
-  - interactive mode parity: TODO
-  - exact option semantics/validation parity: TODO
-  - C behavior when entry does not exist (create path): TODO
+  - `--non-interactive` path: :white_check_mark:
+  - interactive mode parity: :white_check_mark:
+  - exact option semantics/validation parity: :white_check_mark:
+  - C behavior when entry does not exist (create path): :white_check_mark:
 
 - `duplicate`
 

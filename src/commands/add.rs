@@ -1,14 +1,38 @@
 #![forbid(unsafe_code)]
 
-use std::io::{self, Read};
+use std::env;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::process::Command;
 
-use crate::blob::{Account, Blob, Field};
-use crate::commands::data::{load_blob, save_blob};
+use crate::blob::{Account, Field};
+use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
 use crate::notes::{
     NoteType, collapse_notes, note_field_is_multiline, note_has_field, note_type_by_name,
-    note_type_by_shortname, note_type_display_name,
+    note_type_by_shortname, note_type_display_name, note_type_fields,
 };
 use crate::terminal;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum EditChoice {
+    Any,
+    Username,
+    Password,
+    Url,
+    Field,
+    Notes,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct AddArgs {
+    name: String,
+    choice: EditChoice,
+    field: Option<String>,
+    non_interactive: bool,
+    sync_mode: SyncMode,
+    note_type: NoteType,
+    is_app: bool,
+}
 
 #[derive(Debug)]
 struct ParsedEntry {
@@ -34,79 +58,386 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let parsed = parse_add_args(args)?;
+
+    if parsed.note_type != NoteType::None
+        && parsed.choice != EditChoice::Any
+        && parsed.choice != EditChoice::Notes
+    {
+        return Err("Note type may only be used with secure notes".to_string());
+    }
+
+    let raw_input = if parsed.non_interactive {
+        read_stdin_to_string()?
+    } else {
+        let initial = make_editor_initial_text(&parsed);
+        edit_with_editor(&initial)?
+    };
+
+    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut account = if parsed.choice == EditChoice::Any {
+        let entry = parse_entry_input(&raw_input, parsed.note_type);
+        let entry_name = entry.name.clone().unwrap_or_else(|| parsed.name.clone());
+        let mut account = build_account(&entry, &entry_name);
+        if parsed.is_app
+            && !account
+                .fields
+                .iter()
+                .any(|field| field.name == "Application")
+        {
+            account.fields.push(make_field("Application", ""));
+        }
+        account
+    } else {
+        let mut account = new_account(&parsed.name, parsed.choice, parsed.note_type, parsed.is_app);
+        let mut value = raw_input;
+        trim_single_trailing_newline(&mut value);
+        apply_choice_value(&mut account, parsed.choice, parsed.field.as_deref(), &value)?;
+        if account
+            .fields
+            .iter()
+            .any(|field| field.name.eq_ignore_ascii_case("NoteType"))
+        {
+            account = collapse_notes(&account);
+        }
+        account
+    };
+
+    account.id = "0".to_string();
+    blob.accounts.push(account.clone());
+    save_blob(&blob).map_err(|err| format!("{err}"))?;
+    maybe_push_account_update(&account, parsed.sync_mode).map_err(|err| format!("{err}"))?;
+    Ok(0)
+}
+
+fn parse_add_args(args: &[String]) -> Result<AddArgs, String> {
     let usage = "usage: add [--sync=auto|now|no] [--non-interactive] [--color=auto|never|always] {--username|--password|--url|--notes|--field=FIELD|--note-type=NOTETYPE} NAME";
+    let mut choice = EditChoice::Any;
+    let mut field: Option<String> = None;
     let mut non_interactive = false;
+    let mut sync_mode = SyncMode::Auto;
     let mut note_type = NoteType::None;
+    let mut is_app = false;
     let mut name: Option<String> = None;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         if !arg.starts_with('-') {
+            if name.is_some() {
+                return Err(usage.to_string());
+            }
             name = Some(arg.clone());
             continue;
         }
-        if arg == "--non-interactive" {
-            non_interactive = true;
-        } else if arg == "--note-type" {
-            if let Some(next) = iter.next() {
+
+        match arg.as_str() {
+            "-u" | "--username" => set_choice(&mut choice, EditChoice::Username)?,
+            "-p" | "--password" => set_choice(&mut choice, EditChoice::Password)?,
+            "--url" => set_choice(&mut choice, EditChoice::Url)?,
+            "--notes" => set_choice(&mut choice, EditChoice::Notes)?,
+            "--field" => {
+                set_choice(&mut choice, EditChoice::Field)?;
+                let Some(next) = iter.next() else {
+                    return Err(usage.to_string());
+                };
+                field = Some(next.clone());
+            }
+            "--non-interactive" => non_interactive = true,
+            "--app" => is_app = true,
+            "--note-type" => {
+                let Some(next) = iter.next() else {
+                    return Err(crate::notes::note_type_usage());
+                };
                 note_type = note_type_by_shortname(next);
                 if note_type == NoteType::None {
                     return Err(crate::notes::note_type_usage());
                 }
-            } else {
-                return Err(crate::notes::note_type_usage());
             }
-        } else if let Some(value) = arg.strip_prefix("--note-type=") {
-            note_type = note_type_by_shortname(value);
-            if note_type == NoteType::None {
-                return Err(crate::notes::note_type_usage());
+            "--sync" => {
+                let Some(next) = iter.next() else {
+                    return Err(usage.to_string());
+                };
+                let Some(mode) = SyncMode::parse(next) else {
+                    return Err(usage.to_string());
+                };
+                sync_mode = mode;
             }
-        } else if arg.starts_with("--sync=") {
-            // ignored
-        } else if arg == "--sync" {
-            let _ = iter.next();
-        } else if arg == "--color" {
-            let value = iter.next().ok_or_else(|| usage.to_string())?;
-            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
-            terminal::set_color_mode(mode);
-        } else if let Some(value) = arg.strip_prefix("--color=") {
-            let mode = terminal::parse_color_mode(value).ok_or_else(|| usage.to_string())?;
-            terminal::set_color_mode(mode);
-        } else if matches!(
-            arg.as_str(),
-            "--username" | "--password" | "--url" | "--notes" | "--field"
-        ) {
-            // interactive-only flags ignored for now
-            if arg == "--field" {
-                let _ = iter.next();
+            "--color" => {
+                let Some(next) = iter.next() else {
+                    return Err(usage.to_string());
+                };
+                let Some(mode) = terminal::parse_color_mode(next) else {
+                    return Err(usage.to_string());
+                };
+                terminal::set_color_mode(mode);
             }
-        } else {
-            return Err(usage.to_string());
+            _ => {
+                if let Some(value) = arg.strip_prefix("--sync=") {
+                    let Some(mode) = SyncMode::parse(value) else {
+                        return Err(usage.to_string());
+                    };
+                    sync_mode = mode;
+                    continue;
+                }
+                if let Some(value) = arg.strip_prefix("--field=") {
+                    set_choice(&mut choice, EditChoice::Field)?;
+                    field = Some(value.to_string());
+                    continue;
+                }
+                if let Some(value) = arg.strip_prefix("--note-type=") {
+                    note_type = note_type_by_shortname(value);
+                    if note_type == NoteType::None {
+                        return Err(crate::notes::note_type_usage());
+                    }
+                    continue;
+                }
+                if let Some(value) = arg.strip_prefix("--color=") {
+                    let Some(mode) = terminal::parse_color_mode(value) else {
+                        return Err(usage.to_string());
+                    };
+                    terminal::set_color_mode(mode);
+                    continue;
+                }
+                return Err(usage.to_string());
+            }
         }
     }
 
-    let name = name.ok_or_else(|| usage.to_string())?;
+    let Some(name) = name else {
+        return Err(usage.to_string());
+    };
 
-    if !non_interactive {
-        return Err("interactive add not implemented; use --non-interactive".to_string());
+    Ok(AddArgs {
+        name,
+        choice,
+        field,
+        non_interactive,
+        sync_mode,
+        note_type,
+        is_app,
+    })
+}
+
+fn set_choice(choice: &mut EditChoice, next: EditChoice) -> Result<(), String> {
+    if *choice != EditChoice::Any {
+        return Err(
+            "add ... {--username|--password|--url|--notes|--field=FIELD|--note-type=NOTE_TYPE}"
+                .to_string(),
+        );
+    }
+    *choice = next;
+    Ok(())
+}
+
+fn make_editor_initial_text(parsed: &AddArgs) -> String {
+    let account = new_account(&parsed.name, parsed.choice, parsed.note_type, parsed.is_app);
+    match parsed.choice {
+        EditChoice::Any => render_account_file(&account, parsed.note_type, parsed.is_app),
+        EditChoice::Username => format!("{}\n", account.username),
+        EditChoice::Password => format!("{}\n", account.password),
+        EditChoice::Url => format!("{}\n", account.url),
+        EditChoice::Notes => format!("{}\n", account.note),
+        EditChoice::Field => format!(
+            "{}\n",
+            parsed
+                .field
+                .as_deref()
+                .and_then(|field_name| account.fields.iter().find(|f| f.name == field_name))
+                .map(|field| field.value.as_str())
+                .unwrap_or("")
+        ),
+    }
+}
+
+fn render_account_file(account: &Account, note_type: NoteType, is_app: bool) -> String {
+    let mut out = String::new();
+    out.push_str("Name: ");
+    out.push_str(&account.fullname);
+    out.push('\n');
+
+    if is_app {
+        let appname = account
+            .fields
+            .iter()
+            .find(|field| field.name == "Application")
+            .map(|field| field.value.as_str())
+            .unwrap_or("");
+        out.push_str("Application: ");
+        out.push_str(appname);
+        out.push('\n');
+    } else if note_type == NoteType::None {
+        out.push_str("URL: ");
+        out.push_str(&account.url);
+        out.push('\n');
+        out.push_str("Username: ");
+        out.push_str(&account.username);
+        out.push('\n');
+        out.push_str("Password: ");
+        out.push_str(&account.password);
+        out.push('\n');
     }
 
+    let mut fields = account.fields.clone();
+    if note_type != NoteType::None {
+        for field_name in note_type_fields(note_type) {
+            if *field_name == "Username" || *field_name == "Password" {
+                continue;
+            }
+            if fields.iter().any(|field| field.name == *field_name) {
+                continue;
+            }
+            fields.push(make_field(field_name, ""));
+        }
+    }
+
+    for field in &fields {
+        if is_app && field.name == "Application" {
+            continue;
+        }
+        out.push_str(&field.name);
+        out.push_str(": ");
+        out.push_str(&field.value);
+        out.push('\n');
+    }
+
+    if account.pwprotect {
+        out.push_str("Reprompt: Yes\n");
+    }
+
+    out.push_str("Notes:    # Add notes below this line.\n");
+    out.push_str(&account.note);
+    out
+}
+
+fn edit_with_editor(initial: &str) -> Result<String, String> {
+    let mut file = tempfile::NamedTempFile::new().map_err(|err| format!("mkstemp: {err}"))?;
+    file.write_all(initial.as_bytes())
+        .map_err(|err| format!("write: {err}"))?;
+    file.flush().map_err(|err| format!("flush: {err}"))?;
+
+    let editor = env::var("VISUAL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("EDITOR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| "vi".to_string());
+    let path = file.path().to_string_lossy().to_string();
+    let _status = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} {}", shell_quote(&path)))
+        .status()
+        .map_err(|err| format!("system($VISUAL): {err}"))?;
+
+    fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn read_stdin_to_string() -> Result<String, String> {
     let mut input = String::new();
     io::stdin()
         .read_to_string(&mut input)
         .map_err(|err| format!("stdin: {err}"))?;
+    Ok(input)
+}
 
-    let parsed = parse_entry_input(&input, note_type);
-    let entry_name = parsed.name.clone().unwrap_or_else(|| name.clone());
+fn new_account(name: &str, choice: EditChoice, note_type: NoteType, is_app: bool) -> Account {
+    let (group, item_name) = split_group(name);
+    let fullname = if group.is_empty() {
+        item_name.clone()
+    } else {
+        format!("{group}/{item_name}")
+    };
 
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
-    let mut account = build_account(&parsed, &entry_name);
-    account.id = next_id(&blob);
+    let mut fields = Vec::new();
+    if note_type != NoteType::None && choice == EditChoice::Any {
+        if let Some(note_name) = note_type_display_name(note_type) {
+            fields.push(make_field("NoteType", note_name));
+        }
+    }
+    if is_app {
+        fields.push(make_field("Application", ""));
+    }
 
-    blob.accounts.push(account);
-    save_blob(&blob).map_err(|err| format!("{err}"))?;
+    Account {
+        id: "0".to_string(),
+        share_name: None,
+        name: item_name,
+        name_encrypted: None,
+        group,
+        group_encrypted: None,
+        fullname,
+        url: if choice == EditChoice::Notes || note_type != NoteType::None {
+            "http://sn".to_string()
+        } else {
+            String::new()
+        },
+        url_encrypted: None,
+        username: String::new(),
+        username_encrypted: None,
+        password: String::new(),
+        password_encrypted: None,
+        note: String::new(),
+        note_encrypted: None,
+        last_touch: "skipped".to_string(),
+        last_modified_gmt: "skipped".to_string(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields,
+    }
+}
 
-    Ok(0)
+fn apply_choice_value(
+    account: &mut Account,
+    choice: EditChoice,
+    field_name: Option<&str>,
+    value: &str,
+) -> Result<(), String> {
+    match choice {
+        EditChoice::Username => account.username = value.to_string(),
+        EditChoice::Password => account.password = value.to_string(),
+        EditChoice::Url => account.url = value.to_string(),
+        EditChoice::Notes => account.note = value.to_string(),
+        EditChoice::Field => {
+            if account.url != "http://sn" {
+                return Err(
+                    "Editing fields of entries that are not secure notes is currently not supported."
+                        .to_string(),
+                );
+            }
+            let field_name = field_name.unwrap_or_default();
+            if value.is_empty() {
+                account.fields.retain(|field| field.name != field_name);
+            } else if let Some(field) = account
+                .fields
+                .iter_mut()
+                .find(|field| field.name == field_name)
+            {
+                field.value = value.to_string();
+            } else {
+                account.fields.push(make_field(field_name, value));
+            }
+        }
+        EditChoice::Any => {}
+    }
+    Ok(())
+}
+
+fn trim_single_trailing_newline(value: &mut String) {
+    if value.ends_with('\n') {
+        value.pop();
+        if value.ends_with('\r') {
+            value.pop();
+        }
+    }
 }
 
 fn parse_entry_input(raw: &str, mut note_type: NoteType) -> ParsedEntry {
@@ -233,7 +564,7 @@ fn build_account(parsed: &ParsedEntry, entry_name: &str) -> Account {
     let fullname = if group.is_empty() {
         name.clone()
     } else {
-        format!("{}/{}", group, name)
+        format!("{group}/{name}")
     };
 
     let mut fields = parsed.fields.clone();
@@ -287,18 +618,6 @@ fn split_group(full: &str) -> (String, String) {
         return (group, name);
     }
     (String::new(), full.to_string())
-}
-
-fn next_id(blob: &Blob) -> String {
-    let mut max_id = 0u32;
-    for account in &blob.accounts {
-        if let Ok(value) = account.id.parse::<u32>() {
-            if value > max_id {
-                max_id = value;
-            }
-        }
-    }
-    format!("{:04}", max_id.saturating_add(1))
 }
 
 fn split_key_value(line: &str) -> Option<(&str, &str)> {
@@ -405,30 +724,11 @@ mod tests {
 
     #[test]
     fn split_group_splits_last_slash_only() {
+        assert_eq!(split_group("a/b/c"), ("a/b".to_string(), "c".to_string()));
         assert_eq!(
-            split_group("a/b/c"),
-            ("a/b".to_string(), "c".to_string())
+            split_group("single"),
+            ("".to_string(), "single".to_string())
         );
-        assert_eq!(split_group("single"), ("".to_string(), "single".to_string()));
-    }
-
-    #[test]
-    fn next_id_ignores_non_numeric_ids() {
-        let blob = Blob {
-            version: 1,
-            local_version: false,
-            accounts: vec![
-                Account {
-                    id: "0009".to_string(),
-                    ..Account::default()
-                },
-                Account {
-                    id: "abc".to_string(),
-                    ..Account::default()
-                },
-            ],
-        };
-        assert_eq!(next_id(&blob), "0010");
     }
 
     #[test]
@@ -446,6 +746,82 @@ mod tests {
     }
 
     #[test]
+    fn parse_add_args_validates_choices_and_sync() {
+        let parsed =
+            parse_add_args(&["--username".to_string(), "entry".to_string()]).expect("args");
+        assert_eq!(parsed.choice, EditChoice::Username);
+
+        let err = parse_add_args(&[
+            "--username".to_string(),
+            "--password".to_string(),
+            "entry".to_string(),
+        ])
+        .expect_err("conflicting selectors");
+        assert!(err.contains("--username|--password"));
+
+        let err =
+            parse_add_args(&["--sync=bad".to_string(), "entry".to_string()]).expect_err("bad sync");
+        assert!(err.contains("usage: add"));
+
+        let err = parse_add_args(&["--sync".to_string(), "entry".to_string()])
+            .expect_err("missing sync value");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn apply_choice_value_rejects_field_for_non_secure_note() {
+        let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
+        let err = apply_choice_value(
+            &mut account,
+            EditChoice::Field,
+            Some("Hostname"),
+            "example.com",
+        )
+        .expect_err("must fail");
+        assert!(err.contains("not secure notes"));
+    }
+
+    #[test]
+    fn apply_choice_value_updates_selected_targets() {
+        let mut account = new_account("entry", EditChoice::Notes, NoteType::None, false);
+        apply_choice_value(&mut account, EditChoice::Notes, None, "hello").expect("notes");
+        assert_eq!(account.note, "hello");
+
+        apply_choice_value(&mut account, EditChoice::Field, Some("Hostname"), "srv")
+            .expect("field");
+        assert!(
+            account
+                .fields
+                .iter()
+                .any(|field| field.name == "Hostname" && field.value == "srv")
+        );
+
+        apply_choice_value(&mut account, EditChoice::Field, Some("Hostname"), "")
+            .expect("remove field");
+        assert!(!account.fields.iter().any(|field| field.name == "Hostname"));
+    }
+
+    #[test]
+    fn render_account_file_includes_defaults_for_note_type() {
+        let account = new_account("group/item", EditChoice::Any, NoteType::Server, false);
+        let rendered = render_account_file(&account, NoteType::Server, false);
+        assert!(rendered.contains("Name: group/item"));
+        assert!(rendered.contains("Hostname: "));
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn trim_single_trailing_newline_only_removes_one_newline() {
+        let mut value = "line\n\n".to_string();
+        trim_single_trailing_newline(&mut value);
+        assert_eq!(value, "line\n");
+    }
+
+    #[test]
     fn run_inner_validates_arguments_before_io() {
         let err = run_inner(&[]).expect_err("missing name");
         assert!(err.contains("usage: add"));
@@ -456,5 +832,13 @@ mod tests {
         let err = run_inner(&["--note-type=unknown".to_string(), "name".to_string()])
             .expect_err("invalid note type");
         assert!(err.contains("--note-type=TYPE"));
+
+        let err = run_inner(&[
+            "--note-type=server".to_string(),
+            "-u".to_string(),
+            "name".to_string(),
+        ])
+        .expect_err("invalid note type selector");
+        assert!(err.contains("Note type may only be used with secure notes"));
     }
 }

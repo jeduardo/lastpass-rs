@@ -396,7 +396,11 @@ mod tests {
 
     #[test]
     fn socket_send_pid_matches_platform_contract() {
-        if cfg!(any(target_os = "linux", target_os = "android", target_os = "cygwin")) {
+        if cfg!(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "cygwin"
+        )) {
             assert!(!socket_send_pid());
         } else {
             assert!(socket_send_pid());

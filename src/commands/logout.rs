@@ -58,11 +58,7 @@ where
         return Ok(1);
     }
 
-    maybe_remote_logout(
-        try_key,
-        load_session,
-        logout_remote,
-    )?;
+    maybe_remote_logout(try_key, load_session, logout_remote)?;
 
     kill_session()?;
 
@@ -129,8 +125,9 @@ where
     O: FnOnce(&Session),
 {
     if let Some(mut key) = try_key() {
-        let session = load_session(&key)?
-            .ok_or_else(|| "Could not find session. Perhaps you need to login with `lpass login`.".to_string())?;
+        let session = load_session(&key)?.ok_or_else(|| {
+            "Could not find session. Perhaps you need to login with `lpass login`.".to_string()
+        })?;
         logout(&session);
         key.zeroize();
     }
@@ -141,11 +138,8 @@ fn lastpass_logout(token: &str, session: Option<&Session>) {
     lastpass_logout_with_factory(token, session, HttpClient::from_env);
 }
 
-fn lastpass_logout_with_factory<F>(
-    token: &str,
-    session: Option<&Session>,
-    client_factory: F,
-) where
+fn lastpass_logout_with_factory<F>(token: &str, session: Option<&Session>, client_factory: F)
+where
     F: FnOnce() -> crate::error::Result<HttpClient>,
 {
     let Ok(client) = client_factory() else {
@@ -183,17 +177,16 @@ fn ask_yes_no_with_reader_writer<R: BufRead, W: Write>(
     loop {
         writer
             .write_all(
-                terminal::render_stderr(&format!("{FG_YELLOW}{prompt}{RESET} [{options_colored}] ")).as_bytes(),
+                terminal::render_stderr(&format!(
+                    "{FG_YELLOW}{prompt}{RESET} [{options_colored}] "
+                ))
+                .as_bytes(),
             )
             .map_err(display_to_string)?;
-        writer
-            .flush()
-            .map_err(display_to_string)?;
+        writer.flush().map_err(display_to_string)?;
 
         let mut response = String::new();
-        let read = reader
-            .read_line(&mut response)
-            .map_err(display_to_string)?;
+        let read = reader.read_line(&mut response).map_err(display_to_string)?;
         if read == 0 {
             return Err("aborted response.".to_string());
         }
@@ -206,9 +199,7 @@ fn ask_yes_no_with_reader_writer<R: BufRead, W: Write>(
         writer
             .write_all(format!("{}\n", terminal::render_stderr(&msg)).as_bytes())
             .map_err(display_to_string)?;
-        writer
-            .flush()
-            .map_err(display_to_string)?;
+        writer.flush().map_err(display_to_string)?;
     }
 }
 
@@ -231,8 +222,7 @@ mod tests {
     use super::{
         ask_yes_no_with_reader_writer, lastpass_logout, lastpass_logout_with_client,
         lastpass_logout_with_factory, load_session_for_logout, logout_session_remote,
-        maybe_remote_logout, parse_logout_args, parse_yes_no_response, run_inner,
-        run_inner_with,
+        maybe_remote_logout, parse_logout_args, parse_yes_no_response, run_inner, run_inner_with,
     };
     use crate::http::HttpClient;
     use crate::kdf::KDF_HASH_LEN;
@@ -295,8 +285,12 @@ mod tests {
 
     #[test]
     fn parse_logout_args_accepts_color_modes() {
-        let args = parse_logout_args(&["--color".to_string(), "always".to_string(), "-f".to_string()])
-            .expect("args");
+        let args = parse_logout_args(&[
+            "--color".to_string(),
+            "always".to_string(),
+            "-f".to_string(),
+        ])
+        .expect("args");
         assert!(args.force);
 
         let args = parse_logout_args(&["--color=never".to_string()]).expect("args");
@@ -319,12 +313,7 @@ mod tests {
 
     #[test]
     fn maybe_remote_logout_handles_all_key_paths() {
-        maybe_remote_logout(
-            || None,
-            noop_load_session,
-            noop_logout,
-        )
-        .expect("no key");
+        maybe_remote_logout(|| None, noop_load_session, noop_logout).expect("no key");
         let _ = noop_load_session(&[0u8; KDF_HASH_LEN]).expect("noop");
         let noop_session = Session {
             uid: "u".to_string(),
@@ -344,12 +333,8 @@ mod tests {
         .expect_err("load error");
         assert_eq!(err, "load failed");
 
-        let err = maybe_remote_logout(
-            || Some([7u8; KDF_HASH_LEN]),
-            |_key| Ok(None),
-            noop_logout,
-        )
-        .expect_err("missing session");
+        let err = maybe_remote_logout(|| Some([7u8; KDF_HASH_LEN]), |_key| Ok(None), noop_logout)
+            .expect_err("missing session");
         assert!(err.contains("Could not find session"));
 
         let called = Cell::new(false);
@@ -386,11 +371,9 @@ mod tests {
         lastpass_logout_with_client(&real, "token", Some(&session));
         lastpass_logout("token", Some(&session));
 
-        lastpass_logout_with_factory(
-            "token",
-            Some(&session),
-            || Err(crate::error::LpassError::Crypto("factory failed")),
-        );
+        lastpass_logout_with_factory("token", Some(&session), || {
+            Err(crate::error::LpassError::Crypto("factory failed"))
+        });
         lastpass_logout_with_factory("token", Some(&session), || Ok(HttpClient::mock()));
     }
 

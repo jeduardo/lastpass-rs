@@ -307,7 +307,10 @@ mod tests {
     fn decrypt_private_key_rejects_invalid_formats() {
         let key = [13u8; 32];
         let err = decrypt_private_key("abc", &key).expect_err("odd hex must fail");
-        assert!(matches!(err, LpassError::Crypto("invalid private key format")));
+        assert!(matches!(
+            err,
+            LpassError::Crypto("invalid private key format")
+        ));
 
         let err = decrypt_private_key("zz", &key).expect_err("invalid hex must fail");
         assert!(matches!(err, LpassError::Crypto("invalid private key")));

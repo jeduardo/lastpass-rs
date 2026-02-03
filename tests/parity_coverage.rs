@@ -1,6 +1,6 @@
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -66,7 +66,13 @@ fn login_agent_status_ls_show_and_logout_cycle() {
     let login = run(
         &home,
         Some(&askpass),
-        &["login", "--trust", "--plaintext-key", "--force", "user@example.com"],
+        &[
+            "login",
+            "--trust",
+            "--plaintext-key",
+            "--force",
+            "user@example.com",
+        ],
     );
     assert_eq!(
         login.status.code().unwrap_or(-1),
@@ -88,7 +94,11 @@ fn login_agent_status_ls_show_and_logout_cycle() {
         String::from_utf8_lossy(&status_verbose.stdout)
     );
 
-    let ls = run(&home, None, &["ls", "--sync=no", "--long", "-u", "--color=never"]);
+    let ls = run(
+        &home,
+        None,
+        &["ls", "--sync=no", "--long", "-u", "--color=never"],
+    );
     assert_eq!(ls.status.code().unwrap_or(-1), 0);
     let ls_out = String::from_utf8_lossy(&ls.stdout);
     assert!(ls_out.contains("test-group/test-account"), "{ls_out}");
@@ -140,7 +150,11 @@ fn login_warning_failure_and_option_error_paths() {
         String::from_utf8_lossy(&ls_bad_args.stderr)
     );
 
-    let missing_field = run(&home, None, &["show", "--field=Missing", "test-group/test-note"]);
+    let missing_field = run(
+        &home,
+        None,
+        &["show", "--field=Missing", "test-group/test-note"],
+    );
     assert_eq!(missing_field.status.code().unwrap_or(-1), 1);
     assert!(
         String::from_utf8_lossy(&missing_field.stderr).contains("Could not find specified field"),
@@ -148,7 +162,11 @@ fn login_warning_failure_and_option_error_paths() {
         String::from_utf8_lossy(&missing_field.stderr)
     );
 
-    let show_attach = run(&home, None, &["show", "--attach=1", "test-group/test-account"]);
+    let show_attach = run(
+        &home,
+        None,
+        &["show", "--attach=1", "test-group/test-account"],
+    );
     assert_eq!(show_attach.status.code().unwrap_or(-1), 0);
 
     let status_bad = run(&home, None, &["status", "unexpected"]);

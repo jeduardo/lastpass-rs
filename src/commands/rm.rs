@@ -15,8 +15,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage =
-        "usage: rm [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
+    let usage = "usage: rm [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
     let mut name: Option<String> = None;
 
     let mut iter = args.iter().peekable();
@@ -135,10 +134,7 @@ mod tests {
             account("1", "alpha", "group/alpha"),
             account("2", "beta", "group/beta"),
         ];
-        assert_eq!(
-            find_unique_account_index(&accounts, "2").expect("id"),
-            1
-        );
+        assert_eq!(find_unique_account_index(&accounts, "2").expect("id"), 1);
         assert_eq!(
             find_unique_account_index(&accounts, "group/alpha").expect("fullname"),
             0

@@ -71,15 +71,29 @@ fn add_edit_duplicate_generate_and_export_flow() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
 
-    let add_in = "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\nNotes:\ninitial note\n";
-    let add_out = run(&home, &["add", "--sync=no", "--non-interactive", "team/service-one"], Some(add_in));
+    let add_in =
+        "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\nNotes:\ninitial note\n";
+    let add_out = run(
+        &home,
+        &["add", "--sync=no", "--non-interactive", "team/service-one"],
+        Some(add_in),
+    );
     assert_eq!(add_out.status.code().unwrap_or(-1), 0);
 
-    let show_id = run(&home, &["show", "--sync=no", "--id", "team/service-one"], None);
+    let show_id = run(
+        &home,
+        &["show", "--sync=no", "--id", "team/service-one"],
+        None,
+    );
     assert_eq!(show_id.status.code().unwrap_or(-1), 0);
     let original_id = String::from_utf8_lossy(&show_id.stdout).trim().to_string();
+    assert_eq!(original_id, "0");
 
-    let show_pw = run(&home, &["show", "--sync=no", "--password", "team/service-one"], None);
+    let show_pw = run(
+        &home,
+        &["show", "--sync=no", "--password", "team/service-one"],
+        None,
+    );
     assert_eq!(String::from_utf8_lossy(&show_pw.stdout).trim(), "pass-a");
 
     let edit_user = run(
@@ -89,22 +103,18 @@ fn add_edit_duplicate_generate_and_export_flow() {
             "--sync=no",
             "--username",
             "--non-interactive",
-            &original_id,
+            "team/service-one",
         ],
         Some("user-b\n"),
     );
     assert_eq!(edit_user.status.code().unwrap_or(-1), 0);
 
-    let show_user = run(&home, &["show", "--sync=no", "--username", &original_id], None);
+    let show_user = run(
+        &home,
+        &["show", "--sync=no", "--username", "team/service-one"],
+        None,
+    );
     assert_eq!(String::from_utf8_lossy(&show_user.stdout).trim(), "user-b");
-
-    let dup_out = run(&home, &["duplicate", "--sync=no", "team/service-one"], None);
-    assert_eq!(dup_out.status.code().unwrap_or(-1), 0);
-
-    let ls_out = run(&home, &["ls", "--sync=no", "--color=never"], None);
-    assert_eq!(ls_out.status.code().unwrap_or(-1), 0);
-    let ls_text = String::from_utf8_lossy(&ls_out.stdout);
-    assert!(ls_text.matches("team/service-one").count() >= 2, "{ls_text}");
 
     let gen_existing = run(
         &home,
@@ -113,22 +123,48 @@ fn add_edit_duplicate_generate_and_export_flow() {
             "--sync=no",
             "--username=gen-user",
             "--url=https://gen.example.com",
-            &original_id,
+            "team/service-one",
             "20",
         ],
         None,
     );
     assert_eq!(gen_existing.status.code().unwrap_or(-1), 0);
 
-    let show_user2 = run(&home, &["show", "--sync=no", "--username", &original_id], None);
-    assert_eq!(String::from_utf8_lossy(&show_user2.stdout).trim(), "gen-user");
-    let show_url = run(&home, &["show", "--sync=no", "--url", &original_id], None);
+    let show_user2 = run(
+        &home,
+        &["show", "--sync=no", "--username", "team/service-one"],
+        None,
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&show_user2.stdout).trim(),
+        "gen-user"
+    );
+    let show_url = run(
+        &home,
+        &["show", "--sync=no", "--url", "team/service-one"],
+        None,
+    );
     assert_eq!(
         String::from_utf8_lossy(&show_url.stdout).trim(),
         "https://gen.example.com"
     );
-    let show_pw2 = run(&home, &["show", "--sync=no", "--password", &original_id], None);
+    let show_pw2 = run(
+        &home,
+        &["show", "--sync=no", "--password", "team/service-one"],
+        None,
+    );
     assert_eq!(String::from_utf8_lossy(&show_pw2.stdout).trim().len(), 20);
+
+    let dup_out = run(&home, &["duplicate", "--sync=no", "team/service-one"], None);
+    assert_eq!(dup_out.status.code().unwrap_or(-1), 0);
+
+    let ls_out = run(&home, &["ls", "--sync=no", "--color=never"], None);
+    assert_eq!(ls_out.status.code().unwrap_or(-1), 0);
+    let ls_text = String::from_utf8_lossy(&ls_out.stdout);
+    assert!(
+        ls_text.matches("team/service-one").count() >= 2,
+        "{ls_text}"
+    );
 
     let gen_new = run(
         &home,
@@ -148,7 +184,10 @@ fn add_edit_duplicate_generate_and_export_flow() {
         &["show", "--sync=no", "--password", "team/new-generated"],
         None,
     );
-    assert_eq!(String::from_utf8_lossy(&show_new_pw.stdout).trim().len(), 16);
+    assert_eq!(
+        String::from_utf8_lossy(&show_new_pw.stdout).trim().len(),
+        16
+    );
 
     let export = run(
         &home,
@@ -188,7 +227,10 @@ fn secure_note_edit_paths_work() {
         &["show", "--sync=no", "--field=Number", "secure-note"],
         None,
     );
-    assert_eq!(String::from_utf8_lossy(&show_number.stdout).trim(), "000-00-0000");
+    assert_eq!(
+        String::from_utf8_lossy(&show_number.stdout).trim(),
+        "000-00-0000"
+    );
 
     let edit_field = run(
         &home,
@@ -207,7 +249,10 @@ fn secure_note_edit_paths_work() {
         &["show", "--sync=no", "--field=Number", "secure-note"],
         None,
     );
-    assert_eq!(String::from_utf8_lossy(&show_number2.stdout).trim(), "111-11-1111");
+    assert_eq!(
+        String::from_utf8_lossy(&show_number2.stdout).trim(),
+        "111-11-1111"
+    );
 
     let edit_any = run(
         &home,
@@ -229,18 +274,28 @@ fn usage_and_error_paths_are_reported() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
 
-    let add_no_non_interactive = run(&home, &["add", "x"], Some("Name: x\n"));
-    assert_eq!(add_no_non_interactive.status.code().unwrap_or(-1), 1);
+    let add_bad_choice = run(
+        &home,
+        &["add", "--username", "--password", "x"],
+        Some("v\n"),
+    );
+    assert_eq!(add_bad_choice.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&add_no_non_interactive.stderr)
-            .contains("interactive add not implemented")
+        String::from_utf8_lossy(&add_bad_choice.stderr).contains("--username|--password"),
+        "stderr: {}",
+        String::from_utf8_lossy(&add_bad_choice.stderr)
     );
 
-    let edit_no_non_interactive = run(&home, &["edit", "--username", "x"], Some("u\n"));
-    assert_eq!(edit_no_non_interactive.status.code().unwrap_or(-1), 1);
+    let edit_bad_choice = run(
+        &home,
+        &["edit", "--username", "--password", "x"],
+        Some("u\n"),
+    );
+    assert_eq!(edit_bad_choice.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&edit_no_non_interactive.stderr)
-            .contains("interactive edit not implemented")
+        String::from_utf8_lossy(&edit_bad_choice.stderr).contains("usage: edit"),
+        "stderr: {}",
+        String::from_utf8_lossy(&edit_bad_choice.stderr)
     );
 
     let duplicate_bad = run(&home, &["duplicate", "--bogus"], None);
@@ -265,7 +320,9 @@ fn usage_and_error_paths_are_reported() {
 
     let rm_missing = run(&home, &["rm", "x"], None);
     assert_eq!(rm_missing.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&rm_missing.stderr).contains("Could not find specified account"));
+    assert!(
+        String::from_utf8_lossy(&rm_missing.stderr).contains("Could not find specified account")
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -287,7 +344,10 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
     assert_eq!(mv_out.status.code().unwrap_or(-1), 0);
     let show_name = run(&home, &["show", "--name", "ops/service-one"], None);
     assert_eq!(show_name.status.code().unwrap_or(-1), 0);
-    assert_eq!(String::from_utf8_lossy(&show_name.stdout).trim(), "service-one");
+    assert_eq!(
+        String::from_utf8_lossy(&show_name.stdout).trim(),
+        "service-one"
+    );
 
     let rm_out = run(&home, &["rm", "ops/service-one"], None);
     assert_eq!(rm_out.status.code().unwrap_or(-1), 0);
@@ -298,7 +358,10 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
     let import_out = run(&home, &["import", "--keep-dupes"], Some(csv));
     assert_eq!(import_out.status.code().unwrap_or(-1), 0);
     let import_stdout = String::from_utf8_lossy(&import_out.stdout);
-    assert!(import_stdout.contains("Parsed 1 accounts"), "{import_stdout}");
+    assert!(
+        import_stdout.contains("Parsed 1 accounts"),
+        "{import_stdout}"
+    );
 
     let sync_out = run(&home, &["sync", "--background"], None);
     assert_eq!(sync_out.status.code().unwrap_or(-1), 0);
@@ -310,7 +373,12 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
 
     let show_fmt = run(
         &home,
-        &["show", "--format=%fn=%fv", "--title-format=%an", "team/entry1"],
+        &[
+            "show",
+            "--format=%fn=%fv",
+            "--title-format=%an",
+            "team/entry1",
+        ],
         None,
     );
     assert_eq!(show_fmt.status.code().unwrap_or(-1), 0);

@@ -98,9 +98,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let fullname = if print_tree { 'n' } else { 'N' };
     let username = if long_listing { " [username: %au]" } else { "" };
     let format = output_format.unwrap_or_else(|| {
-        format!(
-            "{FG_CYAN}{mtime}{FG_GREEN}{BOLD}%a{fullname}{NO_BOLD} [id: %ai]{username}{RESET}"
-        )
+        format!("{FG_CYAN}{mtime}{FG_GREEN}{BOLD}%a{fullname}{NO_BOLD} [id: %ai]{username}{RESET}")
     });
 
     if print_tree {
@@ -325,7 +323,14 @@ mod tests {
 
     #[test]
     fn matches_group_handles_prefix_and_separator_rules() {
-        let account = account("1", None, "team/sub", "entry", "team/sub/entry", "https://x");
+        let account = account(
+            "1",
+            None,
+            "team/sub",
+            "entry",
+            "team/sub/entry",
+            "https://x",
+        );
         assert!(matches_group(&account, Some("team")));
         assert!(matches_group(&account, Some("team/sub")));
         assert!(matches_group(&account, Some("team/sub/")));

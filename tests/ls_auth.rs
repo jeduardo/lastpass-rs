@@ -26,7 +26,9 @@ fn ls_without_login_shows_upstream_style_error() {
     assert_eq!(output.status.code().unwrap_or(-1), 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Could not find decryption key. Perhaps you need to login with `lpass login`."),
+        stderr.contains(
+            "Could not find decryption key. Perhaps you need to login with `lpass login`."
+        ),
         "stderr: {stderr}"
     );
     assert!(
@@ -36,4 +38,3 @@ fn ls_without_login_shows_upstream_style_error() {
 
     let _ = fs::remove_dir_all(&test_home);
 }
-

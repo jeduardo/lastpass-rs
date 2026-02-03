@@ -273,6 +273,17 @@ pub fn note_has_field(note_type: NoteType, field: &str) -> bool {
     template.fields.iter().any(|name| name == &field)
 }
 
+pub fn note_type_fields(note_type: NoteType) -> &'static [&'static str] {
+    if note_type == NoteType::None {
+        return &[];
+    }
+    let idx = note_type.to_index();
+    NOTE_TEMPLATES
+        .get(idx)
+        .map(|template| template.fields)
+        .unwrap_or(&[])
+}
+
 pub fn note_field_is_multiline(note_type: NoteType, field: &str) -> bool {
     note_type == NoteType::SshKey && field == "Private Key"
 }
@@ -621,7 +632,10 @@ mod tests {
         assert_eq!(note_type_by_name(" social security "), NoteType::Ssn);
         assert_eq!(note_type_by_name("missing"), NoteType::None);
 
-        assert_eq!(note_type_display_name(NoteType::Wifi), Some("Wi-Fi Password"));
+        assert_eq!(
+            note_type_display_name(NoteType::Wifi),
+            Some("Wi-Fi Password")
+        );
         assert_eq!(note_type_display_name(NoteType::None), None);
 
         let usage = note_type_usage();
