@@ -340,6 +340,10 @@ fn sync_without_mock_reaches_server_fetch_path_and_reports_network_error() {
         String::from_utf8_lossy(&login.stderr)
     );
 
+    // Force a local unroutable endpoint so this test exercises non-mock code
+    // without contacting the real LastPass service.
+    fs::write(home.join("session_server"), "127.0.0.1:1").expect("set local server");
+
     let sync = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env_remove("LPASS_HTTP_MOCK")

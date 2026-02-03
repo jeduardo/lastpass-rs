@@ -3,7 +3,7 @@
 [![CI](https://github.com/jeduardo/lastpass-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jeduardo/lastpass-rs/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jeduardo/lastpass-rs/branch/main/graph/badge.svg)](https://codecov.io/gh/jeduardo/lastpass-rs)
 
-A Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
+An unofficial Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
 
   ⚠️ **WARNING** ⚠️ **Alpha software:** 
   This project is under heavy active development.
@@ -101,9 +101,10 @@ Per-command checklist:
 
 - `logout`
 
-  - default behavior and local session cleanup: :white_check_mark: (basic parity)
+  - default behavior and local session cleanup: :white_check_mark:
+  - remote logout flow (`agent_ask` gated, best-effort server call): :white_check_mark:
   - `--force/-f`, `--color`: :white_check_mark:
-  - exact interactive prompt text parity: TODO
+  - exact interactive prompt text parity: :white_check_mark:
 
 - `add`
 

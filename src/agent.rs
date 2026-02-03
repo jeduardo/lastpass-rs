@@ -151,6 +151,10 @@ pub fn agent_kill() -> Result<()> {
     }
 }
 
+pub fn agent_try_ask_decryption_key() -> Result<[u8; KDF_HASH_LEN]> {
+    agent_ask()
+}
+
 fn verify_key(key: &[u8; KDF_HASH_LEN]) -> Result<bool> {
     match config_read_encrypted_string("verify", key)? {
         Some(value) => Ok(value == VERIFY_STRING),
