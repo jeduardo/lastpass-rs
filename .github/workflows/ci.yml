@@ -152,7 +152,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.asset_name }}
-          path: dist/lpass-${{ matrix.asset_name }}*
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
           if-no-files-found: error
 
   release-latest:
@@ -183,4 +185,6 @@ jobs:
           body: |
             Rolling release built from main.
             Commit: ${{ github.sha }}
-          artifacts: dist/*
+          artifacts: |
+            dist/*.tar.gz
+            dist/*.zip
