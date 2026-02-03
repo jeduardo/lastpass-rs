@@ -12,11 +12,15 @@ fn unique_test_home() -> PathBuf {
     std::env::temp_dir().join(format!("lpass-command-cov-{nanos}"))
 }
 
-fn run(home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
+fn run_with_mock(home: &Path, args: &[&str], stdin: Option<&str>, http_mock: bool) -> Output {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let mut command = Command::new(exe);
     command.env("LPASS_HOME", home);
-    command.env("LPASS_HTTP_MOCK", "1");
+    if http_mock {
+        command.env("LPASS_HTTP_MOCK", "1");
+    } else {
+        command.env_remove("LPASS_HTTP_MOCK");
+    }
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
     command.args(args);
@@ -37,12 +41,27 @@ fn run(home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
     }
 }
 
+fn run(home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
+    run_with_mock(home, args, stdin, true)
+}
+
 #[cfg(unix)]
 fn write_askpass(home: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let askpass = home.join("askpass.sh");
     fs::write(&askpass, "#!/bin/sh\necho 123456\n").expect("write askpass");
+    fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
+    askpass
+}
+
+#[cfg(unix)]
+fn write_askpass_value(home: &Path, value: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let askpass = home.join("askpass-value.sh");
+    let script = format!("#!/bin/sh\necho {value}\n");
+    fs::write(&askpass, script).expect("write askpass");
     fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
     askpass
 }
@@ -244,9 +263,96 @@ fn usage_and_error_paths_are_reported() {
     assert_eq!(show_bad.status.code().unwrap_or(-1), 1);
     assert!(String::from_utf8_lossy(&show_bad.stderr).contains("usage: show"));
 
-    let not_impl = run(&home, &["rm", "x"], None);
-    assert_eq!(not_impl.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&not_impl.stderr).contains("not implemented"));
+    let rm_missing = run(&home, &["rm", "x"], None);
+    assert_eq!(rm_missing.status.code().unwrap_or(-1), 1);
+    assert!(String::from_utf8_lossy(&rm_missing.stderr).contains("Could not find specified account"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let add_in = "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\n";
+    let add_out = run(
+        &home,
+        &["add", "--sync=no", "--non-interactive", "team/service-one"],
+        Some(add_in),
+    );
+    assert_eq!(add_out.status.code().unwrap_or(-1), 0);
+
+    let mv_out = run(&home, &["mv", "team/service-one", "ops"], None);
+    assert_eq!(mv_out.status.code().unwrap_or(-1), 0);
+    let show_name = run(&home, &["show", "--name", "ops/service-one"], None);
+    assert_eq!(show_name.status.code().unwrap_or(-1), 0);
+    assert_eq!(String::from_utf8_lossy(&show_name.stdout).trim(), "service-one");
+
+    let rm_out = run(&home, &["rm", "ops/service-one"], None);
+    assert_eq!(rm_out.status.code().unwrap_or(-1), 0);
+    let show_removed = run(&home, &["show", "ops/service-one"], None);
+    assert_eq!(show_removed.status.code().unwrap_or(-1), 1);
+
+    let csv = "url,username,password,extra,name,grouping,fav\nhttps://one.example.com,u1,p1,n1,entry1,team,1\n";
+    let import_out = run(&home, &["import", "--keep-dupes"], Some(csv));
+    assert_eq!(import_out.status.code().unwrap_or(-1), 0);
+    let import_stdout = String::from_utf8_lossy(&import_out.stdout);
+    assert!(import_stdout.contains("Parsed 1 accounts"), "{import_stdout}");
+
+    let sync_out = run(&home, &["sync", "--background"], None);
+    assert_eq!(sync_out.status.code().unwrap_or(-1), 0);
+
+    let ls_fmt = run(&home, &["ls", "--color=never", "--format", "%an"], None);
+    assert_eq!(ls_fmt.status.code().unwrap_or(-1), 0);
+    let ls_fmt_stdout = String::from_utf8_lossy(&ls_fmt.stdout);
+    assert!(ls_fmt_stdout.contains("entry1"), "{ls_fmt_stdout}");
+
+    let show_fmt = run(
+        &home,
+        &["show", "--format=%fn=%fv", "--title-format=%an", "team/entry1"],
+        None,
+    );
+    assert_eq!(show_fmt.status.code().unwrap_or(-1), 0);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_without_mock_reaches_server_fetch_path_and_reports_network_error() {
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let askpass = write_askpass_value(&home, "123456");
+
+    let login = Command::new(exe)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_HOME", &home)
+        .env("LPASS_ASKPASS", &askpass)
+        .args(["login", "user@example.com"])
+        .output()
+        .expect("run login");
+    assert_eq!(
+        login.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+
+    let sync = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env_remove("LPASS_HTTP_MOCK")
+        .env("LPASS_ASKPASS", &askpass)
+        .arg("sync")
+        .output()
+        .expect("run sync");
+    assert_eq!(sync.status.code().unwrap_or(-1), 1);
+    let stderr = String::from_utf8_lossy(&sync.stderr);
+    assert!(
+        stderr.contains("http post") || stderr.contains("Unable to fetch blob"),
+        "{stderr}"
+    );
 
     let _ = fs::remove_dir_all(&home);
 }

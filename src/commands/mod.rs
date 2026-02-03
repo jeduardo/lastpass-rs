@@ -6,11 +6,15 @@ mod duplicate;
 mod edit;
 mod export;
 mod generate;
+mod import;
 mod login;
 mod logout;
 mod ls;
+mod mv;
+mod rm;
 mod show;
 mod status;
+mod sync;
 
 pub fn run(command: &str, args: &[String]) -> i32 {
     match command {
@@ -19,12 +23,16 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "duplicate" => duplicate::run(args),
         "export" => export::run(args),
         "generate" => generate::run(args),
+        "import" => import::run(args),
         "login" => login::run(args),
         "logout" => logout::run(args),
         "show" => show::run(args),
         "ls" => ls::run(args),
+        "mv" => mv::run(args),
+        "rm" => rm::run(args),
         "status" => status::run(args),
-        "passwd" | "mv" | "rm" | "sync" | "import" | "share" => not_implemented(command),
+        "sync" => sync::run(args),
+        "passwd" | "share" => not_implemented(command),
         _ => 1,
     }
 }

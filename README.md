@@ -29,6 +29,7 @@ The original C implementation is kept in `lastpass-cli/` and is used as the refe
 Implemented (working, with ongoing parity improvements):
 
 - `login`
+- `logout`
 - `status`
 - `ls`
 - `show`
@@ -37,15 +38,14 @@ Implemented (working, with ongoing parity improvements):
 - `duplicate`
 - `generate`
 - `export`
-
-Planned / not fully implemented yet:
-
-- `logout`
-- `passwd`
 - `mv`
 - `rm`
 - `sync`
 - `import`
+
+Planned / not fully implemented yet:
+
+- `passwd`
 - `share`
 
 ## Implementation status
@@ -53,6 +53,7 @@ Planned / not fully implemented yet:
 Audit source of truth:
 
 - `lastpass-cli/cmd-login.c`
+- `lastpass-cli/cmd-logout.c`
 - `lastpass-cli/cmd-status.c`
 - `lastpass-cli/cmd-ls.c`
 - `lastpass-cli/cmd-show.c`
@@ -61,6 +62,10 @@ Audit source of truth:
 - `lastpass-cli/cmd-duplicate.c`
 - `lastpass-cli/cmd-generate.c`
 - `lastpass-cli/cmd-export.c`
+- `lastpass-cli/cmd-mv.c`
+- `lastpass-cli/cmd-rm.c`
+- `lastpass-cli/cmd-sync.c`
+- `lastpass-cli/cmd-import.c`
 
 Per-command checklist:
 
@@ -81,7 +86,7 @@ Per-command checklist:
   - default list output: :white_check_mark:
   - `--color`: :white_check_mark:
   - `--long/-l`, `-m`, `-u` exact behavior parity: TODO
-  - `--format/-f`: TODO
+  - `--format/-f`: :white_check_mark: (basic parity)
   - positional `GROUP` filtering (including `(none)`): TODO
   - tree/shared-folder rendering parity with C client: TODO
 
@@ -91,8 +96,14 @@ Per-command checklist:
   - `--color`: :white_check_mark:
   - `--attach`, `--clip`: TODO
   - `--basic-regexp/-G`, `--fixed-strings/-F`, `--expand-multi/-x`: TODO
-  - `--title-format/-t`, `--format/-o`: TODO
+  - `--title-format/-t`, `--format/-o`: :white_check_mark: (basic parity)
   - strict multi-match behavior/output parity: TODO
+
+- `logout`
+
+  - default behavior and local session cleanup: :white_check_mark: (basic parity)
+  - `--force/-f`, `--color`: :white_check_mark:
+  - exact interactive prompt text parity: TODO
 
 - `add`
 
@@ -124,6 +135,30 @@ Per-command checklist:
   - default export and `--fields`: :white_check_mark: (basic parity)
   - `--fields` validation parity: TODO
   - protected-entry reprompt/auth parity: TODO
+
+- `mv`
+
+  - default move behavior by ID/name: :white_check_mark: (basic parity)
+  - `--sync`, `--color`: :white_check_mark:
+  - shared-folder move semantics parity: TODO
+
+- `rm`
+
+  - default remove behavior by ID/name: :white_check_mark: (basic parity)
+  - `--sync`, `--color`: :white_check_mark:
+  - readonly shared-entry delete parity: TODO
+
+- `sync`
+
+  - default path and `--background/-b`: :white_check_mark: (basic parity)
+  - `--color`: :white_check_mark:
+  - uploader/background queue parity with C client: TODO
+
+- `import`
+
+  - stdin/file CSV input and `--keep-dupes`: :white_check_mark: (basic parity)
+  - core header mapping (`url,username,password,extra,name,grouping,fav`): :white_check_mark:
+  - full API/upload parity and CSV edge cases: TODO
 
 - Cross-cutting
   - strict C-like option parsing errors for unknown/invalid flags: TODO

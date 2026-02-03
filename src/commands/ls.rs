@@ -26,6 +26,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut show_mtime = true;
     let mut group: Option<String> = None;
     let mut color_mode = terminal::ColorMode::Auto;
+    let mut output_format: Option<String> = None;
 
     while let Some(arg) = iter.next() {
         if arg == "--sync" {
@@ -45,6 +46,15 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         }
         if arg == "-u" {
             show_mtime = false;
+            continue;
+        }
+        if arg == "--format" || arg == "-f" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            output_format = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--format=") {
+            output_format = Some(value.to_string());
             continue;
         }
         if arg == "--color" {
@@ -87,8 +97,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     };
     let fullname = if print_tree { 'n' } else { 'N' };
     let username = if long_listing { " [username: %au]" } else { "" };
-    let format =
-        format!("{FG_CYAN}{mtime}{FG_GREEN}{BOLD}%a{fullname}{NO_BOLD} [id: %ai]{username}{RESET}");
+    let format = output_format.unwrap_or_else(|| {
+        format!(
+            "{FG_CYAN}{mtime}{FG_GREEN}{BOLD}%a{fullname}{NO_BOLD} [id: %ai]{username}{RESET}"
+        )
+    });
 
     if print_tree {
         let mut root = LsNode::default();
@@ -355,6 +368,9 @@ mod tests {
     #[test]
     fn run_inner_rejects_invalid_option_combinations() {
         let err = run_inner(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: ls"));
+
+        let err = run_inner(&["--format".to_string()]).expect_err("missing format value");
         assert!(err.contains("usage: ls"));
 
         let err = run_inner(&["--bogus".to_string()]).expect_err("unknown flag");

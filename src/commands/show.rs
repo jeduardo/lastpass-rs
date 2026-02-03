@@ -34,6 +34,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut field_name: Option<String> = None;
     let mut json = false;
     let mut names: Vec<String> = Vec::new();
+    let mut title_format_override: Option<String> = None;
+    let mut field_format_override: Option<String> = None;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -63,6 +65,16 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             if let Some(next) = iter.next() {
                 field_name = Some(next.clone());
             }
+        } else if arg == "--format" || arg == "-o" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            field_format_override = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            field_format_override = Some(value.to_string());
+        } else if arg == "--title-format" || arg == "-t" {
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            title_format_override = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--title-format=") {
+            title_format_override = Some(value.to_string());
         } else if arg.starts_with("--sync=") {
             // ignored
         } else if arg == "--sync" || arg == "-S" {
@@ -100,9 +112,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         return Err(usage.to_string());
     }
 
-    let title_format =
-        format!("{FG_CYAN}%/as{RESET}{FG_BLUE}%/ag{BOLD}%an{RESET}{FG_GREEN} [id: %ai]{RESET}");
-    let field_format = format!("{FG_YELLOW}%fn{RESET}: %fv");
+    let title_format = title_format_override.unwrap_or_else(|| {
+        format!("{FG_CYAN}%/as{RESET}{FG_BLUE}%/ag{BOLD}%an{RESET}{FG_GREEN} [id: %ai]{RESET}")
+    });
+    let field_format =
+        field_format_override.unwrap_or_else(|| format!("{FG_YELLOW}%fn{RESET}: %fv"));
 
     let blob = load_blob().map_err(|err| format!("{err}"))?;
     let matches = find_matches(&blob.accounts, &names);
@@ -387,5 +401,7 @@ mod tests {
         assert!(run_inner(&[]).is_err());
         assert!(run_inner(&["--bogus".to_string()]).is_err());
         assert!(run_inner(&["--field".to_string()]).is_err());
+        assert!(run_inner(&["--format".to_string()]).is_err());
+        assert!(run_inner(&["--title-format".to_string()]).is_err());
     }
 }
