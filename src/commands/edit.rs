@@ -515,16 +515,7 @@ fn parse_update_input(raw: &str, note_type: NoteType) -> ParsedUpdate {
         let value = value.trim_start().to_string();
 
         if key == "Notes" {
-            let mut note_value = value;
-            if idx + 1 < lines.len() {
-                let rest = lines[idx + 1..].join("\n");
-                if !rest.is_empty() {
-                    if !note_value.is_empty() {
-                        note_value.push('\n');
-                    }
-                    note_value.push_str(&rest);
-                }
-            }
+            let note_value = lines[idx + 1..].join("\n");
             update.note = Some(note_value);
             break;
         }
@@ -781,13 +772,22 @@ mod tests {
         assert_eq!(parsed.url.as_deref(), Some("https://u"));
         assert_eq!(parsed.fullname.as_deref(), Some("grp/item"));
         assert_eq!(parsed.reprompt, Some(true));
-        assert_eq!(parsed.note.as_deref(), Some("note1\nnote2"));
+        assert_eq!(parsed.note.as_deref(), Some("note2"));
         assert!(
             parsed
                 .fields
                 .iter()
                 .any(|(name, value)| { name == "Private Key" && value == "line1\nline2" })
         );
+    }
+
+    #[test]
+    fn parse_update_input_ignores_notes_inline_comment_value() {
+        let parsed = parse_update_input(
+            "Notes:    # Add notes below this line.\nupdated body",
+            NoteType::None,
+        );
+        assert_eq!(parsed.note.as_deref(), Some("updated body"));
     }
 
     #[test]

@@ -257,7 +257,7 @@ fn secure_note_edit_paths_work() {
     let edit_any = run(
         &home,
         &["edit", "--sync=no", "--non-interactive", "secure-note"],
-        Some("Reprompt: Yes\nNotes: updated note"),
+        Some("Reprompt: Yes\nNotes:\nupdated note"),
     );
     assert_eq!(edit_any.status.code().unwrap_or(-1), 0);
 

@@ -13,6 +13,7 @@ use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, decrypt_privat
 use crate::error::{LpassError, Result};
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
+use crate::session::Session;
 use brotli::Decompressor as BrotliDecoder;
 use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use serde_json;
@@ -93,7 +94,50 @@ pub(crate) fn maybe_push_account_update(account: &Account, sync_mode: SyncMode) 
         ))?;
     let client = HttpClient::from_env()?;
 
-    let params = build_show_website_params(account, &session.token, &key)?;
+    let params = build_show_website_params(account, &session, &key)?;
+    let params_ref: Vec<(&str, &str)> = params
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    let response = client.post_lastpass(None, "show_website.php", Some(&session), &params_ref)?;
+    if response.status >= 400 {
+        return Err(LpassError::User("Server rejected account update."));
+    }
+
+    if matches!(sync_mode, SyncMode::Now) {
+        refresh_blob_from_server(&client, &session, &key)?;
+    } else if should_refresh_after_update(sync_mode, &account.id) {
+        let _ = refresh_blob_from_server(&client, &session, &key);
+    }
+
+    Ok(())
+}
+
+pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) -> Result<()> {
+    if matches!(sync_mode, SyncMode::No) {
+        return Ok(());
+    }
+    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+        return Ok(());
+    }
+
+    let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
+    let session = crate::session::session_load(&key)
+        .map_err(map_decryption_key_error)?
+        .ok_or(LpassError::User(
+            "Could not find session. Perhaps you need to login with `lpass login`.",
+        ))?;
+    let client = HttpClient::from_env()?;
+
+    let mut params = vec![
+        ("extjs".to_string(), "1".to_string()),
+        ("token".to_string(), session.token.clone()),
+        ("delete".to_string(), "1".to_string()),
+        ("aid".to_string(), account.id.clone()),
+    ];
+    if session.url_logging_enabled {
+        params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
+    }
     let params_ref: Vec<(&str, &str)> = params
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -144,12 +188,12 @@ fn refresh_blob_from_server(
 
 fn build_show_website_params(
     account: &Account,
-    token: &str,
+    session: &Session,
     key: &[u8; KDF_HASH_LEN],
 ) -> Result<Vec<(String, String)>> {
     let mut params = vec![
         ("extjs".to_string(), "1".to_string()),
-        ("token".to_string(), token.to_string()),
+        ("token".to_string(), session.token.clone()),
         ("method".to_string(), "cli".to_string()),
         ("name".to_string(), encrypt_and_encode(&account.name, key)?),
         (
@@ -177,15 +221,33 @@ fn build_show_website_params(
             encrypt_and_encode(&account.password, key)?,
         ),
         ("extra".to_string(), encrypt_and_encode(&account.note, key)?),
-        ("url".to_string(), hex::encode(account.url.as_bytes())),
+        (
+            "url".to_string(),
+            if session.url_encryption_enabled && !is_secure_note(account) {
+                encrypt_and_encode(&account.url, key)?
+            } else {
+                hex::encode(account.url.as_bytes())
+            },
+        ),
     ];
 
     if let Some(field_data) = stringify_fields_data(&account.fields, key)? {
         params.push(("save_all".to_string(), "1".to_string()));
         params.push(("data".to_string(), field_data));
     }
+    if session.url_logging_enabled {
+        params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
+    }
 
     Ok(params)
+}
+
+fn is_secure_note(account: &Account) -> bool {
+    account.url == "http://sn"
+}
+
+fn should_refresh_after_update(sync_mode: SyncMode, account_id: &str) -> bool {
+    matches!(sync_mode, SyncMode::Auto) && account_id == "0"
 }
 
 fn encrypt_and_encode(value: &str, key: &[u8; KDF_HASH_LEN]) -> Result<String> {
@@ -615,13 +677,71 @@ mod tests {
             fields: Vec::new(),
         };
         let key = [3u8; KDF_HASH_LEN];
-        let params = build_show_website_params(&account, "tok", &key).expect("params");
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let params = build_show_website_params(&account, &session, &key).expect("params");
         assert!(params.iter().any(|(k, _)| k == "extjs"));
         assert!(params.iter().any(|(k, _)| k == "token"));
         assert!(params.iter().any(|(k, _)| k == "aid"));
         assert!(params.iter().any(|(k, _)| k == "name"));
         assert!(params.iter().any(|(k, _)| k == "password"));
         assert!(params.iter().any(|(k, _)| k == "url"));
+    }
+
+    #[test]
+    fn build_show_website_params_uses_encrypted_url_when_feature_enabled() {
+        let account = Account {
+            id: "0".to_string(),
+            share_name: None,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let key = [6u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: true,
+            url_logging_enabled: true,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let params = build_show_website_params(&account, &session, &key).expect("params");
+        let url = params
+            .iter()
+            .find(|(k, _)| k == "url")
+            .map(|(_, v)| v.clone())
+            .expect("url param");
+        assert!(url.starts_with('!'));
+        assert!(params.iter().any(|(k, _)| k == "recordUrl"));
     }
 
     #[test]
@@ -650,5 +770,13 @@ mod tests {
             upload_field_value(&encrypted, &key).expect("encrypted"),
             "!abc|def"
         );
+    }
+
+    #[test]
+    fn should_refresh_after_update_only_for_auto_new_accounts() {
+        assert!(should_refresh_after_update(SyncMode::Auto, "0"));
+        assert!(!should_refresh_after_update(SyncMode::Auto, "1234"));
+        assert!(!should_refresh_after_update(SyncMode::Now, "0"));
+        assert!(!should_refresh_after_update(SyncMode::No, "0"));
     }
 }

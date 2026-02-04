@@ -203,6 +203,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,

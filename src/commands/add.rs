@@ -480,16 +480,7 @@ fn parse_entry_input(raw: &str, mut note_type: NoteType) -> ParsedEntry {
         let value = value.trim_start().to_string();
 
         if key == "Notes" {
-            let mut note_value = value;
-            if idx + 1 < lines.len() {
-                let rest = lines[idx + 1..].join("\n");
-                if !rest.is_empty() {
-                    if !note_value.is_empty() {
-                        note_value.push('\n');
-                    }
-                    note_value.push_str(&rest);
-                }
-            }
+            let note_value = lines[idx + 1..].join("\n");
             note = Some(note_value);
             break;
         }
@@ -683,7 +674,7 @@ mod tests {
         assert_eq!(parsed.password.as_deref(), Some("top-secret"));
         assert_eq!(parsed.url.as_deref(), Some("https://example.com"));
         assert_eq!(parsed.reprompt, Some(true));
-        assert_eq!(parsed.note.as_deref(), Some("line1\nline2"));
+        assert_eq!(parsed.note.as_deref(), Some("line2"));
     }
 
     #[test]
@@ -709,7 +700,7 @@ mod tests {
     #[test]
     fn build_account_assigns_fullname_and_reprompt() {
         let parsed = parse_entry_input(
-            "Username: alice\nPassword: p\nReprompt: No\nNotes: hello",
+            "Username: alice\nPassword: p\nReprompt: No\nNotes:\nhello",
             NoteType::None,
         );
         let account = build_account(&parsed, "team/entry");
@@ -720,6 +711,15 @@ mod tests {
         assert_eq!(account.password, "p");
         assert!(!account.pwprotect);
         assert_eq!(account.note, "hello");
+    }
+
+    #[test]
+    fn parse_entry_input_ignores_notes_inline_comment_value() {
+        let parsed = parse_entry_input(
+            "Notes:    # Add notes below this line.\nbody",
+            NoteType::None,
+        );
+        assert_eq!(parsed.note.as_deref(), Some("body"));
     }
 
     #[test]
