@@ -99,7 +99,9 @@ fn parse_import_accounts(input: &str) -> Result<Vec<Account>, String> {
         && grouping_idx.is_none()
         && fav_idx.is_none()
     {
-        return Err("Could not read the CSV header at the first line of the input file".to_string());
+        return Err(
+            "Could not read the CSV header at the first line of the input file".to_string(),
+        );
     }
 
     let mut out = Vec::new();
@@ -283,8 +285,7 @@ mod tests {
 
     #[test]
     fn parse_import_accounts_requires_supported_header() {
-        let err =
-            parse_import_accounts("foo,bar\n1,2\n").expect_err("unknown header should fail");
+        let err = parse_import_accounts("foo,bar\n1,2\n").expect_err("unknown header should fail");
         assert!(err.contains("Could not read the CSV header"));
     }
 

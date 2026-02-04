@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::Account;
-use crate::commands::data::{load_blob, save_blob};
+use crate::commands::data::{SyncMode, load_blob, maybe_push_account_remove, save_blob};
 use crate::terminal;
 
 pub fn run(args: &[String]) -> i32 {
@@ -15,9 +15,9 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage =
-        "usage: rm [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
+    let usage = "usage: rm [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
     let mut name: Option<String> = None;
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -29,11 +29,19 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             continue;
         }
 
-        if arg.starts_with("--sync=") {
+        if let Some(value) = arg.strip_prefix("--sync=") {
+            let Some(mode) = SyncMode::parse(value) else {
+                return Err(usage.to_string());
+            };
+            sync_mode = mode;
             continue;
         }
         if arg == "--sync" {
-            let _ = iter.next();
+            let value = iter.next().ok_or_else(|| usage.to_string())?;
+            let Some(mode) = SyncMode::parse(value) else {
+                return Err(usage.to_string());
+            };
+            sync_mode = mode;
             continue;
         }
         if arg == "--color" {
@@ -63,8 +71,9 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             ));
         }
     };
-    blob.accounts.remove(idx);
+    let removed = blob.accounts.remove(idx);
     save_blob(&blob).map_err(|err| format!("{err}"))?;
+    maybe_push_account_remove(&removed, sync_mode).map_err(|err| format!("{err}"))?;
     Ok(0)
 }
 
@@ -135,10 +144,7 @@ mod tests {
             account("1", "alpha", "group/alpha"),
             account("2", "beta", "group/beta"),
         ];
-        assert_eq!(
-            find_unique_account_index(&accounts, "2").expect("id"),
-            1
-        );
+        assert_eq!(find_unique_account_index(&accounts, "2").expect("id"), 1);
         assert_eq!(
             find_unique_account_index(&accounts, "group/alpha").expect("fullname"),
             0
@@ -173,6 +179,10 @@ mod tests {
         assert!(err.contains("usage: rm"));
 
         let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: rm"));
+
+        let err = run_inner(&["--sync=bad".to_string(), "alpha".to_string()])
+            .expect_err("bad sync value");
         assert!(err.contains("usage: rm"));
 
         let err = run_inner(&["--bogus".to_string()]).expect_err("unknown option");

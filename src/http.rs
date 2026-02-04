@@ -345,7 +345,13 @@ mod tests {
             &[("k", "v")],
         )
         .expect_err("request must fail");
-        assert!(matches!(err, LpassError::Io { context: "http post", .. }));
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "http post",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -362,6 +368,12 @@ mod tests {
             &[("k", "v")],
         )
         .expect_err("request must fail");
-        assert!(matches!(err, LpassError::Io { context: "http post", .. }));
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "http post",
+                ..
+            }
+        ));
     }
 }

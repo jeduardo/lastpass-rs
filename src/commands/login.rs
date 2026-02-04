@@ -7,9 +7,7 @@ use std::process::Command;
 use super::data::ensure_mock_blob;
 use crate::agent::agent_save;
 use crate::config::config_unlink;
-use crate::config::{
-    ConfigStore, config_write_buffer, config_write_string,
-};
+use crate::config::{ConfigStore, config_write_buffer, config_write_string};
 use crate::crypto::decrypt_private_key;
 use crate::error::Result;
 use crate::http::HttpClient;
@@ -64,11 +62,10 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
 
     let (mut session, key) = loop {
         let password = prompt_password(&parsed.username).map_err(|err| format!("{err}"))?;
-        let login_hash =
-            kdf_login_key(&parsed.username, &password, iterations).map_err(|err| format!("{err}"))?;
-        let key =
-            kdf_decryption_key(&parsed.username, &password, iterations)
-                .map_err(|err| format!("{err}"))?;
+        let login_hash = kdf_login_key(&parsed.username, &password, iterations)
+            .map_err(|err| format!("{err}"))?;
+        let key = kdf_decryption_key(&parsed.username, &password, iterations)
+            .map_err(|err| format!("{err}"))?;
 
         match lastpass_login(
             &parsed.username,
@@ -105,8 +102,10 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
         let _ = post_trust(&session, trusted_id.as_deref(), trust_label.as_deref());
     }
 
-    let message =
-        format!("{FG_GREEN}{BOLD}Success{RESET}: Logged in as {UNDERLINE}{}{RESET}.", parsed.username);
+    let message = format!(
+        "{FG_GREEN}{BOLD}Success{RESET}: Logged in as {UNDERLINE}{}{RESET}.",
+        parsed.username
+    );
     println!("{}", terminal::render_stdout(&message));
     Ok(0)
 }
@@ -256,7 +255,9 @@ fn parse_login_response(body: &str) -> Result<Session> {
     }
 
     if let Some(message) = parse_error_cause(body, "message") {
-        return Err(crate::error::LpassError::User(filter_error_message(&message)));
+        return Err(crate::error::LpassError::User(filter_error_message(
+            &message,
+        )));
     }
 
     Err(crate::error::LpassError::Crypto("login failed"))
@@ -277,7 +278,10 @@ fn fetch_blob(session: &Session) -> std::result::Result<Vec<u8>, String> {
     fetch_blob_with_client(&client, session)
 }
 
-fn fetch_blob_with_client(client: &HttpClient, session: &Session) -> std::result::Result<Vec<u8>, String> {
+fn fetch_blob_with_client(
+    client: &HttpClient,
+    session: &Session,
+) -> std::result::Result<Vec<u8>, String> {
     let params = [
         ("mobile", "1"),
         ("requestsrc", "cli"),
@@ -296,16 +300,13 @@ fn ensure_non_empty_blob_response(blob: Vec<u8>) -> std::result::Result<Vec<u8>,
     Ok(blob)
 }
 
-fn persist_blob_after_login(session: &Session, key: &[u8; KDF_HASH_LEN]) -> std::result::Result<(), String> {
+fn persist_blob_after_login(
+    session: &Session,
+    key: &[u8; KDF_HASH_LEN],
+) -> std::result::Result<(), String> {
     let use_mock = env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1");
     let store = ConfigStore::from_current();
-    persist_blob_after_login_with_fetch(
-        &store,
-        use_mock,
-        session,
-        key,
-        fetch_blob,
-    )
+    persist_blob_after_login_with_fetch(&store, use_mock, session, key, fetch_blob)
 }
 
 fn persist_blob_after_login_with_fetch<F>(
@@ -363,7 +364,9 @@ fn ask_yes_no_with_reader_writer<R: BufRead, W: Write>(
             .write_all(
                 format!(
                     "{}\n",
-                    terminal::render_stderr(&format!("{BOLD}Error{RESET}: Response not understood."))
+                    terminal::render_stderr(&format!(
+                        "{BOLD}Error{RESET}: Response not understood."
+                    ))
                 )
                 .as_bytes(),
             )
@@ -417,7 +420,8 @@ fn calculate_trust_label() -> String {
         .or_else(|| env::var("COMPUTERNAME").ok())
         .unwrap_or_else(|| "unknown-host".to_string());
     let sysname = command_output_trimmed("uname -s").unwrap_or_else(|| "UnknownOS".to_string());
-    let release = command_output_trimmed("uname -r").unwrap_or_else(|| "unknown-release".to_string());
+    let release =
+        command_output_trimmed("uname -r").unwrap_or_else(|| "unknown-release".to_string());
     format!("{hostname} - {sysname} {release}")
 }
 
@@ -433,7 +437,11 @@ fn command_output_trimmed(command: &str) -> Option<String> {
     if value.is_empty() { None } else { Some(value) }
 }
 
-fn post_trust(session: &Session, trusted_id: Option<&str>, trust_label: Option<&str>) -> Result<()> {
+fn post_trust(
+    session: &Session,
+    trusted_id: Option<&str>,
+    trust_label: Option<&str>,
+) -> Result<()> {
     if trusted_id.is_none() || trust_label.is_none() {
         return Ok(());
     }
@@ -454,7 +462,11 @@ fn post_trust_with_client(
         None,
         "trust.php",
         Some(session),
-        &[("token", &session.token), ("uuid", uuid), ("trustlabel", label)],
+        &[
+            ("token", &session.token),
+            ("uuid", uuid),
+            ("trustlabel", label),
+        ],
     )?;
     Ok(())
 }
@@ -489,11 +501,8 @@ mod tests {
 
     #[test]
     fn run_inner_rejects_invalid_color_mode() {
-        let err = run_inner(&[
-            "--color=rainbow".to_string(),
-            "a@example.com".to_string(),
-        ])
-        .expect_err("invalid color mode must fail");
+        let err = run_inner(&["--color=rainbow".to_string(), "a@example.com".to_string()])
+            .expect_err("invalid color mode must fail");
         assert!(err.contains("usage: login"));
     }
 
@@ -550,7 +559,10 @@ mod tests {
         assert_eq!(session.uid, "57747756");
         assert_eq!(session.session_id, "1234");
         assert_eq!(session.token, "abcd");
-        assert_eq!(session.server.as_deref(), Some(crate::http::LASTPASS_SERVER));
+        assert_eq!(
+            session.server.as_deref(),
+            Some(crate::http::LASTPASS_SERVER)
+        );
 
         let err = lastpass_login_with_client_basic(&client, "user@example.com", "bad", 1000)
             .expect_err("bad login must fail");
@@ -564,6 +576,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -579,6 +593,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: Some("127.0.0.1:1".to_string()),
             private_key: None,
             private_key_enc: None,
@@ -593,6 +609,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -616,6 +634,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -627,14 +647,8 @@ mod tests {
             ..ConfigEnv::default()
         });
 
-        persist_blob_after_login_with_fetch(
-            &store,
-            true,
-            &session,
-            &key,
-            sample_blob,
-        )
-        .expect("mock mode");
+        persist_blob_after_login_with_fetch(&store, true, &session, &key, sample_blob)
+            .expect("mock mode");
         assert!(
             store
                 .read_encrypted_buffer("blob", &key)
@@ -642,14 +656,8 @@ mod tests {
                 .is_none()
         );
 
-        persist_blob_after_login_with_fetch(
-            &store,
-            false,
-            &session,
-            &key,
-            sample_blob,
-        )
-        .expect("persist blob");
+        persist_blob_after_login_with_fetch(&store, false, &session, &key, sample_blob)
+            .expect("persist blob");
 
         let stored = store
             .read_encrypted_buffer("blob", &key)
@@ -664,6 +672,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -675,13 +685,9 @@ mod tests {
             lpass_home: Some(temp.path().to_path_buf()),
             ..ConfigEnv::default()
         });
-        let err = persist_blob_after_login_with_fetch(
-            &store,
-            false,
-            &session,
-            &key,
-            |_session| Err("fetch failed".to_string()),
-        )
+        let err = persist_blob_after_login_with_fetch(&store, false, &session, &key, |_session| {
+            Err("fetch failed".to_string())
+        })
         .expect_err("fetch error");
         assert_eq!(err, "fetch failed");
 
@@ -692,14 +698,11 @@ mod tests {
             lpass_home: Some(invalid_home),
             ..ConfigEnv::default()
         });
-        let err = persist_blob_after_login_with_fetch(
-            &bad_store,
-            false,
-            &session,
-            &key,
-            |_session| Ok(vec![1, 2, 3]),
-        )
-        .expect_err("write error");
+        let err =
+            persist_blob_after_login_with_fetch(&bad_store, false, &session, &key, |_session| {
+                Ok(vec![1, 2, 3])
+            })
+            .expect_err("write error");
         assert!(err.contains("IO error while"));
     }
 
@@ -709,6 +712,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -809,12 +814,9 @@ mod tests {
     fn generate_trusted_id_has_expected_shape() {
         let trusted_id = generate_trusted_id();
         assert_eq!(trusted_id.len(), 32);
-        assert!(
-            trusted_id
-                .chars()
-                .all(|ch| "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$"
-                    .contains(ch))
-        );
+        assert!(trusted_id.chars().all(|ch| {
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$".contains(ch)
+        }));
     }
 
     #[test]
@@ -859,6 +861,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: Some(vec![1]),
             private_key_enc: Some("ignored".to_string()),
@@ -873,6 +877,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: Some(private_key_enc),
@@ -884,6 +890,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: Some("not-a-valid-key".to_string()),
@@ -895,7 +903,10 @@ mod tests {
     #[test]
     fn parse_login_response_reports_generic_error_when_message_is_missing() {
         let err = parse_login_response("<response><error/></response>").expect_err("must fail");
-        assert!(matches!(err, crate::error::LpassError::Crypto("login failed")));
+        assert!(matches!(
+            err,
+            crate::error::LpassError::Crypto("login failed")
+        ));
     }
 
     #[test]
@@ -911,6 +922,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,

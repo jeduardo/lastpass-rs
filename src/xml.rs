@@ -15,6 +15,8 @@ pub fn parse_ok_session(xml: &str) -> Option<Session> {
         uid,
         session_id,
         token,
+        url_encryption_enabled: parse_flag(&attrs, "url_encryption"),
+        url_logging_enabled: parse_flag(&attrs, "url_logging"),
         server: None,
         private_key: None,
         private_key_enc: None,
@@ -52,6 +54,12 @@ pub fn parse_login_check(xml: &str, session: &mut Session) -> Option<u64> {
     if let Some(token) = attrs.get("token") {
         session.token = token.to_string();
     }
+    if attrs.contains_key("url_encryption") {
+        session.url_encryption_enabled = parse_flag(&attrs, "url_encryption");
+    }
+    if attrs.contains_key("url_logging") {
+        session.url_logging_enabled = parse_flag(&attrs, "url_logging");
+    }
 
     attrs
         .get("accts_version")
@@ -69,6 +77,10 @@ fn parse_ok_attributes(xml: &str) -> Option<std::collections::HashMap<String, St
 fn parse_error_attribute(xml: &str, attr_name: &str) -> Option<String> {
     let attrs = parse_element_attributes(xml, b"error")?;
     attrs.get(attr_name).cloned()
+}
+
+fn parse_flag(attrs: &std::collections::HashMap<String, String>, key: &str) -> bool {
+    attrs.get(key).map(String::as_str) == Some("1")
 }
 
 fn parse_element_attributes(
@@ -134,10 +146,20 @@ mod tests {
 
     #[test]
     fn parse_login_check_version() {
-        let xml = "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" accts_version=\"123\"/></response>";
+        let xml = "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" accts_version=\"123\" url_encryption=\"1\" url_logging=\"1\"/></response>";
         let mut session = Session::default();
         let version = parse_login_check(xml, &mut session).expect("version");
         assert_eq!(version, 123);
         assert_eq!(session.uid, "1");
+        assert!(session.url_encryption_enabled);
+        assert!(session.url_logging_enabled);
+    }
+
+    #[test]
+    fn parse_ok_session_feature_flags() {
+        let xml = "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" url_encryption=\"1\" url_logging=\"0\"/></response>";
+        let session = parse_ok_session(xml).expect("session");
+        assert!(session.url_encryption_enabled);
+        assert!(!session.url_logging_enabled);
     }
 }

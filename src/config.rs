@@ -200,6 +200,8 @@ const PATHNAME_TYPE_LOOKUP: &[(&str, ConfigType)] = &[
     ("session_privatekey", ConfigType::Data),
     ("session_privatekeyenc", ConfigType::Data),
     ("session_server", ConfigType::Data),
+    ("session_ff_url_encryption", ConfigType::Data),
+    ("session_ff_url_logging", ConfigType::Data),
     ("lpass.log", ConfigType::Data),
     ("agent.sock", ConfigType::Runtime),
     ("uploader.pid", ConfigType::Runtime),

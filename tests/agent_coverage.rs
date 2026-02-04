@@ -53,7 +53,11 @@ mod unix_tests {
         }
 
         let mut stream = UnixStream::connect(&socket_path).expect("connect socket");
-        if !cfg!(any(target_os = "linux", target_os = "android", target_os = "cygwin")) {
+        if !cfg!(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "cygwin"
+        )) {
             let pid = std::process::id();
             stream.write_all(&pid.to_ne_bytes()).expect("write pid");
             let mut pid_buf = [0u8; 4];

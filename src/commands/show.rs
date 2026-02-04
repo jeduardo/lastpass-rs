@@ -369,7 +369,10 @@ mod tests {
 
     #[test]
     fn find_matches_prefers_id_and_supports_names() {
-        let accounts = vec![account("0001", "alpha", "team"), account("0002", "beta", "")];
+        let accounts = vec![
+            account("0001", "alpha", "team"),
+            account("0002", "beta", ""),
+        ];
         let by_id = find_matches(&accounts, &["0002".to_string()]);
         assert_eq!(by_id.len(), 1);
         assert_eq!(by_id[0].name, "beta");

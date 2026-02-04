@@ -258,12 +258,8 @@ mod tests {
         let err = run_inner(&["--color=rainbow".to_string()]).expect_err("bad color");
         assert!(err.contains("usage: mv"));
 
-        let err = run_inner(&[
-            "--sync".to_string(),
-            "auto".to_string(),
-            "a".to_string(),
-        ])
-        .expect_err("missing destination");
+        let err = run_inner(&["--sync".to_string(), "auto".to_string(), "a".to_string()])
+            .expect_err("missing destination");
         assert!(err.contains("usage: mv"));
     }
 }

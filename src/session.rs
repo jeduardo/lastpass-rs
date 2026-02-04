@@ -9,6 +9,8 @@ pub struct Session {
     pub uid: String,
     pub session_id: String,
     pub token: String,
+    pub url_encryption_enabled: bool,
+    pub url_logging_enabled: bool,
     pub server: Option<String>,
     pub private_key: Option<Vec<u8>>,
     pub private_key_enc: Option<String>,
@@ -35,6 +37,8 @@ pub fn session_load_with_store(
     let uid = store.read_encrypted_string("session_uid", key)?;
     let session_id = store.read_encrypted_string("session_sessionid", key)?;
     let token = store.read_encrypted_string("session_token", key)?;
+    let url_encryption = store.read_encrypted_string("session_ff_url_encryption", key)?;
+    let url_logging = store.read_encrypted_string("session_ff_url_logging", key)?;
     let server = store.read_string("session_server")?;
     let private_key = store.read_encrypted_buffer("session_privatekey", key)?;
     let private_key_enc = store.read_encrypted_string("session_privatekeyenc", key)?;
@@ -43,6 +47,8 @@ pub fn session_load_with_store(
         uid: uid.unwrap_or_default(),
         session_id: session_id.unwrap_or_default(),
         token: token.unwrap_or_default(),
+        url_encryption_enabled: url_encryption.as_deref() == Some("1"),
+        url_logging_enabled: url_logging.as_deref() == Some("1"),
         server,
         private_key,
         private_key_enc,
@@ -71,6 +77,24 @@ pub fn session_save_with_store(
     store.write_encrypted_string("session_uid", &session.uid, key)?;
     store.write_encrypted_string("session_sessionid", &session.session_id, key)?;
     store.write_encrypted_string("session_token", &session.token, key)?;
+    store.write_encrypted_string(
+        "session_ff_url_encryption",
+        if session.url_encryption_enabled {
+            "1"
+        } else {
+            "0"
+        },
+        key,
+    )?;
+    store.write_encrypted_string(
+        "session_ff_url_logging",
+        if session.url_logging_enabled {
+            "1"
+        } else {
+            "0"
+        },
+        key,
+    )?;
 
     if let Some(private_key) = &session.private_key {
         store.write_encrypted_buffer("session_privatekey", private_key, key)?;
@@ -137,6 +161,8 @@ mod tests {
             uid: "u1".to_string(),
             session_id: "s1".to_string(),
             token: "t1".to_string(),
+            url_encryption_enabled: true,
+            url_logging_enabled: false,
             server: Some("lastpass.com".to_string()),
             private_key: Some(vec![1, 2, 3]),
             private_key_enc: None,
@@ -150,6 +176,8 @@ mod tests {
         assert_eq!(loaded.uid, "u1");
         assert_eq!(loaded.session_id, "s1");
         assert_eq!(loaded.token, "t1");
+        assert!(loaded.url_encryption_enabled);
+        assert!(!loaded.url_logging_enabled);
         assert_eq!(loaded.server.as_deref(), Some("lastpass.com"));
         assert_eq!(loaded.private_key.as_deref(), Some(&[1, 2, 3][..]));
     }

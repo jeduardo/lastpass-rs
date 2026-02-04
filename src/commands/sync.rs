@@ -160,15 +160,16 @@ mod tests {
 
     #[test]
     fn parse_args_accepts_background_and_color_flags() {
-        let parsed = parse_args(&[
-            "--background".to_string(),
-            "--color=never".to_string(),
-        ])
-        .expect("parse args");
+        let parsed = parse_args(&["--background".to_string(), "--color=never".to_string()])
+            .expect("parse args");
         assert!(parsed.background);
 
-        let parsed = parse_args(&["-b".to_string(), "--color".to_string(), "always".to_string()])
-            .expect("parse args");
+        let parsed = parse_args(&[
+            "-b".to_string(),
+            "--color".to_string(),
+            "always".to_string(),
+        ])
+        .expect("parse args");
         assert!(parsed.background);
     }
 
@@ -202,6 +203,8 @@ mod tests {
             uid: "u".to_string(),
             session_id: "s".to_string(),
             token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
             server: None,
             private_key: None,
             private_key_enc: None,
@@ -210,5 +213,4 @@ mod tests {
         let err = sync_session_blob(&client, &session, &key).expect_err("empty mock body");
         assert!(err.contains("Unable to fetch blob"));
     }
-
 }
