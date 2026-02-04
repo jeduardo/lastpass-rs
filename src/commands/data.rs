@@ -94,20 +94,28 @@ pub(crate) fn maybe_push_account_update(account: &Account, sync_mode: SyncMode) 
         ))?;
     let client = HttpClient::from_env()?;
 
-    let params = build_show_website_params(account, &session, &key)?;
+    push_account_update_with_client(&client, &session, &key, account, sync_mode)
+}
+
+fn push_account_update_with_client(
+    client: &HttpClient,
+    session: &Session,
+    key: &[u8; KDF_HASH_LEN],
+    account: &Account,
+    sync_mode: SyncMode,
+) -> Result<()> {
+    let params = build_show_website_params(account, session, key)?;
     let params_ref: Vec<(&str, &str)> = params
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
-    let response = client.post_lastpass(None, "show_website.php", Some(&session), &params_ref)?;
-    if response.status >= 400 {
-        return Err(LpassError::User("Server rejected account update."));
-    }
+    let response = client.post_lastpass(None, "show_website.php", Some(session), &params_ref)?;
+    ensure_success_status(response.status)?;
 
     if matches!(sync_mode, SyncMode::Now) {
-        refresh_blob_from_server(&client, &session, &key)?;
+        refresh_blob_from_server(client, session, key)?;
     } else if should_refresh_after_update(sync_mode, &account.id) {
-        let _ = refresh_blob_from_server(&client, &session, &key);
+        let _ = refresh_blob_from_server(client, session, key);
     }
 
     Ok(())
@@ -129,6 +137,32 @@ pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) 
         ))?;
     let client = HttpClient::from_env()?;
 
+    push_account_remove_with_client(&client, &session, &key, account, sync_mode)
+}
+
+fn push_account_remove_with_client(
+    client: &HttpClient,
+    session: &Session,
+    key: &[u8; KDF_HASH_LEN],
+    account: &Account,
+    sync_mode: SyncMode,
+) -> Result<()> {
+    let params = build_show_website_delete_params(account, session);
+    let params_ref: Vec<(&str, &str)> = params
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    let response = client.post_lastpass(None, "show_website.php", Some(session), &params_ref)?;
+    ensure_success_status(response.status)?;
+
+    if matches!(sync_mode, SyncMode::Now) {
+        refresh_blob_from_server(client, session, key)?;
+    }
+
+    Ok(())
+}
+
+fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec<(String, String)> {
     let mut params = vec![
         ("extjs".to_string(), "1".to_string()),
         ("token".to_string(), session.token.clone()),
@@ -138,20 +172,7 @@ pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) 
     if session.url_logging_enabled {
         params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
     }
-    let params_ref: Vec<(&str, &str)> = params
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let response = client.post_lastpass(None, "show_website.php", Some(&session), &params_ref)?;
-    if response.status >= 400 {
-        return Err(LpassError::User("Server rejected account update."));
-    }
-
-    if matches!(sync_mode, SyncMode::Now) {
-        refresh_blob_from_server(&client, &session, &key)?;
-    }
-
-    Ok(())
+    params
 }
 
 fn map_decryption_key_error(err: LpassError) -> LpassError {
@@ -248,6 +269,14 @@ fn is_secure_note(account: &Account) -> bool {
 
 fn should_refresh_after_update(sync_mode: SyncMode, account_id: &str) -> bool {
     matches!(sync_mode, SyncMode::Auto) && account_id == "0"
+}
+
+fn ensure_success_status(status: u16) -> Result<()> {
+    if status >= 400 {
+        Err(LpassError::User("Server rejected account update."))
+    } else {
+        Ok(())
+    }
 }
 
 fn encrypt_and_encode(value: &str, key: &[u8; KDF_HASH_LEN]) -> Result<String> {
@@ -778,5 +807,186 @@ mod tests {
         assert!(!should_refresh_after_update(SyncMode::Auto, "1234"));
         assert!(!should_refresh_after_update(SyncMode::Now, "0"));
         assert!(!should_refresh_after_update(SyncMode::No, "0"));
+    }
+
+    #[test]
+    fn is_secure_note_checks_sn_url_only() {
+        let mut account = Account {
+            id: "0".to_string(),
+            share_name: None,
+            name: String::new(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: String::new(),
+            url: "http://sn".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        assert!(is_secure_note(&account));
+        account.url = "https://example.com".to_string();
+        assert!(!is_secure_note(&account));
+    }
+
+    #[test]
+    fn ensure_success_status_checks_error_boundary() {
+        assert!(ensure_success_status(200).is_ok());
+        assert!(ensure_success_status(399).is_ok());
+        let err = ensure_success_status(400).expect_err("must fail");
+        assert!(format!("{err}").contains("Server rejected account update."));
+    }
+
+    #[test]
+    fn build_show_website_delete_params_respects_record_url_flag() {
+        let account = Account {
+            id: "42".to_string(),
+            share_name: None,
+            name: String::new(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: String::new(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let mut session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+
+        let params = build_show_website_delete_params(&account, &session);
+        assert!(params.iter().any(|(k, _)| k == "aid"));
+        assert!(!params.iter().any(|(k, _)| k == "recordUrl"));
+
+        session.url_logging_enabled = true;
+        let params = build_show_website_delete_params(&account, &session);
+        assert!(params.iter().any(|(k, _)| k == "recordUrl"));
+    }
+
+    #[test]
+    fn push_account_update_with_client_handles_sync_modes() {
+        let key = [5u8; KDF_HASH_LEN];
+        let account = Account {
+            id: "0".to_string(),
+            share_name: None,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "u".to_string(),
+            username_encrypted: None,
+            password: "p".to_string(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let client = HttpClient::mock();
+
+        push_account_update_with_client(&client, &session, &key, &account, SyncMode::Auto)
+            .expect("auto should ignore refresh failure");
+        let err = push_account_update_with_client(&client, &session, &key, &account, SyncMode::Now)
+            .expect_err("now should fail because mock getaccts body is empty");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn push_account_remove_with_client_handles_sync_modes() {
+        let key = [7u8; KDF_HASH_LEN];
+        let account = Account {
+            id: "42".to_string(),
+            share_name: None,
+            name: String::new(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: String::new(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: true,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let client = HttpClient::mock();
+
+        push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Auto)
+            .expect("auto delete");
+        let err = push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Now)
+            .expect_err("now should fail because mock getaccts body is empty");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
     }
 }
