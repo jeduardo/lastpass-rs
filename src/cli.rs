@@ -13,10 +13,6 @@ struct CommandSpec {
 
 const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
-        name: "version",
-        usage: "version",
-    },
-    CommandSpec {
         name: "login",
         usage: "login [--trust] [--plaintext-key [--force, -f]] [--color=auto|never|always] USERNAME",
     },
@@ -123,14 +119,6 @@ fn dispatch(args: &[String]) -> Dispatch {
     }
 
     let arg = args[1].as_str();
-    if arg == "version" {
-        return if args.len() == 2 {
-            Dispatch::VersionOnly
-        } else {
-            Dispatch::HelpOnly
-        };
-    }
-
     if arg.starts_with('-') {
         return match arg {
             "-h" | "--help" => Dispatch::HelpWithVersion,
