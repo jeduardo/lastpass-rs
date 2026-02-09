@@ -174,6 +174,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_rejects_unknown_flag() {
+        let err = parse_args(&["--bogus".to_string()]).expect_err("unknown flag");
+        assert!(err.contains("usage: sync"));
+    }
+
+    #[test]
     fn store_blob_bytes_rejects_empty_blob() {
         let key = [1u8; KDF_HASH_LEN];
         let err = store_blob_bytes(&[], &key).expect_err("empty blob must fail");

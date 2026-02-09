@@ -30,6 +30,10 @@ pub struct ConfigEnv {
 
 impl ConfigEnv {
     pub fn from_current() -> Self {
+        #[cfg(test)]
+        if let Some(env) = test_env_override() {
+            return env;
+        }
         Self {
             lpass_home: env::var_os("LPASS_HOME").map(PathBuf::from),
             xdg_data_home: env::var_os("XDG_DATA_HOME").map(PathBuf::from),
@@ -37,6 +41,37 @@ impl ConfigEnv {
             xdg_runtime_dir: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
             home: env::var_os("HOME").map(PathBuf::from),
         }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ENV: std::cell::RefCell<Option<ConfigEnv>> = std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn test_env_override() -> Option<ConfigEnv> {
+    TEST_ENV.with(|cell| cell.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) struct TestEnvGuard {
+    prev: Option<ConfigEnv>,
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_env(env: ConfigEnv) -> TestEnvGuard {
+    let prev = TEST_ENV.with(|cell| cell.replace(Some(env)));
+    TestEnvGuard { prev }
+}
+
+#[cfg(test)]
+impl Drop for TestEnvGuard {
+    fn drop(&mut self) {
+        let prev = self.prev.take();
+        TEST_ENV.with(|cell| {
+            let _ = cell.replace(prev);
+        });
     }
 }
 
@@ -401,6 +436,9 @@ pub fn config_read_encrypted_buffer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     fn env_with_home(home: &Path) -> ConfigEnv {
@@ -505,5 +543,225 @@ mod tests {
             .expect("write");
         let value = store.read_encrypted_string("secret", &key).expect("read");
         assert_eq!(value.as_deref(), Some("hunter2"));
+    }
+
+    #[test]
+    fn config_path_type_recognizes_alias_and_lock() {
+        assert_eq!(config_path_type("alias.test"), ConfigType::Config);
+        assert_eq!(config_path_type("something.lock"), ConfigType::Runtime);
+        assert_eq!(config_path_type("env"), ConfigType::Config);
+        assert_eq!(config_path_type("blob"), ConfigType::Data);
+    }
+
+    #[test]
+    fn config_path_uses_xdg_config_and_runtime_dirs() {
+        let base = TempDir::new().expect("tempdir");
+        let runtime = TempDir::new().expect("tempdir");
+        let env = ConfigEnv {
+            xdg_config_home: Some(base.path().to_path_buf()),
+            xdg_runtime_dir: Some(runtime.path().to_path_buf()),
+            ..ConfigEnv::default()
+        };
+
+        let config_path =
+            config_path_for_type_with_env(&env, ConfigType::Config, "env").expect("path");
+        assert_eq!(config_path, base.path().join("lpass").join("env"));
+
+        let runtime_path =
+            config_path_for_type_with_env(&env, ConfigType::Runtime, "agent.sock").expect("path");
+        assert_eq!(runtime_path, runtime.path().join("lpass").join("agent.sock"));
+    }
+
+    #[test]
+    fn get_xdg_dir_prefers_config_home() {
+        let base = TempDir::new().expect("tempdir");
+        let env = ConfigEnv {
+            xdg_config_home: Some(base.path().to_path_buf()),
+            ..ConfigEnv::default()
+        };
+        assert_eq!(
+            get_xdg_dir(&env, "XDG_CONFIG_HOME"),
+            Some(base.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn get_xdg_dir_falls_back_to_home_for_config() {
+        let home = TempDir::new().expect("tempdir");
+        let runtime = TempDir::new().expect("tempdir");
+        let env = ConfigEnv {
+            home: Some(home.path().to_path_buf()),
+            xdg_runtime_dir: Some(runtime.path().to_path_buf()),
+            ..ConfigEnv::default()
+        };
+        assert_eq!(
+            get_xdg_dir(&env, "XDG_CONFIG_HOME"),
+            Some(home.path().join(".config"))
+        );
+    }
+
+    #[test]
+    fn get_xdg_dir_returns_none_for_unknown_var() {
+        let home = TempDir::new().expect("tempdir");
+        let runtime = TempDir::new().expect("tempdir");
+        let env = ConfigEnv {
+            home: Some(home.path().to_path_buf()),
+            xdg_runtime_dir: Some(runtime.path().to_path_buf()),
+            ..ConfigEnv::default()
+        };
+        assert_eq!(get_xdg_dir(&env, "XDG_UNKNOWN"), None);
+    }
+
+    #[test]
+    fn config_unlink_and_mtime_roundtrip() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        assert!(!store.unlink("missing").expect("unlink missing"));
+        store.write_string("username", "alice").expect("write");
+        let before = store.mtime("username").expect("mtime").expect("present");
+        store.touch("username").expect("touch");
+        let after = store.mtime("username").expect("mtime").expect("present");
+        assert!(after >= before);
+        assert!(store.unlink("username").expect("unlink"));
+    }
+
+    #[test]
+    fn config_read_string_rejects_invalid_utf8() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        store.write_buffer("bad", &[0xff, 0xfe]).expect("write");
+        let err = store.read_string("bad").expect_err("invalid utf8");
+        assert!(matches!(err, LpassError::InvalidUtf8));
+    }
+
+    #[test]
+    fn config_wrappers_use_test_env() {
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let path = config_path("blob").expect("path");
+        assert_eq!(path, temp.path().join("blob"));
+        let data_path = config_path_for_type(ConfigType::Data, "blob").expect("path");
+        assert_eq!(data_path, temp.path().join("blob"));
+
+        config_write_string("username", "alice").expect("write");
+        let value = config_read_string("username").expect("read");
+        assert_eq!(value.as_deref(), Some("alice"));
+        assert!(config_exists("username"));
+        assert!(config_unlink("username").expect("unlink"));
+        assert!(!config_exists("username"));
+
+        let key = [7u8; KDF_HASH_LEN];
+        config_write_encrypted_string("secret", "value", &key).expect("write encrypted");
+        let decrypted = config_read_encrypted_string("secret", &key).expect("read encrypted");
+        assert_eq!(decrypted.as_deref(), Some("value"));
+
+        config_write_encrypted_buffer("secret-bin", b"value", &key)
+            .expect("write encrypted buffer");
+        let decrypted = config_read_encrypted_buffer("secret-bin", &key)
+            .expect("read encrypted buffer");
+        assert_eq!(decrypted.as_deref(), Some(b"value".as_slice()));
+    }
+
+    #[test]
+    fn config_wrappers_touch_and_mtime_roundtrip() {
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        config_write_string("touched", "data").expect("write");
+        let before = config_mtime("touched").expect("mtime").expect("present");
+        config_touch("touched").expect("touch");
+        let after = config_mtime("touched").expect("mtime").expect("present");
+        assert!(after >= before);
+    }
+
+    #[test]
+    fn config_unlink_reports_errors_for_directories() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let bad = temp.path().join("bad");
+        fs::create_dir_all(&bad).expect("create dir");
+        let err = store.unlink("bad").expect_err("unlink should error");
+        assert!(matches!(err, LpassError::Io { context: "unlink", .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_read_buffer_reports_open_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let dir = temp.path().join("protected");
+        fs::create_dir_all(&dir).expect("create dir");
+        let perms = fs::Permissions::from_mode(0o000);
+        fs::set_permissions(&dir, perms).expect("set perms");
+
+        let err = store
+            .read_buffer("protected/file")
+            .expect_err("open should fail");
+        assert!(matches!(err, LpassError::Io { context: "open", .. }));
+
+        let perms = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(&dir, perms).expect("restore perms");
+    }
+
+    #[test]
+    fn config_path_for_type_replaces_existing_file_dir() {
+        let temp = TempDir::new().expect("tempdir");
+        let env = ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        };
+
+        let nested = temp.path().join("nested");
+        fs::write(&nested, b"not a dir").expect("create file");
+        let path =
+            config_path_for_type_with_env(&env, ConfigType::Data, "nested/file").expect("path");
+        assert_eq!(path, temp.path().join("nested/file"));
+        assert!(nested.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_mtime_reports_permission_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let protected = temp.path().join("protected");
+        fs::create_dir_all(&protected).expect("create dir");
+        let perms = fs::Permissions::from_mode(0o000);
+        fs::set_permissions(&protected, perms).expect("set perms");
+
+        let err = store
+            .mtime("protected/file")
+            .expect_err("mtime should error");
+        assert!(matches!(err, LpassError::Io { context: "stat", .. }));
+
+        let perms = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(&protected, perms).expect("restore perms");
     }
 }

@@ -398,7 +398,7 @@ fn sync_without_mock_reaches_server_fetch_path_and_reports_network_error() {
         .env("LPASS_HTTP_MOCK", "1")
         .env("LPASS_HOME", &home)
         .env("LPASS_ASKPASS", &askpass)
-        .args(["login", "user@example.com"])
+        .args(["login", "--plaintext-key", "--force", "user@example.com"])
         .output()
         .expect("run login");
     assert_eq!(

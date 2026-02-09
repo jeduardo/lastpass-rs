@@ -85,4 +85,10 @@ mod tests {
         let err = run_inner(&["--color".to_string()]).expect_err("must fail");
         assert!(err.contains("--color=auto|never|always"));
     }
+
+    #[test]
+    fn run_inner_rejects_unknown_flag() {
+        let err = run_inner(&["--bogus".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: status"));
+    }
 }

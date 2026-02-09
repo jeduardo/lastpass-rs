@@ -168,6 +168,12 @@ mod tests {
     }
 
     #[test]
+    fn find_unique_account_allows_name_zero_without_id_match() {
+        let accounts = vec![account("0", "0", "0")];
+        assert_eq!(find_unique_account_index(&accounts, "0").expect("name"), 0);
+    }
+
+    #[test]
     fn run_inner_rejects_invalid_invocations() {
         let err = run_inner(&[]).expect_err("missing arg");
         assert!(err.contains("usage: rm"));
@@ -179,6 +185,14 @@ mod tests {
         assert!(err.contains("usage: rm"));
 
         let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: rm"));
+
+        let err = run_inner(&[
+            "--sync".to_string(),
+            "bad".to_string(),
+            "alpha".to_string(),
+        ])
+        .expect_err("bad sync value with separate arg");
         assert!(err.contains("usage: rm"));
 
         let err = run_inner(&["--sync=bad".to_string(), "alpha".to_string()])

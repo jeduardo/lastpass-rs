@@ -841,4 +841,117 @@ mod tests {
         .expect_err("invalid note type selector");
         assert!(err.contains("Note type may only be used with secure notes"));
     }
+
+    #[test]
+    fn parse_add_args_supports_field_note_type_color_and_app() {
+        let parsed = parse_add_args(&[
+            "--field".to_string(),
+            "Hostname".to_string(),
+            "--sync".to_string(),
+            "now".to_string(),
+            "--color=never".to_string(),
+            "--app".to_string(),
+            "entry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+        assert_eq!(parsed.sync_mode, SyncMode::Now);
+        assert!(parsed.is_app);
+
+        let parsed = parse_add_args(&[
+            "--note-type=server".to_string(),
+            "--non-interactive".to_string(),
+            "note".to_string(),
+        ])
+        .expect("note args");
+        assert_eq!(parsed.note_type, NoteType::Server);
+        assert!(parsed.non_interactive);
+    }
+
+    #[test]
+    fn make_editor_initial_text_covers_choice_variants() {
+        let base = AddArgs {
+            name: "entry".to_string(),
+            choice: EditChoice::Any,
+            field: None,
+            non_interactive: false,
+            sync_mode: SyncMode::Auto,
+            note_type: NoteType::None,
+            is_app: false,
+        };
+        let any = make_editor_initial_text(&base);
+        assert!(any.contains("Name: entry"));
+
+        let username = make_editor_initial_text(&AddArgs { choice: EditChoice::Username, ..base.clone() });
+        assert!(username.ends_with('\n'));
+
+        let password = make_editor_initial_text(&AddArgs { choice: EditChoice::Password, ..base.clone() });
+        assert!(password.ends_with('\n'));
+
+        let url = make_editor_initial_text(&AddArgs { choice: EditChoice::Url, ..base.clone() });
+        assert!(url.ends_with('\n'));
+
+        let notes = make_editor_initial_text(&AddArgs { choice: EditChoice::Notes, ..base.clone() });
+        assert!(notes.ends_with('\n'));
+
+        let field = make_editor_initial_text(&AddArgs {
+            choice: EditChoice::Field,
+            field: Some("Application".to_string()),
+            is_app: true,
+            ..base
+        });
+        assert!(field.ends_with('\n'));
+    }
+
+    #[test]
+    fn render_account_file_includes_application_for_apps() {
+        let account = new_account("app/item", EditChoice::Any, NoteType::None, true);
+        let rendered = render_account_file(&account, NoteType::None, true);
+        assert!(rendered.contains("Application:"));
+        assert!(!rendered.contains("URL: "));
+    }
+
+    #[test]
+    fn parse_entry_input_handles_duplicate_name_and_note_type_field() {
+        let parsed = parse_entry_input(
+            "Name: primary\nName: secondary\nNoteType: Server\nHostname: host\nNotes:\nbody",
+            NoteType::None,
+        );
+        assert_eq!(parsed.name.as_deref(), Some("primary"));
+        assert!(parsed.has_note_type_field);
+        assert_eq!(parsed.note_type, NoteType::Server);
+        assert!(parsed.fields.iter().any(|field| field.name == "Name"));
+    }
+
+    #[test]
+    fn apply_choice_value_updates_existing_field() {
+        let mut account = new_account("entry", EditChoice::Any, NoteType::SshKey, false);
+        account.fields.push(make_field("Hostname", "old"));
+        apply_choice_value(
+            &mut account,
+            EditChoice::Field,
+            Some("Hostname"),
+            "new",
+        )
+        .expect("update");
+        let field = account
+            .fields
+            .iter()
+            .find(|field| field.name == "Hostname")
+            .expect("field");
+        assert_eq!(field.value, "new");
+    }
+
+    #[test]
+    fn build_account_collapses_notes_for_secure_note_types() {
+        let parsed = parse_entry_input(
+            "NoteType: Server\nHostname: host\nNotes:\nbody",
+            NoteType::Server,
+        );
+        let account = build_account(&parsed, "secure/entry");
+        assert_eq!(account.url, "http://sn");
+        assert!(account.note.contains("NoteType:"));
+        assert_eq!(account.fullname, "secure/entry");
+    }
 }

@@ -41,3 +41,15 @@ fn not_implemented(command: &str) -> i32 {
     eprintln!("error: command '{}' not implemented", command);
     1
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_reports_unimplemented_and_unknown_commands() {
+        assert_eq!(run("passwd", &[]), 1);
+        assert_eq!(run("share", &[]), 1);
+        assert_eq!(run("unknown", &[]), 1);
+    }
+}

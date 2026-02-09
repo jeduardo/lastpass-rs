@@ -826,6 +826,88 @@ mod tests {
     }
 
     #[test]
+    fn parse_edit_args_supports_color_and_field_equals() {
+        let parsed = parse_edit_args(&[
+            "--field=Hostname".to_string(),
+            "--sync=now".to_string(),
+            "--color=always".to_string(),
+            "entry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+        assert_eq!(parsed.sync_mode, SyncMode::Now);
+    }
+
+    #[test]
+    fn make_editor_initial_text_handles_field_and_notes() {
+        let acct = account();
+        let args = EditArgs {
+            name: acct.fullname.clone(),
+            choice: EditChoice::Field,
+            field: Some("Hostname".to_string()),
+            non_interactive: false,
+            sync_mode: SyncMode::Auto,
+        };
+        let text = make_editor_initial_text(&acct, &args, true);
+        assert!(text.contains("old-host"));
+
+        let no_field = make_editor_initial_text(&acct, &args, false);
+        assert_eq!(no_field, "\n");
+
+        let notes = make_editor_initial_text(
+            &acct,
+            &EditArgs {
+                choice: EditChoice::Notes,
+                ..args
+            },
+            false,
+        );
+        assert!(notes.ends_with('\n'));
+    }
+
+    #[test]
+    fn render_account_file_includes_reprompt_and_note_fields() {
+        let mut acct = account();
+        acct.pwprotect = true;
+        acct.url = "http://sn".to_string();
+        acct.fields.push(Field {
+            name: "NoteType".to_string(),
+            field_type: "text".to_string(),
+            value: "Server".to_string(),
+            value_encrypted: None,
+            checked: false,
+        });
+        let rendered = render_account_file(&acct);
+        assert!(rendered.contains("Reprompt: Yes"));
+        assert!(rendered.contains("NoteType: Server"));
+        assert!(!rendered.contains("URL: https://"));
+    }
+
+    #[test]
+    fn parse_update_input_tracks_unknown_fields_and_reprompt() {
+        let parsed = parse_update_input("Custom: value\nReprompt: no", NoteType::None);
+        assert_eq!(parsed.reprompt, Some(false));
+        assert!(parsed
+            .fields
+            .iter()
+            .any(|(name, value)| name == "Custom" && value == "value"));
+    }
+
+    #[test]
+    fn account_note_type_detects_note_type_field() {
+        let mut acct = account();
+        acct.fields.push(Field {
+            name: "NoteType".to_string(),
+            field_type: "text".to_string(),
+            value: "Server".to_string(),
+            value_encrypted: None,
+            checked: false,
+        });
+        assert_eq!(account_note_type(&acct), NoteType::Server);
+    }
+
+    #[test]
     fn render_account_file_and_shell_quote_cover_helper_paths() {
         let mut acct = account();
         acct.fields.push(Field {

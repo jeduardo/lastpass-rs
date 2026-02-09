@@ -1,4 +1,4 @@
 [alias]
 test-upstream = "run --bin test-upstream"
-coverage = "llvm-cov --workspace --all-targets --lcov --output-path coverage/lcov.info"
-coverage-html = "llvm-cov --workspace --all-targets --html --output-dir coverage/html"
+coverage = "llvm-cov --workspace --all-targets --lcov --output-path coverage/lcov.info --ignore-filename-regex src/bin/test-upstream.rs$"
+coverage-html = "llvm-cov --workspace --all-targets --html --output-dir coverage/html --ignore-filename-regex src/bin/test-upstream.rs$"

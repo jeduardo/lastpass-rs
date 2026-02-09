@@ -690,4 +690,36 @@ mod tests {
         assert!(collapsed.note.contains("URL:https://example.com"));
         assert!(collapsed.note.contains("Notes:memo"));
     }
+
+    #[test]
+    fn note_type_fields_returns_empty_for_none() {
+        assert!(note_type_fields(NoteType::None).is_empty());
+        assert!(!note_type_fields(NoteType::Server).is_empty());
+    }
+
+    #[test]
+    fn expand_notes_handles_blank_lines_and_multiline_fields() {
+        let note = "NoteType: SSH Key\n\nPrivate Key: line1\nProc-Type: 4,ENCRYPTED\nline2\nNotes: note-body\ntrailing";
+        let account = base_secure_note(note);
+        let expanded = expand_notes(&account).expect("expanded");
+        let private_key = expanded
+            .fields
+            .iter()
+            .find(|field| field.name == "Private Key")
+            .expect("private key");
+        assert!(private_key.value.contains("line1"));
+        assert!(private_key.value.contains("Proc-Type: 4,ENCRYPTED"));
+        assert!(private_key.value.contains("line2"));
+        assert!(private_key.value.contains("Notes: note-body"));
+        assert!(expanded.note.is_empty());
+    }
+
+    #[test]
+    fn expand_notes_falls_back_when_no_fields_present() {
+        let note = "NoteType: Server\n";
+        let account = base_secure_note(note);
+        let expanded = expand_notes(&account).expect("expanded");
+        assert!(expanded.note.is_empty());
+        assert!(!expanded.fields.is_empty());
+    }
 }

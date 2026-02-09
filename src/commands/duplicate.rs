@@ -154,9 +154,26 @@ mod tests {
     }
 
     #[test]
+    fn find_account_index_allows_name_zero_without_id_match() {
+        let mut blob = blob_with_accounts();
+        blob.accounts.push(account("0000", "0", ""));
+        assert_eq!(find_account_index(&blob, "0"), Some(3));
+    }
+
+    #[test]
     fn next_id_uses_highest_numeric_value() {
         let blob = blob_with_accounts();
         assert_eq!(next_id(&blob), "0008");
+    }
+
+    #[test]
+    fn next_id_ignores_lower_numeric_values() {
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            accounts: vec![account("0005", "alpha", ""), account("0001", "beta", "")],
+        };
+        assert_eq!(next_id(&blob), "0006");
     }
 
     #[test]
