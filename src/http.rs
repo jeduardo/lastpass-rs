@@ -45,6 +45,7 @@ impl HttpClient {
     pub fn real() -> Result<Self> {
         let client = Client::builder()
             .user_agent(user_agent())
+            .gzip(false)
             .build()
             .map_err(|_| LpassError::Crypto("failed to build http client"))?;
         Ok(Self {

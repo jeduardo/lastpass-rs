@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
 use std::env;
-use std::io::Read;
-
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
@@ -14,8 +12,6 @@ use crate::error::{LpassError, Result};
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::Session;
-use brotli::Decompressor as BrotliDecoder;
-use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use serde_json;
 
 const BLOB_JSON_NAME: &str = "blob.json";
@@ -59,7 +55,6 @@ pub(crate) fn load_blob() -> Result<Blob> {
 
     let blob_bytes =
         config_read_encrypted_buffer("blob", &key)?.ok_or(LpassError::Crypto("missing blob"))?;
-    let blob_bytes = maybe_decompress_blob(blob_bytes)?;
     if !looks_like_blob(&blob_bytes) {
         return Err(LpassError::Crypto(
             "blob response was not a blob; try logging in again",
@@ -363,38 +358,6 @@ fn load_mock_blob() -> Result<Blob> {
     Ok(blob)
 }
 
-fn maybe_decompress_blob(blob_bytes: Vec<u8>) -> Result<Vec<u8>> {
-    if looks_like_blob(&blob_bytes) {
-        return Ok(blob_bytes);
-    }
-
-    if let Some(decoded) = try_gzip(&blob_bytes)? {
-        if looks_like_blob(&decoded) {
-            return Ok(decoded);
-        }
-    }
-
-    if let Some(decoded) = try_zlib(&blob_bytes)? {
-        if looks_like_blob(&decoded) {
-            return Ok(decoded);
-        }
-    }
-
-    if let Some(decoded) = try_deflate(&blob_bytes)? {
-        if looks_like_blob(&decoded) {
-            return Ok(decoded);
-        }
-    }
-
-    if let Some(decoded) = try_brotli(&blob_bytes)? {
-        if looks_like_blob(&decoded) {
-            return Ok(decoded);
-        }
-    }
-
-    Ok(blob_bytes)
-}
-
 fn load_private_key(key: &[u8; KDF_HASH_LEN]) -> Result<Option<Vec<u8>>> {
     if let Some(private_key) = config_read_encrypted_buffer("session_privatekey", key)? {
         return Ok(Some(private_key));
@@ -413,48 +376,6 @@ fn load_private_key(key: &[u8; KDF_HASH_LEN]) -> Result<Option<Vec<u8>>> {
 
 fn looks_like_blob(bytes: &[u8]) -> bool {
     bytes.starts_with(b"LPAV")
-}
-
-fn try_gzip(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
-    if bytes.len() < 2 || bytes[0] != 0x1f || bytes[1] != 0x8b {
-        return Ok(None);
-    }
-    let mut decoder = GzDecoder::new(bytes);
-    let mut decoded = Vec::new();
-    decoder
-        .read_to_end(&mut decoded)
-        .map_err(|err| LpassError::io("gzip decode", err))?;
-    Ok(Some(decoded))
-}
-
-fn try_zlib(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
-    if bytes.len() < 2 || bytes[0] != 0x78 {
-        return Ok(None);
-    }
-    let mut decoder = ZlibDecoder::new(bytes);
-    let mut decoded = Vec::new();
-    if decoder.read_to_end(&mut decoded).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(decoded))
-}
-
-fn try_deflate(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
-    let mut decoder = DeflateDecoder::new(bytes);
-    let mut decoded = Vec::new();
-    if decoder.read_to_end(&mut decoded).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(decoded))
-}
-
-fn try_brotli(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
-    let mut decoder = BrotliDecoder::new(bytes, 4096);
-    let mut decoded = Vec::new();
-    if decoder.read_to_end(&mut decoded).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(decoded))
 }
 
 fn save_mock_blob(blob: &Blob) -> Result<()> {
@@ -562,13 +483,6 @@ fn mock_account(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::Compression;
-    use flate2::write::{DeflateEncoder, GzEncoder, ZlibEncoder};
-    use std::io::Write;
-
-    fn blob_bytes() -> Vec<u8> {
-        b"LPAVtest-blob".to_vec()
-    }
 
     #[test]
     fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
@@ -587,46 +501,6 @@ mod tests {
     fn looks_like_blob_detects_signature() {
         assert!(looks_like_blob(b"LPAVabc"));
         assert!(!looks_like_blob(b"XXXXabc"));
-    }
-
-    #[test]
-    fn maybe_decompress_blob_handles_gzip_zlib_deflate_and_brotli() {
-        let source = blob_bytes();
-
-        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
-        gz.write_all(&source).expect("gzip write");
-        let gzip = gz.finish().expect("gzip finish");
-        assert_eq!(maybe_decompress_blob(gzip).expect("gzip decode"), source);
-
-        let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
-        z.write_all(&source).expect("zlib write");
-        let zlib = z.finish().expect("zlib finish");
-        assert_eq!(maybe_decompress_blob(zlib).expect("zlib decode"), source);
-
-        let mut d = DeflateEncoder::new(Vec::new(), Compression::default());
-        d.write_all(&source).expect("deflate write");
-        let deflate = d.finish().expect("deflate finish");
-        assert_eq!(
-            maybe_decompress_blob(deflate).expect("deflate decode"),
-            source
-        );
-
-        let mut brotli = Vec::new();
-        {
-            let mut writer = brotli::CompressorWriter::new(&mut brotli, 4096, 5, 20);
-            writer.write_all(&source).expect("brotli write");
-            writer.flush().expect("brotli flush");
-        }
-        assert_eq!(
-            maybe_decompress_blob(brotli).expect("brotli decode"),
-            source
-        );
-    }
-
-    #[test]
-    fn maybe_decompress_blob_returns_original_for_unknown_data() {
-        let input = b"not-a-compressed-blob".to_vec();
-        assert_eq!(maybe_decompress_blob(input.clone()).expect("decode"), input);
     }
 
     #[test]

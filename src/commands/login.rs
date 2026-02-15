@@ -2,7 +2,6 @@
 
 use std::env;
 use std::io::{self, BufRead, Write};
-use std::process::Command;
 
 use super::data::ensure_mock_blob;
 use crate::agent::agent_save;
@@ -17,6 +16,7 @@ use crate::session::{Session, session_save};
 use crate::terminal::{self, BOLD, FG_GREEN, RESET, UNDERLINE};
 use crate::xml::{parse_error_cause, parse_ok_session};
 use rand::Rng;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct LoginArgs {
@@ -55,17 +55,18 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
 
     let trusted_id = calculate_trust_id(parsed.trust).map_err(|err| format!("{err}"))?;
     let trust_label = if parsed.trust {
-        Some(calculate_trust_label())
+        Some(calculate_trust_label().map_err(|err| err.to_string())?)
     } else {
         None
     };
 
     let (mut session, key) = loop {
-        let password = prompt_password(&parsed.username).map_err(|err| format!("{err}"))?;
+        let mut password = prompt_password(&parsed.username).map_err(|err| format!("{err}"))?;
         let login_hash = kdf_login_key(&parsed.username, &password, iterations)
             .map_err(|err| format!("{err}"))?;
         let key = kdf_decryption_key(&parsed.username, &password, iterations)
             .map_err(|err| format!("{err}"))?;
+        password.zeroize();
 
         match lastpass_login(
             &parsed.username,
@@ -414,27 +415,26 @@ fn calculate_trust_id_with_store(store: &ConfigStore, force: bool) -> Result<Opt
     Ok(Some(trusted_id))
 }
 
-fn calculate_trust_label() -> String {
-    let hostname = command_output_trimmed("hostname")
-        .or_else(|| env::var("HOSTNAME").ok())
-        .or_else(|| env::var("COMPUTERNAME").ok())
-        .unwrap_or_else(|| "unknown-host".to_string());
-    let sysname = command_output_trimmed("uname -s").unwrap_or_else(|| "UnknownOS".to_string());
-    let release =
-        command_output_trimmed("uname -r").unwrap_or_else(|| "unknown-release".to_string());
-    format!("{hostname} - {sysname} {release}")
-}
-
-fn command_output_trimmed(command: &str) -> Option<String> {
-    let mut parts = command.split_whitespace();
-    let program = parts.next()?;
-    let args: Vec<&str> = parts.collect();
-    let output = Command::new(program).args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
+fn calculate_trust_label() -> std::result::Result<String, String> {
+    #[cfg(unix)]
+    {
+        let uts = nix::sys::utsname::uname()
+            .map_err(|_| "Failed to determine uname.".to_string())?;
+        let nodename = uts.nodename().to_string_lossy();
+        let sysname = uts.sysname().to_string_lossy();
+        let release = uts.release().to_string_lossy();
+        return Ok(format!("{nodename} - {sysname} {release}"));
     }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
+
+    #[cfg(not(unix))]
+    {
+        let hostname = env::var("HOSTNAME")
+            .or_else(|_| env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "unknown-host".to_string());
+        let sysname = env::var("OS").unwrap_or_else(|_| "UnknownOS".to_string());
+        let release = env::var("OS_VERSION").unwrap_or_else(|_| "unknown-release".to_string());
+        Ok(format!("{hostname} - {sysname} {release}"))
+    }
 }
 
 fn post_trust(
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn calculate_trust_label_is_non_empty() {
-        let label = calculate_trust_label();
+        let label = calculate_trust_label().expect("label");
         assert!(label.contains(" - "));
     }
 
@@ -907,13 +907,6 @@ mod tests {
             err,
             crate::error::LpassError::Crypto("login failed")
         ));
-    }
-
-    #[test]
-    fn command_output_trimmed_handles_missing_and_failing_commands() {
-        assert!(command_output_trimmed("__definitely_missing_binary__").is_none());
-        assert!(command_output_trimmed("cargo --definitely-unknown-option").is_none());
-        assert!(command_output_trimmed("true").is_none());
     }
 
     #[test]
