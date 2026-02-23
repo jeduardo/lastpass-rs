@@ -191,13 +191,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/latest" || true
 
       - name: Publish rolling latest release
         uses: ncipollo/release-action@v1
         with:
           tag: latest
           name: latest
-          generateReleaseNotes: false
+          generateReleaseNotes: true
           body: |
             Rolling release built from main.
             Commit: ${{ github.sha }}
