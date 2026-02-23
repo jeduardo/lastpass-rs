@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -315,11 +314,11 @@ fn edit_with_editor(initial: &str) -> Result<String, String> {
         .map_err(|err| format!("write: {err}"))?;
     file.flush().map_err(|err| format!("flush: {err}"))?;
 
-    let editor = env::var("VISUAL")
+    let editor = crate::lpenv::var("VISUAL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
-            env::var("EDITOR")
+            crate::lpenv::var("EDITOR")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         })
@@ -883,16 +882,28 @@ mod tests {
         let any = make_editor_initial_text(&base);
         assert!(any.contains("Name: entry"));
 
-        let username = make_editor_initial_text(&AddArgs { choice: EditChoice::Username, ..base.clone() });
+        let username = make_editor_initial_text(&AddArgs {
+            choice: EditChoice::Username,
+            ..base.clone()
+        });
         assert!(username.ends_with('\n'));
 
-        let password = make_editor_initial_text(&AddArgs { choice: EditChoice::Password, ..base.clone() });
+        let password = make_editor_initial_text(&AddArgs {
+            choice: EditChoice::Password,
+            ..base.clone()
+        });
         assert!(password.ends_with('\n'));
 
-        let url = make_editor_initial_text(&AddArgs { choice: EditChoice::Url, ..base.clone() });
+        let url = make_editor_initial_text(&AddArgs {
+            choice: EditChoice::Url,
+            ..base.clone()
+        });
         assert!(url.ends_with('\n'));
 
-        let notes = make_editor_initial_text(&AddArgs { choice: EditChoice::Notes, ..base.clone() });
+        let notes = make_editor_initial_text(&AddArgs {
+            choice: EditChoice::Notes,
+            ..base.clone()
+        });
         assert!(notes.ends_with('\n'));
 
         let field = make_editor_initial_text(&AddArgs {
@@ -928,13 +939,8 @@ mod tests {
     fn apply_choice_value_updates_existing_field() {
         let mut account = new_account("entry", EditChoice::Any, NoteType::SshKey, false);
         account.fields.push(make_field("Hostname", "old"));
-        apply_choice_value(
-            &mut account,
-            EditChoice::Field,
-            Some("Hostname"),
-            "new",
-        )
-        .expect("update");
+        apply_choice_value(&mut account, EditChoice::Field, Some("Hostname"), "new")
+            .expect("update");
         let field = account
             .fields
             .iter()

@@ -10,6 +10,7 @@ pub mod error;
 pub mod format;
 pub mod http;
 pub mod kdf;
+pub mod lpenv;
 pub mod notes;
 pub mod password;
 pub mod session;

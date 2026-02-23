@@ -4,6 +4,7 @@ use rand::distributions::Alphanumeric;
 use rand::{Rng, thread_rng};
 
 use crate::blob::{Account, Blob};
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::{load_blob, save_blob};
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -16,6 +17,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
+    let usage = "usage: generate [--sync=auto|now|no] [--clip, -c] [--username=USERNAME] [--url=URL] [--no-symbols] {NAME|UNIQUEID} LENGTH";
     let mut username: Option<String> = None;
     let mut url: Option<String> = None;
     let mut positional: Vec<String> = Vec::new();
@@ -26,11 +28,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             positional.push(arg.clone());
             continue;
         }
-        if arg.starts_with("--sync=") {
-            continue;
-        }
-        if arg == "--sync" {
-            let _ = iter.next();
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         if arg == "--clip" || arg == "-c" {
@@ -59,11 +57,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             url = Some(value.to_string());
             continue;
         }
-        return Err("usage: generate [--sync=auto|now|no] [--clip, -c] [--username=USERNAME] [--url=URL] [--no-symbols] {NAME|UNIQUEID} LENGTH".to_string());
+        return Err(usage.to_string());
     }
 
     if positional.len() != 2 {
-        return Err("usage: generate [--sync=auto|now|no] [--clip, -c] [--username=USERNAME] [--url=URL] [--no-symbols] {NAME|UNIQUEID} LENGTH".to_string());
+        return Err(usage.to_string());
     }
 
     let name = positional.remove(0);
@@ -177,4 +175,67 @@ fn next_id(blob: &Blob) -> String {
         }
     }
     format!("{:04}", max_id.saturating_add(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, name: &str, group: &str) -> Account {
+        let fullname = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}/{name}")
+        };
+        Account {
+            id: id.to_string(),
+            share_name: None,
+            name: name.to_string(),
+            name_encrypted: None,
+            group: group.to_string(),
+            group_encrypted: None,
+            fullname,
+            url: String::new(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn run_inner_rejects_invalid_sync_values() {
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: generate"));
+
+        let err = run_inner(&["--sync=bad".to_string()]).expect_err("bad sync value");
+        assert!(err.contains("usage: generate"));
+    }
+
+    #[test]
+    fn split_group_and_next_id_cover_helpers() {
+        assert_eq!(
+            split_group("team/alpha"),
+            ("team".to_string(), "alpha".to_string())
+        );
+        assert_eq!(split_group("alpha"), (String::new(), "alpha".to_string()));
+
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            accounts: vec![account("0002", "a", ""), account("0010", "b", "")],
+        };
+        assert_eq!(next_id(&blob), "0011");
+    }
 }

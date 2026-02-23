@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
@@ -25,7 +24,7 @@ pub(crate) enum SyncMode {
 
 impl SyncMode {
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
+        match value.to_ascii_lowercase().as_str() {
             "auto" => Some(Self::Auto),
             "now" => Some(Self::Now),
             "no" => Some(Self::No),
@@ -35,7 +34,7 @@ impl SyncMode {
 }
 
 pub(crate) fn load_blob() -> Result<Blob> {
-    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return load_mock_blob();
     }
 
@@ -65,7 +64,7 @@ pub(crate) fn load_blob() -> Result<Blob> {
 }
 
 pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
-    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return save_mock_blob(blob);
     }
     let key = agent_get_decryption_key()?;
@@ -77,7 +76,7 @@ pub(crate) fn maybe_push_account_update(account: &Account, sync_mode: SyncMode) 
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return Ok(());
     }
 
@@ -120,7 +119,7 @@ pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) 
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return Ok(());
     }
 
@@ -339,7 +338,7 @@ fn url_encode_component(value: &str) -> String {
 }
 
 pub(crate) fn ensure_mock_blob() -> Result<()> {
-    if env::var("LPASS_HTTP_MOCK").as_deref() != Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() != Ok("1") {
         return Ok(());
     }
     let _ = load_mock_blob()?;
@@ -524,6 +523,8 @@ mod tests {
         assert_eq!(SyncMode::parse("auto"), Some(SyncMode::Auto));
         assert_eq!(SyncMode::parse("now"), Some(SyncMode::Now));
         assert_eq!(SyncMode::parse("no"), Some(SyncMode::No));
+        assert_eq!(SyncMode::parse("AUTO"), Some(SyncMode::Auto));
+        assert_eq!(SyncMode::parse("No"), Some(SyncMode::No));
         assert_eq!(SyncMode::parse("bad"), None);
     }
 

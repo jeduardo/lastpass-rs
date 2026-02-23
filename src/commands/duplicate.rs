@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::Blob;
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::{load_blob, save_blob};
 use crate::terminal;
 
@@ -25,11 +26,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             name = Some(arg.clone());
             continue;
         }
-        if arg.starts_with("--sync=") {
-            continue;
-        }
-        if arg == "--sync" {
-            let _ = iter.next();
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         if arg == "--color" {
@@ -185,6 +182,12 @@ mod tests {
     #[test]
     fn run_inner_rejects_invalid_color_mode() {
         let err = run_inner(&["--color=rainbow".to_string()]).expect_err("bad color");
+        assert!(err.contains("usage: duplicate"));
+
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: duplicate"));
+
+        let err = run_inner(&["--sync=bad".to_string(), "x".to_string()]).expect_err("bad sync");
         assert!(err.contains("usage: duplicate"));
     }
 }

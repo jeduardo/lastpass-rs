@@ -56,9 +56,7 @@ fn account(id: &str, name: &str, group: &str) -> Account {
 fn write_mock_blob(home: &Path, blob: &Blob) {
     let store = store_for(home);
     let json = serde_json::to_vec(blob).expect("blob json");
-    store
-        .write_buffer("blob", &json)
-        .expect("mock blob write");
+    store.write_buffer("blob", &json).expect("mock blob write");
 }
 
 fn write_key_and_verify(home: &Path, key: &[u8; KDF_HASH_LEN]) {
@@ -162,13 +160,69 @@ fn ls_reads_encrypted_blob_json() {
 }
 
 #[test]
+fn ls_uses_saved_env_file_for_mock_mode() {
+    let (temp, home) = unique_test_home();
+    let store = store_for(&home);
+    store
+        .write_string("env", "LPASS_HTTP_MOCK=1\n")
+        .expect("write env");
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        accounts: vec![account("0001", "alpha", "team")],
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env_remove("LPASS_HTTP_MOCK")
+        .args(["ls", "--color=never"])
+        .output()
+        .expect("run ls");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("team/alpha"));
+
+    let _ = temp;
+}
+
+#[test]
+fn alias_expands_before_dispatch_in_cli_flow() {
+    let (temp, home) = unique_test_home();
+    let key = [4u8; KDF_HASH_LEN];
+    write_session_and_blob(&home, &key);
+    let store = store_for(&home);
+    store
+        .write_string("alias.passclip", "show --password -c")
+        .expect("alias write");
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .args(["passclip", "team/entry"])
+        .output()
+        .expect("run alias command");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("secret"));
+
+    let _ = temp;
+}
+
+#[test]
 fn rm_removes_account_with_mock_env() {
     let (temp, home) = unique_test_home();
     let exe = env!("CARGO_BIN_EXE_lpass");
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env("LPASS_HTTP_MOCK", "1")
-        .args(["rm", "--sync=no", "--color=never", "test-group/test-account"])
+        .args([
+            "rm",
+            "--sync=no",
+            "--color=never",
+            "test-group/test-account",
+        ])
         .output()
         .expect("run rm");
     assert_eq!(output.status.code().unwrap_or(-1), 0);
@@ -246,7 +300,10 @@ fn rm_reports_ambiguous_match() {
     let blob = Blob {
         version: 1,
         local_version: false,
-        accounts: vec![account("0001", "dup", "team"), account("0002", "dup", "other")],
+        accounts: vec![
+            account("0001", "dup", "team"),
+            account("0002", "dup", "other"),
+        ],
     };
     write_mock_blob(&home, &blob);
 
