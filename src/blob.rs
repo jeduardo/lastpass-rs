@@ -21,6 +21,10 @@ pub struct Account {
     pub id: String,
     #[serde(default)]
     pub share_name: Option<String>,
+    #[serde(default)]
+    pub share_id: Option<String>,
+    #[serde(default)]
+    pub share_readonly: bool,
     pub name: String,
     pub name_encrypted: Option<String>,
     pub group: String,
@@ -48,13 +52,22 @@ pub struct Account {
 pub struct Blob {
     pub version: u64,
     pub local_version: bool,
+    #[serde(default)]
+    pub shares: Vec<Share>,
     pub accounts: Vec<Account>,
 }
 
 #[derive(Debug, Clone)]
 struct ShareContext {
-    name: String,
+    share: Share,
     key: [u8; KDF_HASH_LEN],
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
+pub struct Share {
+    pub id: String,
+    pub name: String,
+    pub readonly: bool,
 }
 
 pub fn blob_parse(
@@ -78,6 +91,9 @@ pub fn blob_parse(
             }
             "SHAR" => {
                 current_share = parse_share(&mut chunk, private_key)?;
+                if let Some(share) = current_share.as_ref().map(|ctx| ctx.share.clone()) {
+                    blob.shares.push(share);
+                }
             }
             "ACCT" => {
                 let account_key = current_share
@@ -86,8 +102,10 @@ pub fn blob_parse(
                     .unwrap_or(key);
                 let mut account = parse_account(&mut chunk, account_key)?;
                 if let Some(share) = &current_share {
-                    account.share_name = Some(share.name.clone());
-                    account.fullname = format!("{}/{}", share.name, account.fullname);
+                    account.share_name = Some(share.share.name.clone());
+                    account.share_id = Some(share.share.id.clone());
+                    account.share_readonly = share.share.readonly;
+                    account.fullname = format!("{}/{}", share.share.name, account.fullname);
                 }
                 blob.accounts.push(account);
                 current_account_index = Some(blob.accounts.len() - 1);
@@ -125,7 +143,7 @@ fn parse_share(
         return Ok(None);
     };
 
-    let _id = read_plain_string(chunk)?;
+    let id = read_plain_string(chunk)?;
     let encrypted_share_key_hex = read_plain_string(chunk)?;
     if encrypted_share_key_hex.is_empty() {
         return Ok(None);
@@ -162,10 +180,14 @@ fn parse_share(
         Err(_) => String::new(),
     };
 
-    let _readonly = read_boolean(chunk)?;
+    let readonly = read_boolean(chunk)?;
 
     Ok(Some(ShareContext {
-        name: share_name,
+        share: Share {
+            id,
+            name: share_name,
+            readonly,
+        },
         key: share_key,
     }))
 }
@@ -237,6 +259,8 @@ fn parse_account(chunk: &mut ChunkCursor<'_>, key: &[u8; KDF_HASH_LEN]) -> Resul
     let mut account = Account {
         id,
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name,
         name_encrypted,
         group,

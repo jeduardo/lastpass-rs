@@ -2,7 +2,7 @@
 
 use crate::blob::Account;
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::load_blob;
+use crate::commands::data::{SyncMode, load_blob};
 use crate::format::{format_account, format_field};
 use crate::notes::expand_notes;
 use crate::terminal::{self, BOLD, FG_BLUE, FG_CYAN, FG_GREEN, FG_YELLOW, RESET};
@@ -37,6 +37,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut names: Vec<String> = Vec::new();
     let mut title_format_override: Option<String> = None;
     let mut field_format_override: Option<String> = None;
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -76,8 +77,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             title_format_override = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--title-format=") {
             title_format_override = Some(value.to_string());
-        } else if parse_sync_option(arg, &mut iter, usage)?.is_some() {
-            // parsed and ignored for now
+        } else if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
         } else if arg == "--all" || arg == "-A" {
             choice = ShowChoice::All;
         } else if arg == "--basic-regexp" || arg == "-G" {
@@ -117,7 +118,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let field_format =
         field_format_override.unwrap_or_else(|| format!("{FG_YELLOW}%fn{RESET}: %fv"));
 
-    let blob = load_blob().map_err(|err| format!("{err}"))?;
+    let blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let matches = find_matches(&blob.accounts, &names);
     if matches.is_empty() {
         return Err("Could not find specified account(s).".to_string());
@@ -342,6 +343,8 @@ mod tests {
         Account {
             id: id.to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: name.to_string(),
             name_encrypted: None,
             group: group.to_string(),

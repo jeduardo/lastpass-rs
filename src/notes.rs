@@ -365,6 +365,8 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
     let mut expanded = Account {
         id: account.id.clone(),
         share_name: account.share_name.clone(),
+        share_id: account.share_id.clone(),
+        share_readonly: account.share_readonly,
         name: account.name.clone(),
         name_encrypted: account.name_encrypted.clone(),
         group: account.group.clone(),
@@ -511,6 +513,8 @@ pub fn collapse_notes(account: &Account) -> Account {
     Account {
         id: account.id.clone(),
         share_name: account.share_name.clone(),
+        share_id: account.share_id.clone(),
+        share_readonly: account.share_readonly,
         name: account.name.clone(),
         name_encrypted: account.name_encrypted.clone(),
         group: account.group.clone(),
@@ -552,6 +556,8 @@ mod tests {
         Account {
             id: "1".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "note".to_string(),
             name_encrypted: None,
             group: "".to_string(),

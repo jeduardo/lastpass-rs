@@ -2,14 +2,21 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 
 fn unique_test_home() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards")
         .as_nanos();
-    std::env::temp_dir().join(format!("lpass-command-cov-{nanos}"))
+    let seq = NEXT_TEST_HOME_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "lpass-command-cov-{}-{nanos}-{seq}",
+        std::process::id()
+    ))
 }
 
 fn run_with_mock(home: &Path, args: &[&str], stdin: Option<&str>, http_mock: bool) -> Output {

@@ -1,6 +1,6 @@
 # Task 02: Blob Sync Semantics and Share-Aware Data Model
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Implement C-like blob loading semantics (`--sync` and auto-sync TTL) and extend the model to represent shares/read-only metadata needed for parity.

@@ -2,7 +2,7 @@
 
 use crate::blob::Account;
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::load_blob;
+use crate::commands::data::{SyncMode, load_blob};
 use crate::terminal;
 
 const DEFAULT_FIELDS: &[&str] = &[
@@ -23,13 +23,15 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let usage =
         "usage: export [--sync=auto|now|no] [--color=auto|never|always] [--fields=FIELDLIST]";
     let mut fields: Vec<String> = Vec::new();
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         if !arg.starts_with('-') {
             return Err(usage.to_string());
         }
-        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+        if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
             continue;
         }
         if arg == "--color" {
@@ -59,7 +61,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         fields = DEFAULT_FIELDS.iter().map(|item| item.to_string()).collect();
     }
 
-    let blob = load_blob().map_err(|err| format!("{err}"))?;
+    let blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let mut out = String::new();
 
     write_row(&fields, &mut out);
@@ -155,6 +157,8 @@ mod tests {
         Account {
             id: "42".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: "team".to_string(),

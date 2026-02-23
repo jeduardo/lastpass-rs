@@ -3,8 +3,8 @@
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
-    config_read_buffer, config_read_encrypted_buffer, config_write_buffer,
-    config_write_encrypted_buffer,
+    config_exists, config_mtime, config_read_buffer, config_read_encrypted_buffer, config_touch,
+    config_write_buffer, config_write_encrypted_buffer,
 };
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, decrypt_private_key};
 use crate::error::{LpassError, Result};
@@ -12,6 +12,7 @@ use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::Session;
 use serde_json;
+use std::time::{Duration, SystemTime};
 
 const BLOB_JSON_NAME: &str = "blob.json";
 
@@ -33,34 +34,156 @@ impl SyncMode {
     }
 }
 
-pub(crate) fn load_blob() -> Result<Blob> {
+pub(crate) fn load_blob(sync_mode: SyncMode) -> Result<Blob> {
     if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return load_mock_blob();
     }
 
     let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
-    let session = crate::session::session_load(&key).map_err(map_decryption_key_error)?;
-    if session.is_none() {
-        return Err(LpassError::User(
+    let mut session = crate::session::session_load(&key)
+        .map_err(map_decryption_key_error)?
+        .ok_or(LpassError::User(
             "Could not find session. Perhaps you need to login with `lpass login`.",
-        ));
-    }
+        ))?;
+    let private_key = load_private_key(&key)?;
+    let client = HttpClient::from_env()?;
 
-    if let Some(buffer) = config_read_encrypted_buffer(BLOB_JSON_NAME, &key)? {
+    let blob = match sync_mode {
+        SyncMode::No => load_local_blob(&key, private_key.as_deref())?,
+        SyncMode::Now => load_latest_blob(&client, &mut session, &key, private_key.as_deref())?,
+        SyncMode::Auto => {
+            if local_blob_is_fresh(auto_sync_time())? {
+                load_local_blob(&key, private_key.as_deref())?
+            } else {
+                load_latest_blob(&client, &mut session, &key, private_key.as_deref())?
+            }
+        }
+    };
+    Ok(blob)
+}
+
+fn load_local_blob(key: &[u8; KDF_HASH_LEN], private_key: Option<&[u8]>) -> Result<Blob> {
+    if let Some(buffer) = config_read_encrypted_buffer(BLOB_JSON_NAME, key)? {
         let blob = serde_json::from_slice::<Blob>(&buffer)
             .map_err(|_| LpassError::Crypto("invalid blob"))?;
         return Ok(blob);
     }
 
-    let blob_bytes =
-        config_read_encrypted_buffer("blob", &key)?.ok_or(LpassError::Crypto("missing blob"))?;
+    let blob_bytes = config_read_encrypted_buffer("blob", key)?.ok_or(LpassError::Crypto(
+        "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
+    ))?;
     if !looks_like_blob(&blob_bytes) {
         return Err(LpassError::Crypto(
             "blob response was not a blob; try logging in again",
         ));
     }
-    let private_key = load_private_key(&key)?;
-    crate::blob::blob_parse(&blob_bytes, &key, private_key.as_deref())
+    crate::blob::blob_parse(&blob_bytes, key, private_key)
+}
+
+fn load_latest_blob(
+    client: &HttpClient,
+    session: &mut Session,
+    key: &[u8; KDF_HASH_LEN],
+    private_key: Option<&[u8]>,
+) -> Result<Blob> {
+    let local = load_local_blob(key, private_key).ok();
+    if let Some(local_blob) = local {
+        let remote_version = fetch_remote_blob_version(client, session, key)?;
+        if remote_version == 0 {
+            return Err(blob_fetch_error());
+        }
+        if remote_version <= local_blob.version {
+            touch_local_blob_cache()?;
+            return Ok(local_blob);
+        }
+    }
+
+    fetch_and_store_blob(client, session, key, private_key)
+}
+
+fn fetch_remote_blob_version(
+    client: &HttpClient,
+    session: &mut Session,
+    key: &[u8; KDF_HASH_LEN],
+) -> Result<u64> {
+    let response =
+        client.post_lastpass(None, "login_check.php", Some(session), &[("method", "cli")])?;
+    if response.status >= 400 {
+        return Ok(0);
+    }
+    let version = crate::xml::parse_login_check(&response.body, session).unwrap_or(0);
+    if version > 0 {
+        let _ = crate::session::session_save(session, key);
+    }
+    Ok(version)
+}
+
+fn fetch_and_store_blob(
+    client: &HttpClient,
+    session: &Session,
+    key: &[u8; KDF_HASH_LEN],
+    private_key: Option<&[u8]>,
+) -> Result<Blob> {
+    let params = [
+        ("mobile", "1"),
+        ("requestsrc", "cli"),
+        ("hasplugin", env!("CARGO_PKG_VERSION")),
+    ];
+    let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
+    if response.body.is_empty() {
+        return Err(blob_fetch_error());
+    }
+    config_write_encrypted_buffer("blob", &response.body, key)?;
+    let _ = crate::config::config_unlink(BLOB_JSON_NAME);
+    crate::blob::blob_parse(&response.body, key, private_key)
+}
+
+fn touch_local_blob_cache() -> Result<()> {
+    if config_exists("blob") {
+        config_touch("blob")?;
+    }
+    if config_exists(BLOB_JSON_NAME) {
+        config_touch(BLOB_JSON_NAME)?;
+    }
+    Ok(())
+}
+
+fn local_blob_is_fresh(max_age: Duration) -> Result<bool> {
+    let now = SystemTime::now();
+    let mut freshest: Option<SystemTime> = None;
+
+    if let Some(mtime) = config_mtime("blob")? {
+        freshest = Some(mtime);
+    }
+    if let Some(mtime) = config_mtime(BLOB_JSON_NAME)? {
+        freshest = match freshest {
+            Some(existing) if existing >= mtime => Some(existing),
+            _ => Some(mtime),
+        };
+    }
+
+    let Some(mtime) = freshest else {
+        return Ok(false);
+    };
+    match now.duration_since(mtime) {
+        Ok(age) => Ok(age < max_age),
+        Err(_) => Ok(true),
+    }
+}
+
+fn auto_sync_time() -> Duration {
+    let secs = crate::lpenv::var("LPASS_AUTO_SYNC_TIME")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(5);
+    Duration::from_secs(secs)
+}
+
+fn blob_fetch_error() -> LpassError {
+    LpassError::User(
+        "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
+    )
 }
 
 pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
@@ -163,6 +286,9 @@ fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec
         ("delete".to_string(), "1".to_string()),
         ("aid".to_string(), account.id.clone()),
     ];
+    if let Some(share_id) = &account.share_id {
+        params.push(("sharedfolderid".to_string(), share_id.clone()));
+    }
     if session.url_logging_enabled {
         params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
     }
@@ -192,9 +318,7 @@ fn refresh_blob_from_server(
     ];
     let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
     if response.body.is_empty() {
-        return Err(LpassError::User(
-            "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
-        ));
+        return Err(blob_fetch_error());
     }
     config_write_encrypted_buffer("blob", &response.body, key)?;
     let _ = crate::config::config_unlink(BLOB_JSON_NAME);
@@ -245,6 +369,10 @@ fn build_show_website_params(
             },
         ),
     ];
+
+    if let Some(share_id) = &account.share_id {
+        params.push(("sharedfolderid".to_string(), share_id.clone()));
+    }
 
     if let Some(field_data) = stringify_fields_data(&account.fields, key)? {
         params.push(("save_all".to_string(), "1".to_string()));
@@ -386,6 +514,7 @@ fn mock_blob() -> Blob {
     let mut blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: Vec::new(),
     };
 
@@ -455,6 +584,8 @@ fn mock_account(
     Account {
         id: id.to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: name.to_string(),
         name_encrypted: None,
         group: group.to_string(),
@@ -529,6 +660,22 @@ mod tests {
     }
 
     #[test]
+    fn auto_sync_time_defaults_and_respects_env() {
+        crate::lpenv::clear_overrides_for_tests();
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "17");
+        assert_eq!(auto_sync_time(), Duration::from_secs(17));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "0");
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "invalid");
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+        crate::lpenv::clear_overrides_for_tests();
+    }
+
+    #[test]
     fn url_encode_component_escapes_reserved_bytes() {
         assert_eq!(url_encode_component("a b/c"), "a%20b%2Fc");
         assert_eq!(url_encode_component("alpha-_.~"), "alpha-_.~");
@@ -558,6 +705,8 @@ mod tests {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: "group".to_string(),
@@ -601,10 +750,60 @@ mod tests {
     }
 
     #[test]
+    fn build_show_website_params_includes_sharedfolderid() {
+        let account = Account {
+            id: "0".to_string(),
+            share_name: Some("Team".to_string()),
+            share_id: Some("4321".to_string()),
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "group".to_string(),
+            group_encrypted: None,
+            fullname: "Team/group/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "user".to_string(),
+            username_encrypted: None,
+            password: "pass".to_string(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let key = [3u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let params = build_show_website_params(&account, &session, &key).expect("params");
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| k == "sharedfolderid" && v == "4321")
+        );
+    }
+
+    #[test]
     fn build_show_website_params_uses_encrypted_url_when_feature_enabled() {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: String::new(),
@@ -689,6 +888,8 @@ mod tests {
         let mut account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
@@ -729,6 +930,8 @@ mod tests {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
@@ -765,10 +968,20 @@ mod tests {
         let params = build_show_website_delete_params(&account, &session);
         assert!(params.iter().any(|(k, _)| k == "aid"));
         assert!(!params.iter().any(|(k, _)| k == "recordUrl"));
+        assert!(!params.iter().any(|(k, _)| k == "sharedfolderid"));
 
         session.url_logging_enabled = true;
         let params = build_show_website_delete_params(&account, &session);
         assert!(params.iter().any(|(k, _)| k == "recordUrl"));
+
+        let mut shared = account.clone();
+        shared.share_id = Some("9988".to_string());
+        let params = build_show_website_delete_params(&shared, &session);
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| k == "sharedfolderid" && v == "9988")
+        );
     }
 
     #[test]
@@ -777,6 +990,8 @@ mod tests {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: String::new(),
@@ -824,6 +1039,8 @@ mod tests {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
