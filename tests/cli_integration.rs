@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use lpass_core::blob::{Account, Blob};
+use lpass_core::blob::{Account, Blob, Share};
 use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
@@ -29,6 +29,8 @@ fn account(id: &str, name: &str, group: &str) -> Account {
     Account {
         id: id.to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: name.to_string(),
         name_encrypted: None,
         group: group.to_string(),
@@ -89,6 +91,8 @@ fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
     let account = Account {
         id: "100".to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: "entry".to_string(),
         name_encrypted: None,
         group: "team".to_string(),
@@ -115,6 +119,7 @@ fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
     let blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: vec![account],
     };
     let json = serde_json::to_vec(&blob).expect("blob json");
@@ -169,6 +174,7 @@ fn ls_uses_saved_env_file_for_mock_mode() {
     let blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
     };
     write_mock_blob(&home, &blob);
@@ -236,6 +242,7 @@ fn duplicate_accepts_sync_and_color_flags() {
     let blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
     };
     write_mock_blob(&home, &blob);
@@ -278,6 +285,7 @@ fn rm_accepts_space_separated_sync_and_color_flags() {
     let blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
     };
     write_mock_blob(&home, &blob);
@@ -300,6 +308,7 @@ fn rm_reports_ambiguous_match() {
     let blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: vec![
             account("0001", "dup", "team"),
             account("0002", "dup", "other"),
@@ -371,6 +380,97 @@ fn sync_reports_missing_session() {
     assert_eq!(output.status.code().unwrap_or(-1), 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Could not find session"));
+
+    let _ = temp;
+}
+
+#[test]
+fn ls_sync_mode_now_requires_remote_while_no_uses_local() {
+    let (temp, home) = unique_test_home();
+    let key = [6u8; KDF_HASH_LEN];
+    write_session_and_blob(&home, &key);
+    let store = store_for(&home);
+    store
+        .write_string("session_server", "127.0.0.1:1")
+        .expect("write session server");
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let local_ok = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .args(["ls", "--sync=no", "--color=never"])
+        .output()
+        .expect("run ls sync=no");
+    assert_eq!(local_ok.status.code().unwrap_or(-1), 0);
+
+    let now_fail = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .args(["ls", "--sync=now", "--color=never"])
+        .output()
+        .expect("run ls sync=now");
+    assert_eq!(now_fail.status.code().unwrap_or(-1), 1);
+
+    let _ = temp;
+}
+
+#[test]
+fn ls_includes_empty_shared_folders_from_blob_metadata() {
+    let (temp, home) = unique_test_home();
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![Share {
+            id: "9001".to_string(),
+            name: "Team Shared".to_string(),
+            readonly: false,
+        }],
+        accounts: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["ls", "--color=never"])
+        .output()
+        .expect("run ls");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Team Shared"));
+
+    let _ = temp;
+}
+
+#[test]
+fn rm_rejects_readonly_shared_entries() {
+    let (temp, home) = unique_test_home();
+    let mut shared = account("0001", "entry", "Team");
+    shared.share_name = Some("Team".to_string());
+    shared.share_id = Some("77".to_string());
+    shared.share_readonly = true;
+
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![Share {
+            id: "77".to_string(),
+            name: "Team".to_string(),
+            readonly: true,
+        }],
+        accounts: vec![shared],
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["rm", "Team/entry"])
+        .output()
+        .expect("run rm");
+    assert_eq!(output.status.code().unwrap_or(-1), 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("readonly shared entry"), "stderr: {stderr}");
 
     let _ = temp;
 }

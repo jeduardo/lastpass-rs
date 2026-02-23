@@ -383,6 +383,25 @@ fn read_pid(stream: &mut std::os::unix::net::UnixStream) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{
+        ConfigEnv, config_exists, config_write_buffer, config_write_encrypted_string,
+        config_write_string, set_test_env,
+    };
+    use crate::kdf::kdf_decryption_key;
+    use std::io::{Read, Write};
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
+    use tempfile::TempDir;
+
+    fn test_config_env(temp: &TempDir) -> ConfigEnv {
+        let runtime = temp.path().join("runtime");
+        std::fs::create_dir_all(&runtime).expect("create runtime");
+        ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            xdg_runtime_dir: Some(runtime),
+            ..ConfigEnv::default()
+        }
+    }
 
     #[test]
     fn maybe_run_agent_returns_none_for_non_agent_commands() {
@@ -410,5 +429,112 @@ mod tests {
     #[test]
     fn agent_timeout_has_default_when_env_missing() {
         assert_eq!(agent_timeout(), Some(Duration::from_secs(60 * 60)));
+    }
+
+    #[test]
+    fn agent_timeout_respects_zero_and_invalid_values() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_AGENT_TIMEOUT", "0");
+        assert_eq!(agent_timeout(), None);
+
+        crate::lpenv::set_override_for_tests("LPASS_AGENT_TIMEOUT", "invalid");
+        assert_eq!(agent_timeout(), Some(Duration::from_secs(60 * 60)));
+    }
+
+    #[test]
+    fn agent_get_decryption_key_prefers_valid_plaintext_key() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+
+        let key = [9u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write plaintext key");
+        config_write_encrypted_string("verify", VERIFY_STRING, &key).expect("write verify");
+        let got = agent_get_decryption_key().expect("get key");
+        assert_eq!(got, key);
+    }
+
+    #[test]
+    fn agent_get_decryption_key_falls_back_to_askpass_loaded_key() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+
+        let askpass = temp.path().join("askpass.sh");
+        std::fs::write(&askpass, "#!/bin/sh\necho hunter2\n").expect("write askpass");
+        std::fs::set_permissions(&askpass, std::fs::Permissions::from_mode(0o700))
+            .expect("chmod askpass");
+
+        let username = "user@example.com";
+        let iterations = 2u32;
+        let key = kdf_decryption_key(username, "hunter2", iterations).expect("derive key");
+        config_write_string("iterations", &iterations.to_string()).expect("write iterations");
+        config_write_string("username", username).expect("write username");
+        config_write_encrypted_string("verify", VERIFY_STRING, &key).expect("write verify");
+        config_write_buffer("plaintext_key", b"bad").expect("write invalid plaintext key");
+
+        crate::lpenv::set_override_for_tests("LPASS_ASKPASS", &askpass.display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_AGENT_DISABLE", "1");
+
+        let got = agent_get_decryption_key().expect("load via askpass");
+        assert_eq!(got, key);
+        assert!(!config_exists("plaintext_key"));
+    }
+
+    #[test]
+    fn agent_is_available_checks_plaintext_key_validity() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+
+        let key = [4u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", VERIFY_STRING, &key).expect("write verify");
+        assert!(agent_is_available());
+
+        config_write_buffer("plaintext_key", b"bad").expect("write invalid key");
+        assert!(!agent_is_available());
+    }
+
+    #[test]
+    fn handle_client_writes_pid_and_key_over_stream_pair() {
+        let key = [5u8; KDF_HASH_LEN];
+        let (mut client, server) = UnixStream::pair().expect("socket pair");
+        let worker = std::thread::spawn(move || handle_client(server, &key));
+
+        if socket_send_pid() {
+            client
+                .write_all(&1234u32.to_ne_bytes())
+                .expect("write pid request");
+            let mut pid = [0u8; 4];
+            client.read_exact(&mut pid).expect("read pid response");
+            assert!(u32::from_ne_bytes(pid) > 0);
+        }
+
+        let mut got = [0u8; KDF_HASH_LEN];
+        client.read_exact(&mut got).expect("read key");
+        assert_eq!(got, key);
+        worker.join().expect("join").expect("handle client");
+    }
+
+    #[test]
+    fn read_pid_reports_truncated_payload() {
+        let (mut writer, mut reader) = UnixStream::pair().expect("socket pair");
+        writer.write_all(&[1u8]).expect("write short pid");
+        drop(writer);
+
+        let err = read_pid(&mut reader).expect_err("must fail");
+        assert!(format!("{err}").contains("read pid"));
+    }
+
+    #[test]
+    fn agent_ask_and_agent_kill_handle_missing_socket() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+
+        let err = agent_ask().expect_err("missing socket should fail");
+        assert!(format!("{err}").contains("connect"));
+        agent_kill().expect("kill without socket should be ok");
     }
 }

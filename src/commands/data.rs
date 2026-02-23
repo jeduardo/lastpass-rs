@@ -3,8 +3,8 @@
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
-    config_read_buffer, config_read_encrypted_buffer, config_write_buffer,
-    config_write_encrypted_buffer,
+    config_exists, config_mtime, config_read_buffer, config_read_encrypted_buffer, config_touch,
+    config_write_buffer, config_write_encrypted_buffer,
 };
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, decrypt_private_key};
 use crate::error::{LpassError, Result};
@@ -12,6 +12,7 @@ use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::Session;
 use serde_json;
+use std::time::{Duration, SystemTime};
 
 const BLOB_JSON_NAME: &str = "blob.json";
 
@@ -33,34 +34,156 @@ impl SyncMode {
     }
 }
 
-pub(crate) fn load_blob() -> Result<Blob> {
+pub(crate) fn load_blob(sync_mode: SyncMode) -> Result<Blob> {
     if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         return load_mock_blob();
     }
 
     let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
-    let session = crate::session::session_load(&key).map_err(map_decryption_key_error)?;
-    if session.is_none() {
-        return Err(LpassError::User(
+    let mut session = crate::session::session_load(&key)
+        .map_err(map_decryption_key_error)?
+        .ok_or(LpassError::User(
             "Could not find session. Perhaps you need to login with `lpass login`.",
-        ));
-    }
+        ))?;
+    let private_key = load_private_key(&key)?;
+    let client = HttpClient::from_env()?;
 
-    if let Some(buffer) = config_read_encrypted_buffer(BLOB_JSON_NAME, &key)? {
+    let blob = match sync_mode {
+        SyncMode::No => load_local_blob(&key, private_key.as_deref())?,
+        SyncMode::Now => load_latest_blob(&client, &mut session, &key, private_key.as_deref())?,
+        SyncMode::Auto => {
+            if local_blob_is_fresh(auto_sync_time())? {
+                load_local_blob(&key, private_key.as_deref())?
+            } else {
+                load_latest_blob(&client, &mut session, &key, private_key.as_deref())?
+            }
+        }
+    };
+    Ok(blob)
+}
+
+fn load_local_blob(key: &[u8; KDF_HASH_LEN], private_key: Option<&[u8]>) -> Result<Blob> {
+    if let Some(buffer) = config_read_encrypted_buffer(BLOB_JSON_NAME, key)? {
         let blob = serde_json::from_slice::<Blob>(&buffer)
             .map_err(|_| LpassError::Crypto("invalid blob"))?;
         return Ok(blob);
     }
 
-    let blob_bytes =
-        config_read_encrypted_buffer("blob", &key)?.ok_or(LpassError::Crypto("missing blob"))?;
+    let blob_bytes = config_read_encrypted_buffer("blob", key)?.ok_or(LpassError::Crypto(
+        "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
+    ))?;
     if !looks_like_blob(&blob_bytes) {
         return Err(LpassError::Crypto(
             "blob response was not a blob; try logging in again",
         ));
     }
-    let private_key = load_private_key(&key)?;
-    crate::blob::blob_parse(&blob_bytes, &key, private_key.as_deref())
+    crate::blob::blob_parse(&blob_bytes, key, private_key)
+}
+
+fn load_latest_blob(
+    client: &HttpClient,
+    session: &mut Session,
+    key: &[u8; KDF_HASH_LEN],
+    private_key: Option<&[u8]>,
+) -> Result<Blob> {
+    let local = load_local_blob(key, private_key).ok();
+    if let Some(local_blob) = local {
+        let remote_version = fetch_remote_blob_version(client, session, key)?;
+        if remote_version == 0 {
+            return Err(blob_fetch_error());
+        }
+        if remote_version <= local_blob.version {
+            touch_local_blob_cache()?;
+            return Ok(local_blob);
+        }
+    }
+
+    fetch_and_store_blob(client, session, key, private_key)
+}
+
+fn fetch_remote_blob_version(
+    client: &HttpClient,
+    session: &mut Session,
+    key: &[u8; KDF_HASH_LEN],
+) -> Result<u64> {
+    let response =
+        client.post_lastpass(None, "login_check.php", Some(session), &[("method", "cli")])?;
+    if response.status >= 400 {
+        return Ok(0);
+    }
+    let version = crate::xml::parse_login_check(&response.body, session).unwrap_or(0);
+    if version > 0 {
+        let _ = crate::session::session_save(session, key);
+    }
+    Ok(version)
+}
+
+fn fetch_and_store_blob(
+    client: &HttpClient,
+    session: &Session,
+    key: &[u8; KDF_HASH_LEN],
+    private_key: Option<&[u8]>,
+) -> Result<Blob> {
+    let params = [
+        ("mobile", "1"),
+        ("requestsrc", "cli"),
+        ("hasplugin", env!("CARGO_PKG_VERSION")),
+    ];
+    let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
+    if response.body.is_empty() {
+        return Err(blob_fetch_error());
+    }
+    config_write_encrypted_buffer("blob", &response.body, key)?;
+    let _ = crate::config::config_unlink(BLOB_JSON_NAME);
+    crate::blob::blob_parse(&response.body, key, private_key)
+}
+
+fn touch_local_blob_cache() -> Result<()> {
+    if config_exists("blob") {
+        config_touch("blob")?;
+    }
+    if config_exists(BLOB_JSON_NAME) {
+        config_touch(BLOB_JSON_NAME)?;
+    }
+    Ok(())
+}
+
+fn local_blob_is_fresh(max_age: Duration) -> Result<bool> {
+    let now = SystemTime::now();
+    let mut freshest: Option<SystemTime> = None;
+
+    if let Some(mtime) = config_mtime("blob")? {
+        freshest = Some(mtime);
+    }
+    if let Some(mtime) = config_mtime(BLOB_JSON_NAME)? {
+        freshest = match freshest {
+            Some(existing) if existing >= mtime => Some(existing),
+            _ => Some(mtime),
+        };
+    }
+
+    let Some(mtime) = freshest else {
+        return Ok(false);
+    };
+    match now.duration_since(mtime) {
+        Ok(age) => Ok(age < max_age),
+        Err(_) => Ok(true),
+    }
+}
+
+fn auto_sync_time() -> Duration {
+    let secs = crate::lpenv::var("LPASS_AUTO_SYNC_TIME")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(5);
+    Duration::from_secs(secs)
+}
+
+fn blob_fetch_error() -> LpassError {
+    LpassError::User(
+        "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
+    )
 }
 
 pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
@@ -163,6 +286,9 @@ fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec
         ("delete".to_string(), "1".to_string()),
         ("aid".to_string(), account.id.clone()),
     ];
+    if let Some(share_id) = &account.share_id {
+        params.push(("sharedfolderid".to_string(), share_id.clone()));
+    }
     if session.url_logging_enabled {
         params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
     }
@@ -192,9 +318,7 @@ fn refresh_blob_from_server(
     ];
     let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
     if response.body.is_empty() {
-        return Err(LpassError::User(
-            "Unable to fetch blob. Either your session is invalid and you need to login with `lpass login`, you need to synchronize, your blob is empty, or there is something wrong with your internet connection.",
-        ));
+        return Err(blob_fetch_error());
     }
     config_write_encrypted_buffer("blob", &response.body, key)?;
     let _ = crate::config::config_unlink(BLOB_JSON_NAME);
@@ -245,6 +369,10 @@ fn build_show_website_params(
             },
         ),
     ];
+
+    if let Some(share_id) = &account.share_id {
+        params.push(("sharedfolderid".to_string(), share_id.clone()));
+    }
 
     if let Some(field_data) = stringify_fields_data(&account.fields, key)? {
         params.push(("save_all".to_string(), "1".to_string()));
@@ -386,6 +514,7 @@ fn mock_blob() -> Blob {
     let mut blob = Blob {
         version: 1,
         local_version: false,
+        shares: Vec::new(),
         accounts: Vec::new(),
     };
 
@@ -455,6 +584,8 @@ fn mock_account(
     Account {
         id: id.to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: name.to_string(),
         name_encrypted: None,
         group: group.to_string(),
@@ -482,6 +613,14 @@ fn mock_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{session_load, session_save};
+    use crate::config::{
+        ConfigEnv, config_path, config_read_encrypted_buffer, config_unlink, config_write_buffer,
+        config_write_encrypted_buffer, config_write_encrypted_string, set_test_env,
+    };
+    use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+    use filetime::{FileTime, set_file_mtime};
+    use tempfile::TempDir;
 
     #[test]
     fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
@@ -529,6 +668,21 @@ mod tests {
     }
 
     #[test]
+    fn auto_sync_time_defaults_and_respects_env() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "17");
+        assert_eq!(auto_sync_time(), Duration::from_secs(17));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "0");
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "invalid");
+        assert_eq!(auto_sync_time(), Duration::from_secs(5));
+    }
+
+    #[test]
     fn url_encode_component_escapes_reserved_bytes() {
         assert_eq!(url_encode_component("a b/c"), "a%20b%2Fc");
         assert_eq!(url_encode_component("alpha-_.~"), "alpha-_.~");
@@ -558,6 +712,8 @@ mod tests {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: "group".to_string(),
@@ -601,10 +757,60 @@ mod tests {
     }
 
     #[test]
+    fn build_show_website_params_includes_sharedfolderid() {
+        let account = Account {
+            id: "0".to_string(),
+            share_name: Some("Team".to_string()),
+            share_id: Some("4321".to_string()),
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "group".to_string(),
+            group_encrypted: None,
+            fullname: "Team/group/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "user".to_string(),
+            username_encrypted: None,
+            password: "pass".to_string(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let key = [3u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        let params = build_show_website_params(&account, &session, &key).expect("params");
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| k == "sharedfolderid" && v == "4321")
+        );
+    }
+
+    #[test]
     fn build_show_website_params_uses_encrypted_url_when_feature_enabled() {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: String::new(),
@@ -689,6 +895,8 @@ mod tests {
         let mut account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
@@ -729,6 +937,8 @@ mod tests {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
@@ -765,10 +975,20 @@ mod tests {
         let params = build_show_website_delete_params(&account, &session);
         assert!(params.iter().any(|(k, _)| k == "aid"));
         assert!(!params.iter().any(|(k, _)| k == "recordUrl"));
+        assert!(!params.iter().any(|(k, _)| k == "sharedfolderid"));
 
         session.url_logging_enabled = true;
         let params = build_show_website_delete_params(&account, &session);
         assert!(params.iter().any(|(k, _)| k == "recordUrl"));
+
+        let mut shared = account.clone();
+        shared.share_id = Some("9988".to_string());
+        let params = build_show_website_delete_params(&shared, &session);
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| k == "sharedfolderid" && v == "9988")
+        );
     }
 
     #[test]
@@ -777,6 +997,8 @@ mod tests {
         let account = Account {
             id: "0".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: String::new(),
@@ -824,6 +1046,8 @@ mod tests {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: String::new(),
             name_encrypted: None,
             group: String::new(),
@@ -863,5 +1087,211 @@ mod tests {
         let err = push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Now)
             .expect_err("now should fail because mock getaccts body is empty");
         assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn mock_mode_paths_cover_load_save_and_push_helpers() {
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        ensure_mock_blob().expect("ensure");
+        let mut blob = load_blob(SyncMode::Auto).expect("load auto");
+        assert!(!blob.accounts.is_empty());
+        blob.version = 99;
+        save_blob(&blob).expect("save");
+        let loaded = load_blob(SyncMode::No).expect("load no");
+        assert_eq!(loaded.version, 99);
+
+        let account = loaded.accounts[0].clone();
+        maybe_push_account_update(&account, SyncMode::Auto).expect("mock update");
+        maybe_push_account_remove(&account, SyncMode::Now).expect("mock remove");
+    }
+
+    #[test]
+    fn load_local_blob_reports_invalid_json_and_non_blob_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [4u8; KDF_HASH_LEN];
+
+        config_write_encrypted_buffer(BLOB_JSON_NAME, b"not-json", &key).expect("write blob json");
+        let err = load_local_blob(&key, None).expect_err("invalid json");
+        assert!(format!("{err}").contains("invalid blob"));
+
+        let _ = config_unlink(BLOB_JSON_NAME);
+        config_write_encrypted_buffer("blob", b"not-a-blob", &key).expect("write blob");
+        let err = load_local_blob(&key, None).expect_err("invalid blob bytes");
+        assert!(format!("{err}").contains("blob response was not a blob"));
+
+        let _ = config_unlink("blob");
+        let err = load_local_blob(&key, None).expect_err("missing blob");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_private_key_prefers_cached_then_decodes_encrypted_variant() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [2u8; KDF_HASH_LEN];
+
+        config_write_encrypted_buffer("session_privatekey", b"CACHED", &key).expect("cache key");
+        let cached = load_private_key(&key).expect("load cached");
+        assert_eq!(cached.as_deref(), Some(b"CACHED".as_ref()));
+
+        let _ = config_unlink("session_privatekey");
+        let payload = b"LastPassPrivateKey<414243>LastPassPrivateKey";
+        let encrypted = aes_encrypt_lastpass(payload, &key).expect("encrypt");
+        let encoded = base64_lastpass_encode(&encrypted);
+        config_write_encrypted_string("session_privatekeyenc", &encoded, &key).expect("write enc");
+        let loaded = load_private_key(&key).expect("load encoded");
+        assert_eq!(loaded.as_deref(), Some(b"ABC".as_ref()));
+
+        let cached_after = config_read_encrypted_buffer("session_privatekey", &key).expect("read");
+        assert_eq!(cached_after.as_deref(), Some(b"ABC".as_ref()));
+    }
+
+    #[test]
+    fn local_blob_freshness_and_touch_cover_mtime_paths() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        assert!(!local_blob_is_fresh(Duration::from_secs(10)).expect("fresh check"));
+        config_write_buffer("blob", b"blob-bytes").expect("write blob");
+        assert!(local_blob_is_fresh(Duration::from_secs(10)).expect("fresh blob"));
+        assert!(!local_blob_is_fresh(Duration::from_secs(0)).expect("age boundary"));
+
+        let blob_path = config_path("blob").expect("blob path");
+        let future = FileTime::from_unix_time(i64::MAX / 2, 0);
+        set_file_mtime(&blob_path, future).expect("set future mtime");
+        assert!(local_blob_is_fresh(Duration::from_secs(1)).expect("future mtime"));
+
+        touch_local_blob_cache().expect("touch");
+    }
+
+    fn test_session() -> Session {
+        Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        }
+    }
+
+    #[test]
+    fn fetch_remote_blob_version_and_load_latest_prefer_newest_local_blob() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [8u8; KDF_HASH_LEN];
+        let client = HttpClient::mock();
+        let mut session = test_session();
+
+        session_save(&session, &key).expect("save session");
+        let version = fetch_remote_blob_version(&client, &mut session, &key).expect("version");
+        assert_eq!(version, 123);
+        let saved_session = session_load(&key).expect("session load").expect("has session");
+        assert_eq!(saved_session.uid, "57747756");
+
+        let local = Blob {
+            version: 999,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: vec![mock_account(
+                "0001",
+                "local-only",
+                "team",
+                "https://example.com",
+                "u",
+                "p",
+                "",
+                false,
+            )],
+        };
+        let buffer = serde_json::to_vec_pretty(&local).expect("json");
+        config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write local blob");
+        let loaded = load_latest_blob(&client, &mut session, &key, None).expect("load latest");
+        assert_eq!(loaded.version, 999);
+        assert_eq!(loaded.accounts[0].name, "local-only");
+    }
+
+    #[test]
+    fn fetch_and_store_blob_reports_empty_body() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [9u8; KDF_HASH_LEN];
+        let client = HttpClient::mock();
+        let session = test_session();
+
+        let err = fetch_and_store_blob(&client, &session, &key, None).expect_err("must fail");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_local_blob_parses_minimal_blob_bytes() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [1u8; KDF_HASH_LEN];
+        let mut blob_bytes = Vec::new();
+        blob_bytes.extend_from_slice(b"LPAV");
+        blob_bytes.extend_from_slice(&1u32.to_be_bytes());
+        blob_bytes.extend_from_slice(b"1");
+        config_write_encrypted_buffer("blob", &blob_bytes, &key).expect("write blob bytes");
+
+        let loaded = load_local_blob(&key, None).expect("load local blob");
+        assert_eq!(loaded.version, 1);
+        assert!(loaded.accounts.is_empty());
+    }
+
+    #[test]
+    fn save_blob_writes_encrypted_json_in_non_mock_mode() {
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [7u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write plaintext key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+
+        let blob = Blob {
+            version: 5,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: Vec::new(),
+        };
+        save_blob(&blob).expect("save blob");
+
+        let stored = config_read_encrypted_buffer(BLOB_JSON_NAME, &key)
+            .expect("read")
+            .expect("exists");
+        let decoded: Blob = serde_json::from_slice(&stored).expect("decode");
+        assert_eq!(decoded.version, 5);
     }
 }

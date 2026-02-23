@@ -59,7 +59,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     }
 
     let name = name.ok_or_else(|| usage.to_string())?;
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let idx = match find_unique_account_index(&blob.accounts, &name) {
         Ok(idx) => idx,
         Err(FindAccountError::Missing) => {
@@ -71,6 +71,16 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             ));
         }
     };
+    if blob.accounts[idx].share_readonly {
+        let share_name = blob.accounts[idx]
+            .share_name
+            .as_deref()
+            .unwrap_or("(unknown)");
+        return Err(format!(
+            "{} is a readonly shared entry from {}. It cannot be deleted.",
+            blob.accounts[idx].fullname, share_name
+        ));
+    }
     let removed = blob.accounts.remove(idx);
     save_blob(&blob).map_err(|err| format!("{err}"))?;
     maybe_push_account_remove(&removed, sync_mode).map_err(|err| format!("{err}"))?;
@@ -114,6 +124,8 @@ mod tests {
         Account {
             id: id.to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: name.to_string(),
             name_encrypted: None,
             group: String::new(),

@@ -2,7 +2,7 @@
 
 use crate::blob::Blob;
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::{load_blob, save_blob};
+use crate::commands::data::{SyncMode, load_blob, save_blob};
 use crate::terminal;
 
 pub fn run(args: &[String]) -> i32 {
@@ -19,6 +19,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let usage =
         "usage: duplicate [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID}";
     let mut name: Option<String> = None;
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -26,7 +27,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             name = Some(arg.clone());
             continue;
         }
-        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+        if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
             continue;
         }
         if arg == "--color" {
@@ -45,7 +47,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
 
     let name = name.ok_or_else(|| usage.to_string())?;
 
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let idx = find_account_index(&blob, &name)
         .ok_or_else(|| "Could not find specified account(s).".to_string())?;
     let mut account = blob.accounts[idx].clone();
@@ -101,6 +103,8 @@ mod tests {
         Account {
             id: id.to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: name.to_string(),
             name_encrypted: None,
             group: group.to_string(),
@@ -129,6 +133,7 @@ mod tests {
         Blob {
             version: 1,
             local_version: false,
+            shares: Vec::new(),
             accounts: vec![
                 account("0001", "alpha", "team"),
                 account("0002", "beta", ""),
@@ -168,6 +173,7 @@ mod tests {
         let blob = Blob {
             version: 1,
             local_version: false,
+            shares: Vec::new(),
             accounts: vec![account("0005", "alpha", ""), account("0001", "beta", "")],
         };
         assert_eq!(next_id(&blob), "0006");

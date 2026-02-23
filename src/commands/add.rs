@@ -73,7 +73,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         edit_with_editor(&initial)?
     };
 
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(parsed.sync_mode).map_err(|err| format!("{err}"))?;
     let mut account = if parsed.choice == EditChoice::Any {
         let entry = parse_entry_input(&raw_input, parsed.note_type);
         let entry_name = entry.name.clone().unwrap_or_else(|| parsed.name.clone());
@@ -366,6 +366,8 @@ fn new_account(name: &str, choice: EditChoice, note_type: NoteType, is_app: bool
     Account {
         id: "0".to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: item_name,
         name_encrypted: None,
         group,
@@ -567,6 +569,8 @@ fn build_account(parsed: &ParsedEntry, entry_name: &str) -> Account {
     let mut account = Account {
         id: "0".to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name,
         name_encrypted: None,
         group,

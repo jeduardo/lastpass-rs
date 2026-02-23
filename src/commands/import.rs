@@ -5,7 +5,7 @@ use std::io::{self, Read};
 
 use crate::blob::{Account, Blob};
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::{load_blob, save_blob};
+use crate::commands::data::{SyncMode, load_blob, save_blob};
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -21,6 +21,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let usage = "usage: import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]";
     let mut keep_dupes = false;
     let mut positional: Vec<String> = Vec::new();
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -33,7 +34,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             keep_dupes = true;
             continue;
         }
-        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+        if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
             continue;
         }
         return Err(usage.to_string());
@@ -50,7 +52,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             .map_err(|err| format!("stdin: {err}"))?;
     }
 
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let mut imported = parse_import_accounts(&input)?;
     println!("Parsed {} accounts", imported.len());
 
@@ -217,6 +219,8 @@ fn new_import_account() -> Account {
     Account {
         id: String::new(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name: String::new(),
         name_encrypted: None,
         group: String::new(),
@@ -307,6 +311,7 @@ mod tests {
         let mut blob = Blob {
             version: 1,
             local_version: false,
+            shares: Vec::new(),
             accounts: vec![new_import_account()],
         };
         blob.accounts[0].name = "entry".to_string();

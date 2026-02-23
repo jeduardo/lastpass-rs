@@ -155,6 +155,8 @@ mod tests {
         Account {
             id: "0001".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "test".to_string(),
             name_encrypted: None,
             group: "group".to_string(),

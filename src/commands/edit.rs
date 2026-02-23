@@ -55,11 +55,18 @@ pub fn run(args: &[String]) -> i32 {
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
     let parsed = parse_edit_args(args)?;
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(parsed.sync_mode).map_err(|err| format!("{err}"))?;
 
     let idx = find_unique_account_index(&blob.accounts, &parsed.name)?;
     let (mut working, secure_note_expanded, is_new) = if let Some(idx) = idx {
         let original = blob.accounts[idx].clone();
+        if original.share_readonly {
+            let share_name = original.share_name.as_deref().unwrap_or("(unknown)");
+            return Err(format!(
+                "{} is a readonly shared entry from {}. It cannot be edited.",
+                original.fullname, share_name
+            ));
+        }
         if let Some(expanded) = expand_notes(&original) {
             (expanded, true, false)
         } else {
@@ -383,6 +390,8 @@ fn new_account(fullname: &str, secure_note: bool) -> Account {
     Account {
         id: "0".to_string(),
         share_name: None,
+        share_id: None,
+        share_readonly: false,
         name,
         name_encrypted: None,
         group,
@@ -629,6 +638,8 @@ mod tests {
         Account {
             id: "100".to_string(),
             share_name: None,
+            share_id: None,
+            share_readonly: false,
             name: "entry".to_string(),
             name_encrypted: None,
             group: "team".to_string(),

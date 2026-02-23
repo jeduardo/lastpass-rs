@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-use crate::blob::Account;
+use crate::blob::{Account, Share};
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::{load_blob, save_blob};
+use crate::commands::data::{SyncMode, load_blob, save_blob};
 use crate::terminal;
 
 pub fn run(args: &[String]) -> i32 {
@@ -19,6 +19,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let usage =
         "usage: mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP";
     let mut positional: Vec<String> = Vec::new();
+    let mut sync_mode = SyncMode::Auto;
 
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
@@ -27,7 +28,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             continue;
         }
 
-        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+        if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
             continue;
         }
         if arg == "--color" {
@@ -51,10 +53,20 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let name = &positional[0];
     let folder = &positional[1];
 
-    let mut blob = load_blob().map_err(|err| format!("{err}"))?;
+    let mut blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let idx = find_unique_account_index(&blob.accounts, name)?;
-    let share_names = collect_share_names(&blob.accounts);
-    update_location(&mut blob.accounts[idx], folder, &share_names);
+    let shares = collect_shares(&blob.accounts, &blob.shares);
+    update_location(&mut blob.accounts[idx], folder, &shares);
+    if blob.accounts[idx].share_readonly {
+        let share_name = blob.accounts[idx]
+            .share_name
+            .as_deref()
+            .unwrap_or("(unknown)");
+        return Err(format!(
+            "You do not have access to move {} into {}",
+            blob.accounts[idx].name, share_name
+        ));
+    }
     save_blob(&blob).map_err(|err| format!("{err}"))?;
     Ok(0)
 }
@@ -86,30 +98,55 @@ fn find_unique_account_index(accounts: &[Account], name: &str) -> Result<usize, 
     }
 }
 
-fn collect_share_names(accounts: &[Account]) -> Vec<String> {
-    let mut names: Vec<String> = accounts
-        .iter()
-        .filter_map(|account| account.share_name.as_ref())
-        .cloned()
-        .collect();
-    names.sort();
-    names.dedup();
-    names.sort_by_key(|name| usize::MAX - name.len());
-    names
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ShareRef {
+    id: Option<String>,
+    name: String,
+    readonly: bool,
 }
 
-fn update_location(account: &mut Account, folder: &str, share_names: &[String]) {
+fn collect_shares(accounts: &[Account], shares: &[Share]) -> Vec<ShareRef> {
+    let mut out: Vec<ShareRef> = shares
+        .iter()
+        .map(|share| ShareRef {
+            id: Some(share.id.clone()),
+            name: share.name.clone(),
+            readonly: share.readonly,
+        })
+        .collect();
+
+    for account in accounts {
+        let Some(name) = account.share_name.as_ref() else {
+            continue;
+        };
+        if out.iter().any(|share| share.name == *name) {
+            continue;
+        }
+        out.push(ShareRef {
+            id: account.share_id.clone(),
+            name: name.clone(),
+            readonly: account.share_readonly,
+        });
+    }
+
+    out.sort_by_key(|share| usize::MAX - share.name.len());
+    out
+}
+
+fn update_location(account: &mut Account, folder: &str, shares: &[ShareRef]) {
     let folder = folder.trim_end_matches('/').to_string();
-    let share_name = infer_share_name(&folder, share_names);
-    if let Some(share_name) = share_name {
-        let group = if folder == share_name {
+    if let Some(share) = infer_share(&folder, shares) {
+        let share_name = &share.name;
+        let group = if folder == *share_name {
             String::new()
-        } else if folder.starts_with(&(share_name.clone() + "/")) {
+        } else if folder.starts_with(&(share_name.to_string() + "/")) {
             folder[share_name.len() + 1..].to_string()
         } else {
             folder.clone()
         };
         account.share_name = Some(share_name.clone());
+        account.share_id = share.id.clone();
+        account.share_readonly = share.readonly;
         account.group = group.clone();
         account.fullname = if group.is_empty() {
             format!("{share_name}/{}", account.name)
@@ -120,6 +157,8 @@ fn update_location(account: &mut Account, folder: &str, share_names: &[String]) 
     }
 
     account.share_name = None;
+    account.share_id = None;
+    account.share_readonly = false;
     account.group = folder.clone();
     account.fullname = if folder.is_empty() {
         account.name.clone()
@@ -128,13 +167,13 @@ fn update_location(account: &mut Account, folder: &str, share_names: &[String]) 
     };
 }
 
-fn infer_share_name(folder: &str, share_names: &[String]) -> Option<String> {
-    for share_name in share_names {
-        if folder == share_name {
-            return Some(share_name.clone());
+fn infer_share<'a>(folder: &str, shares: &'a [ShareRef]) -> Option<&'a ShareRef> {
+    for share in shares {
+        if folder == share.name {
+            return Some(share);
         }
-        if folder.starts_with(&(share_name.clone() + "/")) {
-            return Some(share_name.clone());
+        if folder.starts_with(&(share.name.to_string() + "/")) {
+            return Some(share);
         }
     }
     None
@@ -148,6 +187,8 @@ mod tests {
         Account {
             id: id.to_string(),
             share_name: share_name.map(|value| value.to_string()),
+            share_id: None,
+            share_readonly: false,
             name: name.to_string(),
             name_encrypted: None,
             group: String::new(),
@@ -198,8 +239,17 @@ mod tests {
     #[test]
     fn update_location_infers_share_from_folder_prefix() {
         let mut account = account("1", "entry", "team/entry", Some("Team"));
-        update_location(&mut account, "Team/dev", &[String::from("Team")]);
+        update_location(
+            &mut account,
+            "Team/dev",
+            &[ShareRef {
+                id: Some("42".to_string()),
+                name: "Team".to_string(),
+                readonly: false,
+            }],
+        );
         assert_eq!(account.share_name.as_deref(), Some("Team"));
+        assert_eq!(account.share_id.as_deref(), Some("42"));
         assert_eq!(account.group, "dev");
         assert_eq!(account.fullname, "Team/dev/entry");
     }
@@ -207,35 +257,56 @@ mod tests {
     #[test]
     fn update_location_handles_share_root_and_plain_root() {
         let mut shared = account("1", "entry", "Team/dev/entry", Some("Team"));
-        update_location(&mut shared, "Team/", &[String::from("Team")]);
+        update_location(
+            &mut shared,
+            "Team/",
+            &[ShareRef {
+                id: Some("42".to_string()),
+                name: "Team".to_string(),
+                readonly: false,
+            }],
+        );
         assert_eq!(shared.share_name.as_deref(), Some("Team"));
+        assert_eq!(shared.share_id.as_deref(), Some("42"));
         assert_eq!(shared.group, "");
         assert_eq!(shared.fullname, "Team/entry");
 
         let mut plain = account("2", "entry", "ops/entry", None);
-        update_location(&mut plain, "", &[String::from("Team")]);
+        update_location(
+            &mut plain,
+            "",
+            &[ShareRef {
+                id: Some("42".to_string()),
+                name: "Team".to_string(),
+                readonly: false,
+            }],
+        );
         assert_eq!(plain.share_name, None);
+        assert_eq!(plain.share_id, None);
         assert_eq!(plain.group, "");
         assert_eq!(plain.fullname, "entry");
     }
 
     #[test]
-    fn collect_share_names_deduplicates_and_prefers_longest_prefix() {
+    fn collect_shares_deduplicates_and_prefers_longest_prefix() {
         let accounts = vec![
             account("1", "one", "Team/one", Some("Team")),
             account("2", "two", "Team/Platform/two", Some("Team/Platform")),
             account("3", "three", "Team/three", Some("Team")),
         ];
-        let share_names = collect_share_names(&accounts);
+        let share_names = collect_shares(&accounts, &[]);
         assert_eq!(
-            share_names,
-            vec!["Team/Platform".to_string(), "Team".to_string()]
+            share_names
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Team/Platform", "Team"]
         );
         assert_eq!(
-            infer_share_name("Team/Platform/dev", &share_names).as_deref(),
+            infer_share("Team/Platform/dev", &share_names).map(|s| s.name.as_str()),
             Some("Team/Platform")
         );
-        assert_eq!(infer_share_name("Elsewhere/dev", &share_names), None);
+        assert_eq!(infer_share("Elsewhere/dev", &share_names), None);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 
 use crate::blob::Account;
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::load_blob;
+use crate::commands::data::{SyncMode, load_blob};
 use crate::format::format_account;
 use crate::format::get_display_fullname;
 use crate::terminal::{self, BOLD, FG_BLUE, FG_CYAN, FG_GREEN, NO_BOLD, RESET};
@@ -28,9 +28,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut group: Option<String> = None;
     let mut color_mode = terminal::ColorMode::Auto;
     let mut output_format: Option<String> = None;
+    let mut sync_mode = SyncMode::Auto;
 
     while let Some(arg) = iter.next() {
-        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+        if let Some(mode) = parse_sync_option(arg, &mut iter, usage)? {
+            sync_mode = mode;
             continue;
         }
         if arg == "--long" || arg == "-l" {
@@ -73,12 +75,22 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     }
     terminal::set_color_mode(color_mode);
 
-    let blob = load_blob().map_err(|err| format!("{err}"))?;
+    let blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
 
     let print_tree = color_mode == terminal::ColorMode::Always
         || (color_mode == terminal::ColorMode::Auto && std::io::stdout().is_terminal());
 
-    let mut accounts: Vec<&Account> = blob.accounts.iter().collect();
+    let mut listing_accounts = blob.accounts.clone();
+    for share in &blob.shares {
+        if listing_accounts.iter().any(|account| {
+            account.url == "http://group" && account.share_id.as_deref() == Some(share.id.as_str())
+        }) {
+            continue;
+        }
+        listing_accounts.push(synthetic_share_account(share));
+    }
+
+    let mut accounts: Vec<&Account> = listing_accounts.iter().collect();
     accounts.sort_by(|a, b| get_display_fullname(a).cmp(&get_display_fullname(b)));
 
     let group_filter = match group.as_deref() {
@@ -188,6 +200,36 @@ fn insert_account(root: &mut LsNode, account: &Account) {
     });
 }
 
+fn synthetic_share_account(share: &crate::blob::Share) -> Account {
+    Account {
+        id: share.id.clone(),
+        share_name: Some(share.name.clone()),
+        share_id: Some(share.id.clone()),
+        share_readonly: share.readonly,
+        name: String::new(),
+        name_encrypted: None,
+        group: String::new(),
+        group_encrypted: None,
+        fullname: format!("{}/", share.name),
+        url: "http://group".to_string(),
+        url_encrypted: None,
+        username: String::new(),
+        username_encrypted: None,
+        password: String::new(),
+        password_encrypted: None,
+        note: String::new(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    }
+}
+
 fn parse_path_components(path: &str) -> impl Iterator<Item = &str> {
     path.split('\\').filter(|component| !component.is_empty())
 }
@@ -249,6 +291,8 @@ mod tests {
         Account {
             id: id.to_string(),
             share_name: share_name.map(|value| value.to_string()),
+            share_id: None,
+            share_readonly: false,
             name: name.to_string(),
             name_encrypted: None,
             group: group.to_string(),

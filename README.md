@@ -232,7 +232,7 @@ Implementation status for environment variables (source audited from `lastpass-c
 | `LPASS_AGENT_TIMEOUT` | Agent key timeout in seconds (`0` = no timeout). | ✅ Implemented |
 | `LPASS_AGENT_DISABLE` | Disable use of the background agent when set to `1`. | ✅ Implemented |
 | `LPASS_ASKPASS` | External askpass helper command for password input. | ✅ Implemented |
-| `LPASS_AUTO_SYNC_TIME` | Auto-sync freshness window (seconds) for blob cache. | ❌ Not implemented yet |
+| `LPASS_AUTO_SYNC_TIME` | Auto-sync freshness window (seconds) for blob cache. | ✅ Implemented |
 | `LPASS_PINENTRY` | Pinentry executable override. | ❌ Not implemented yet |
 | `LPASS_DISABLE_PINENTRY` | Disable pinentry fallback and use tty prompt path. | ❌ Not implemented yet |
 | `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ❌ Not implemented yet |
