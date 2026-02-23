@@ -468,7 +468,11 @@ fn check_next_entry_encrypted(chunk: &ChunkCursor<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::aes_encrypt_lastpass;
+    use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+    use rand::thread_rng;
+    use rsa::pkcs1::EncodeRsaPrivateKey;
+    use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
+    use sha1::Sha1;
 
     fn push_chunk(out: &mut Vec<u8>, tag: &str, body: &[u8]) {
         out.extend_from_slice(tag.as_bytes());
@@ -479,6 +483,42 @@ mod tests {
     fn push_item(body: &mut Vec<u8>, bytes: &[u8]) {
         body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
         body.extend_from_slice(bytes);
+    }
+
+    fn push_minimal_account_chunk(out: &mut Vec<u8>, key: &[u8; KDF_HASH_LEN], name: &[u8]) {
+        let mut acct = Vec::new();
+        push_item(&mut acct, b"0001");
+        push_item(&mut acct, name);
+        let group = aes_encrypt_lastpass(b"team", key).expect("group enc");
+        push_item(&mut acct, &group);
+        let url = aes_encrypt_lastpass(b"https://example.com/", key).expect("url enc");
+        push_item(&mut acct, &url);
+        let note = aes_encrypt_lastpass(b"", key).expect("note enc");
+        push_item(&mut acct, &note);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        let user = aes_encrypt_lastpass(b"user", key).expect("user enc");
+        push_item(&mut acct, &user);
+        let pass = aes_encrypt_lastpass(b"pass", key).expect("pass enc");
+        push_item(&mut acct, &pass);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_chunk(out, "ACCT", &acct);
     }
 
     #[test]
@@ -671,5 +711,168 @@ mod tests {
         let account = parse_account(&mut chunk, &key).expect("account");
         assert_eq!(account.url, "https://example.com/");
         assert_eq!(account.fullname, "group/legacy");
+    }
+
+    #[test]
+    fn parse_share_handles_missing_and_invalid_inputs() {
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, b"");
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        assert!(parse_share(&mut chunk, None).expect("no key").is_none());
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, b"not-hex");
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        assert!(parse_share(&mut chunk, Some(b"invalid-private-key"))
+            .expect("invalid share payload")
+            .is_none());
+    }
+
+    #[test]
+    fn blob_parse_handles_share_metadata_and_field_chunks() {
+        let mut rng = thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa private key");
+        let public_key = RsaPublicKey::from(&private_key);
+        let private_der = private_key
+            .to_pkcs1_der()
+            .expect("pkcs1 der")
+            .as_bytes()
+            .to_vec();
+
+        let share_key = [6u8; KDF_HASH_LEN];
+        let encrypted_share_key = public_key
+            .encrypt(
+                &mut rng,
+                Oaep::new::<Sha1>(),
+                hex::encode(share_key).as_bytes(),
+            )
+            .expect("encrypt share key");
+        let share_name_cipher = aes_encrypt_lastpass(b"Team Shared", &share_key).expect("enc");
+        let share_name_b64 = base64_lastpass_encode(&share_name_cipher);
+
+        let mut shar = Vec::new();
+        push_item(&mut shar, b"4321");
+        push_item(&mut shar, hex::encode(encrypted_share_key).as_bytes());
+        push_item(&mut shar, share_name_b64.as_bytes());
+        push_item(&mut shar, b"1");
+
+        let mut blob_bytes = Vec::new();
+        push_chunk(&mut blob_bytes, "LPAV", b"9");
+        push_chunk(&mut blob_bytes, "LOCL", b"");
+        push_chunk(&mut blob_bytes, "SHAR", &shar);
+        let name = aes_encrypt_lastpass(b"entry", &share_key).expect("name");
+        push_minimal_account_chunk(&mut blob_bytes, &share_key, &name);
+
+        let mut field = Vec::new();
+        push_item(&mut field, b"Hostname");
+        push_item(&mut field, b"text");
+        let value = aes_encrypt_lastpass(b"srv", &share_key).expect("field enc");
+        push_item(&mut field, &value);
+        push_item(&mut field, b"1");
+        push_chunk(&mut blob_bytes, "ACFL", &field);
+
+        let blob = blob_parse(&blob_bytes, &[0u8; KDF_HASH_LEN], Some(&private_der)).expect("blob");
+        assert!(blob.local_version);
+        assert_eq!(
+            blob.shares,
+            vec![Share {
+                id: "4321".to_string(),
+                name: "Team Shared".to_string(),
+                readonly: true,
+            }]
+        );
+        assert_eq!(blob.accounts.len(), 1);
+        assert_eq!(blob.accounts[0].share_id.as_deref(), Some("4321"));
+        assert!(blob.accounts[0].share_readonly);
+        assert_eq!(blob.accounts[0].fullname, "Team Shared/team/entry");
+        assert_eq!(blob.accounts[0].fields.len(), 1);
+        assert_eq!(blob.accounts[0].fields[0].name, "Hostname");
+        assert_eq!(blob.accounts[0].fields[0].value, "srv");
+    }
+
+    #[test]
+    fn parse_account_strips_control_prefix_and_decrypts_attach_key() {
+        let key = [2u8; KDF_HASH_LEN];
+        let mut acct = Vec::new();
+        push_item(&mut acct, b"1234");
+        let mut name_bytes = vec![16u8, b'n', b'a', b'm', b'e'];
+        let name = aes_encrypt_lastpass(&name_bytes, &key).expect("name");
+        name_bytes.clear();
+        push_item(&mut acct, &name);
+        let group = aes_encrypt_lastpass(&[16u8, b'g'], &key).expect("group");
+        push_item(&mut acct, &group);
+        let url = aes_encrypt_lastpass(b"http://group", &key).expect("url");
+        push_item(&mut acct, &url);
+        let note = aes_encrypt_lastpass(b"", &key).expect("note");
+        push_item(&mut acct, &note);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        let user = aes_encrypt_lastpass(b"user", &key).expect("user");
+        push_item(&mut acct, &user);
+        let pass = aes_encrypt_lastpass(b"pass", &key).expect("pass");
+        push_item(&mut acct, &pass);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        let attach = aes_encrypt_lastpass(b"attach-secret", &key).expect("attach");
+        let attach_b64 = base64_lastpass_encode(&attach);
+        push_item(&mut acct, attach_b64.as_bytes());
+        push_item(&mut acct, b"1");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+
+        let mut chunk = ChunkCursor::new("ACCT".to_string(), &acct);
+        let account = parse_account(&mut chunk, &key).expect("account");
+        assert_eq!(account.name, "");
+        assert_eq!(account.group, "");
+        assert_eq!(account.fullname, "");
+        assert_eq!(account.attachkey, "attach-secret");
+        assert_eq!(account.attachkey_encrypted.as_deref(), Some(attach_b64.as_str()));
+        assert!(account.attachpresent);
+    }
+
+    #[test]
+    fn chunk_cursor_and_helpers_cover_truncation_paths() {
+        let mut reader = BlobReader::new(b"AB");
+        let err = reader.read_chunk().expect_err("short header");
+        assert!(matches!(err, LpassError::Crypto("blob truncated")));
+
+        let mut bad_len = Vec::new();
+        bad_len.extend_from_slice(b"ABCD");
+        bad_len.extend_from_slice(&10u32.to_be_bytes());
+        bad_len.extend_from_slice(b"x");
+        let mut reader = BlobReader::new(&bad_len);
+        let err = reader.read_chunk().expect_err("short body");
+        assert!(matches!(err, LpassError::Crypto("blob truncated")));
+
+        let chunk = ChunkCursor::new("TEST".to_string(), &[0, 0, 0, 0]);
+        assert_eq!(chunk.peek_item_first_byte(), None);
+        let chunk = ChunkCursor::new("TEST".to_string(), &[0, 0, 0, 1]);
+        assert_eq!(chunk.peek_item_first_byte(), None);
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"!not-valid-ciphertext");
+        push_item(&mut body, b"10");
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        let (value, encrypted) = read_crypt_string(&mut chunk, &[8u8; KDF_HASH_LEN]).expect("crypt");
+        assert_eq!(value, "");
+        assert!(encrypted.is_some());
+        assert!(!read_boolean(&mut chunk).expect("invalid bool"));
     }
 }

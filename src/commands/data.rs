@@ -613,6 +613,14 @@ fn mock_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{session_load, session_save};
+    use crate::config::{
+        ConfigEnv, config_path, config_read_encrypted_buffer, config_unlink, config_write_buffer,
+        config_write_encrypted_buffer, config_write_encrypted_string, set_test_env,
+    };
+    use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+    use filetime::{FileTime, set_file_mtime};
+    use tempfile::TempDir;
 
     #[test]
     fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
@@ -661,7 +669,7 @@ mod tests {
 
     #[test]
     fn auto_sync_time_defaults_and_respects_env() {
-        crate::lpenv::clear_overrides_for_tests();
+        let _guard = crate::lpenv::begin_test_overrides();
         assert_eq!(auto_sync_time(), Duration::from_secs(5));
 
         crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "17");
@@ -672,7 +680,6 @@ mod tests {
 
         crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "invalid");
         assert_eq!(auto_sync_time(), Duration::from_secs(5));
-        crate::lpenv::clear_overrides_for_tests();
     }
 
     #[test]
@@ -1080,5 +1087,211 @@ mod tests {
         let err = push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Now)
             .expect_err("now should fail because mock getaccts body is empty");
         assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn mock_mode_paths_cover_load_save_and_push_helpers() {
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        ensure_mock_blob().expect("ensure");
+        let mut blob = load_blob(SyncMode::Auto).expect("load auto");
+        assert!(!blob.accounts.is_empty());
+        blob.version = 99;
+        save_blob(&blob).expect("save");
+        let loaded = load_blob(SyncMode::No).expect("load no");
+        assert_eq!(loaded.version, 99);
+
+        let account = loaded.accounts[0].clone();
+        maybe_push_account_update(&account, SyncMode::Auto).expect("mock update");
+        maybe_push_account_remove(&account, SyncMode::Now).expect("mock remove");
+    }
+
+    #[test]
+    fn load_local_blob_reports_invalid_json_and_non_blob_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [4u8; KDF_HASH_LEN];
+
+        config_write_encrypted_buffer(BLOB_JSON_NAME, b"not-json", &key).expect("write blob json");
+        let err = load_local_blob(&key, None).expect_err("invalid json");
+        assert!(format!("{err}").contains("invalid blob"));
+
+        let _ = config_unlink(BLOB_JSON_NAME);
+        config_write_encrypted_buffer("blob", b"not-a-blob", &key).expect("write blob");
+        let err = load_local_blob(&key, None).expect_err("invalid blob bytes");
+        assert!(format!("{err}").contains("blob response was not a blob"));
+
+        let _ = config_unlink("blob");
+        let err = load_local_blob(&key, None).expect_err("missing blob");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_private_key_prefers_cached_then_decodes_encrypted_variant() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [2u8; KDF_HASH_LEN];
+
+        config_write_encrypted_buffer("session_privatekey", b"CACHED", &key).expect("cache key");
+        let cached = load_private_key(&key).expect("load cached");
+        assert_eq!(cached.as_deref(), Some(b"CACHED".as_ref()));
+
+        let _ = config_unlink("session_privatekey");
+        let payload = b"LastPassPrivateKey<414243>LastPassPrivateKey";
+        let encrypted = aes_encrypt_lastpass(payload, &key).expect("encrypt");
+        let encoded = base64_lastpass_encode(&encrypted);
+        config_write_encrypted_string("session_privatekeyenc", &encoded, &key).expect("write enc");
+        let loaded = load_private_key(&key).expect("load encoded");
+        assert_eq!(loaded.as_deref(), Some(b"ABC".as_ref()));
+
+        let cached_after = config_read_encrypted_buffer("session_privatekey", &key).expect("read");
+        assert_eq!(cached_after.as_deref(), Some(b"ABC".as_ref()));
+    }
+
+    #[test]
+    fn local_blob_freshness_and_touch_cover_mtime_paths() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        assert!(!local_blob_is_fresh(Duration::from_secs(10)).expect("fresh check"));
+        config_write_buffer("blob", b"blob-bytes").expect("write blob");
+        assert!(local_blob_is_fresh(Duration::from_secs(10)).expect("fresh blob"));
+        assert!(!local_blob_is_fresh(Duration::from_secs(0)).expect("age boundary"));
+
+        let blob_path = config_path("blob").expect("blob path");
+        let future = FileTime::from_unix_time(i64::MAX / 2, 0);
+        set_file_mtime(&blob_path, future).expect("set future mtime");
+        assert!(local_blob_is_fresh(Duration::from_secs(1)).expect("future mtime"));
+
+        touch_local_blob_cache().expect("touch");
+    }
+
+    fn test_session() -> Session {
+        Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        }
+    }
+
+    #[test]
+    fn fetch_remote_blob_version_and_load_latest_prefer_newest_local_blob() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [8u8; KDF_HASH_LEN];
+        let client = HttpClient::mock();
+        let mut session = test_session();
+
+        session_save(&session, &key).expect("save session");
+        let version = fetch_remote_blob_version(&client, &mut session, &key).expect("version");
+        assert_eq!(version, 123);
+        let saved_session = session_load(&key).expect("session load").expect("has session");
+        assert_eq!(saved_session.uid, "57747756");
+
+        let local = Blob {
+            version: 999,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: vec![mock_account(
+                "0001",
+                "local-only",
+                "team",
+                "https://example.com",
+                "u",
+                "p",
+                "",
+                false,
+            )],
+        };
+        let buffer = serde_json::to_vec_pretty(&local).expect("json");
+        config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write local blob");
+        let loaded = load_latest_blob(&client, &mut session, &key, None).expect("load latest");
+        assert_eq!(loaded.version, 999);
+        assert_eq!(loaded.accounts[0].name, "local-only");
+    }
+
+    #[test]
+    fn fetch_and_store_blob_reports_empty_body() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [9u8; KDF_HASH_LEN];
+        let client = HttpClient::mock();
+        let session = test_session();
+
+        let err = fetch_and_store_blob(&client, &session, &key, None).expect_err("must fail");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_local_blob_parses_minimal_blob_bytes() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [1u8; KDF_HASH_LEN];
+        let mut blob_bytes = Vec::new();
+        blob_bytes.extend_from_slice(b"LPAV");
+        blob_bytes.extend_from_slice(&1u32.to_be_bytes());
+        blob_bytes.extend_from_slice(b"1");
+        config_write_encrypted_buffer("blob", &blob_bytes, &key).expect("write blob bytes");
+
+        let loaded = load_local_blob(&key, None).expect("load local blob");
+        assert_eq!(loaded.version, 1);
+        assert!(loaded.accounts.is_empty());
+    }
+
+    #[test]
+    fn save_blob_writes_encrypted_json_in_non_mock_mode() {
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [7u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write plaintext key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+
+        let blob = Blob {
+            version: 5,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: Vec::new(),
+        };
+        save_blob(&blob).expect("save blob");
+
+        let stored = config_read_encrypted_buffer(BLOB_JSON_NAME, &key)
+            .expect("read")
+            .expect("exists");
+        let decoded: Blob = serde_json::from_slice(&stored).expect("decode");
+        assert_eq!(decoded.version, 5);
     }
 }

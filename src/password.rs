@@ -42,7 +42,8 @@ fn decode_password_output(mut bytes: Vec<u8>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_password_output;
+    use super::{decode_password_output, prompt_password};
+    use tempfile::TempDir;
 
     #[test]
     fn decode_password_output_trims_trailing_newlines() {
@@ -60,5 +61,39 @@ mod tests {
     fn askpass_ignores_empty_values() {
         let value = super::askpass_program_from_value(Some("   ".to_string()));
         assert!(value.is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn prompt_password_reads_value_from_askpass_program() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let script = temp.path().join("askpass-ok.sh");
+        std::fs::write(&script, "#!/bin/sh\necho from-askpass\n").expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
+            .expect("chmod script");
+        crate::lpenv::set_override_for_tests("LPASS_ASKPASS", &script.display().to_string());
+
+        let value = prompt_password("user@example.com").expect("askpass value");
+        assert_eq!(value, "from-askpass");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn prompt_password_reports_askpass_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let script = temp.path().join("askpass-fail.sh");
+        std::fs::write(&script, "#!/bin/sh\nexit 1\n").expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
+            .expect("chmod script");
+        crate::lpenv::set_override_for_tests("LPASS_ASKPASS", &script.display().to_string());
+
+        let err = prompt_password("user@example.com").expect_err("askpass must fail");
+        assert!(format!("{err}").contains("askpass failed"));
     }
 }
