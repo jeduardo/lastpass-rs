@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::Account;
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::{load_blob, save_blob};
 use crate::terminal;
 
@@ -15,7 +16,8 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage = "usage: mv [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP";
+    let usage =
+        "usage: mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP";
     let mut positional: Vec<String> = Vec::new();
 
     let mut iter = args.iter().peekable();
@@ -25,11 +27,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             continue;
         }
 
-        if arg.starts_with("--sync=") {
-            continue;
-        }
-        if arg == "--sync" {
-            let _ = iter.next();
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         if arg == "--color" {
@@ -256,6 +254,13 @@ mod tests {
         assert!(err.contains("usage: mv"));
 
         let err = run_inner(&["--color=rainbow".to_string()]).expect_err("bad color");
+        assert!(err.contains("usage: mv"));
+
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync");
+        assert!(err.contains("usage: mv"));
+
+        let err = run_inner(&["--sync=bad".to_string(), "a".to_string(), "b".to_string()])
+            .expect_err("bad sync");
         assert!(err.contains("usage: mv"));
 
         let err = run_inner(&["--sync".to_string(), "auto".to_string(), "a".to_string()])

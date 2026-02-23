@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use std::process::Command;
 
 use crate::error::{LpassError, Result};
@@ -27,7 +26,7 @@ pub fn prompt_password(username: &str) -> Result<String> {
 }
 
 fn askpass_program_from_env() -> Option<String> {
-    askpass_program_from_value(env::var("LPASS_ASKPASS").ok())
+    askpass_program_from_value(crate::lpenv::var("LPASS_ASKPASS").ok())
 }
 
 fn askpass_program_from_value(value: Option<String>) -> Option<String> {

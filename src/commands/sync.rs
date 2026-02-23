@@ -1,7 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
-
 use crate::agent::agent_get_decryption_key;
 use crate::commands::data::ensure_mock_blob;
 use crate::config::ConfigStore;
@@ -24,7 +22,7 @@ pub fn run(args: &[String]) -> i32 {
 fn run_inner(args: &[String]) -> Result<i32, String> {
     let parsed = parse_args(args)?;
 
-    if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
         ensure_mock_blob().map_err(|err| format!("{err}"))?;
         let _ = parsed.background;
         return Ok(0);

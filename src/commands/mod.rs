@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod add;
+mod argparse;
 mod data;
 mod duplicate;
 mod edit;

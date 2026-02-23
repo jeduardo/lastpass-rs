@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::Account;
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::load_blob;
 use crate::terminal;
 
@@ -28,11 +29,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         if !arg.starts_with('-') {
             return Err(usage.to_string());
         }
-        if arg.starts_with("--sync=") {
-            continue;
-        }
-        if arg == "--sync" {
-            let _ = iter.next();
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         if arg == "--color" {
@@ -47,9 +44,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             continue;
         }
         if arg == "--fields" {
-            if let Some(next) = iter.next() {
-                fields.extend(parse_fields(next));
-            }
+            let next = iter.next().ok_or_else(|| usage.to_string())?;
+            fields.extend(parse_fields(next));
             continue;
         }
         if let Some(value) = arg.strip_prefix("--fields=") {
@@ -234,6 +230,15 @@ mod tests {
     #[test]
     fn run_inner_rejects_invalid_color_mode() {
         let err = run_inner(&["--color=rainbow".to_string()]).expect_err("must fail");
+        assert!(err.contains("usage: export"));
+
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: export"));
+
+        let err = run_inner(&["--sync=bad".to_string()]).expect_err("bad sync value");
+        assert!(err.contains("usage: export"));
+
+        let err = run_inner(&["--fields".to_string()]).expect_err("missing fields value");
         assert!(err.contains("usage: export"));
     }
 }

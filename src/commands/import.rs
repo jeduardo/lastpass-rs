@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{self, Read};
 
 use crate::blob::{Account, Blob};
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::{load_blob, save_blob};
 
 pub fn run(args: &[String]) -> i32 {
@@ -17,7 +18,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage = "usage: import [--keep-dupes] [CSV_FILENAME]";
+    let usage = "usage: import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]";
     let mut keep_dupes = false;
     let mut positional: Vec<String> = Vec::new();
 
@@ -32,11 +33,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             keep_dupes = true;
             continue;
         }
-        if arg.starts_with("--sync=") {
-            continue;
-        }
-        if arg == "--sync" {
-            let _ = iter.next();
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         return Err(usage.to_string());
@@ -332,6 +329,12 @@ mod tests {
 
     #[test]
     fn run_inner_rejects_unknown_flags() {
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: import"));
+
+        let err = run_inner(&["--sync=bad".to_string()]).expect_err("bad sync value");
+        assert!(err.contains("usage: import"));
+
         let err = run_inner(&["--bogus".to_string()]).expect_err("unknown flag");
         assert!(err.contains("usage: import"));
     }

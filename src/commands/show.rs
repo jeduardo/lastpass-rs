@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::Account;
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::load_blob;
 use crate::format::{format_account, format_field};
 use crate::notes::expand_notes;
@@ -75,10 +76,8 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             title_format_override = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--title-format=") {
             title_format_override = Some(value.to_string());
-        } else if arg.starts_with("--sync=") {
-            // ignored
-        } else if arg == "--sync" || arg == "-S" {
-            let _ = iter.next();
+        } else if parse_sync_option(arg, &mut iter, usage)?.is_some() {
+            // parsed and ignored for now
         } else if arg == "--all" || arg == "-A" {
             choice = ShowChoice::All;
         } else if arg == "--basic-regexp" || arg == "-G" {
@@ -403,6 +402,8 @@ mod tests {
     fn run_inner_rejects_invalid_invocations() {
         assert!(run_inner(&[]).is_err());
         assert!(run_inner(&["--bogus".to_string()]).is_err());
+        assert!(run_inner(&["--sync".to_string()]).is_err());
+        assert!(run_inner(&["--sync=bad".to_string(), "x".to_string()]).is_err());
         assert!(run_inner(&["--field".to_string()]).is_err());
         assert!(run_inner(&["--format".to_string()]).is_err());
         assert!(run_inner(&["--title-format".to_string()]).is_err());

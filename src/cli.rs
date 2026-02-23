@@ -3,6 +3,8 @@
 use std::path::Path;
 
 use crate::commands;
+use crate::config::config_read_string;
+use crate::lpenv;
 use crate::version;
 
 #[derive(Copy, Clone)]
@@ -34,7 +36,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "mv",
-        usage: "mv [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
+        usage: "mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
     },
     CommandSpec {
         name: "add",
@@ -70,7 +72,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "import",
-        usage: "import [--keep-dupes] [CSV_FILENAME]",
+        usage: "import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]",
     },
     CommandSpec {
         name: "share",
@@ -86,6 +88,11 @@ enum Dispatch {
 }
 
 pub fn run(args: Vec<String>) -> i32 {
+    if let Err(err) = lpenv::reload_saved_environment() {
+        eprintln!("warning: failed to load saved environment: {err}");
+    }
+
+    let args = expand_aliases(args);
     let (program_path, program_name) = program_names(&args);
     match dispatch(&args) {
         Dispatch::HelpOnly => {
@@ -111,6 +118,31 @@ pub fn run(args: Vec<String>) -> i32 {
             }
         }
     }
+}
+
+fn expand_aliases(args: Vec<String>) -> Vec<String> {
+    if args.len() < 2 {
+        return args;
+    }
+    if args[1].starts_with('-') {
+        return args;
+    }
+
+    let alias_name = args[1].clone();
+    let alias_key = format!("alias.{alias_name}");
+    let alias_value = match config_read_string(&alias_key) {
+        Ok(Some(value)) => value,
+        Ok(None) => return args,
+        Err(_) => return args,
+    };
+
+    let mut expanded: Vec<String> = Vec::new();
+    expanded.push(args[0].clone());
+    for token in alias_value.split_whitespace() {
+        expanded.push(token.to_string());
+    }
+    expanded.extend(args.into_iter().skip(2));
+    expanded
 }
 
 fn dispatch(args: &[String]) -> Dispatch {
@@ -152,5 +184,55 @@ fn print_help(program_path: &str, program_name: &str) {
     println!("  {} {{--help|--version}}", program_path);
     for cmd in COMMANDS {
         println!("  {} {}", program_name, cmd.usage);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ConfigEnv, config_write_string, set_test_env};
+    use tempfile::TempDir;
+
+    #[test]
+    fn expand_aliases_keeps_args_when_no_alias_exists() {
+        let args = vec![
+            "lpass".to_string(),
+            "show".to_string(),
+            "team/item".to_string(),
+        ];
+        assert_eq!(expand_aliases(args.clone()), args);
+    }
+
+    #[test]
+    fn expand_aliases_expands_alias_command_and_preserves_tail() {
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        config_write_string("alias.passclip", "show --password -c").expect("alias write");
+
+        let args = vec![
+            "lpass".to_string(),
+            "passclip".to_string(),
+            "test-group/test-account".to_string(),
+        ];
+        let expanded = expand_aliases(args);
+        assert_eq!(
+            expanded,
+            vec![
+                "lpass".to_string(),
+                "show".to_string(),
+                "--password".to_string(),
+                "-c".to_string(),
+                "test-group/test-account".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_aliases_does_not_apply_to_global_flags() {
+        let args = vec!["lpass".to_string(), "--help".to_string()];
+        assert_eq!(expand_aliases(args.clone()), args);
     }
 }

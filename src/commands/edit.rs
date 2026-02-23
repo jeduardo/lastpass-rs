@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -342,11 +341,11 @@ fn edit_with_editor(initial: &str) -> Result<String, String> {
         .map_err(|err| format!("write: {err}"))?;
     file.flush().map_err(|err| format!("flush: {err}"))?;
 
-    let editor = env::var("VISUAL")
+    let editor = crate::lpenv::var("VISUAL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
-            env::var("EDITOR")
+            crate::lpenv::var("EDITOR")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         })
@@ -888,10 +887,12 @@ mod tests {
     fn parse_update_input_tracks_unknown_fields_and_reprompt() {
         let parsed = parse_update_input("Custom: value\nReprompt: no", NoteType::None);
         assert_eq!(parsed.reprompt, Some(false));
-        assert!(parsed
-            .fields
-            .iter()
-            .any(|(name, value)| name == "Custom" && value == "value"));
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|(name, value)| name == "Custom" && value == "value")
+        );
     }
 
     #[test]

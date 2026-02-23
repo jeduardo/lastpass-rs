@@ -187,12 +187,8 @@ mod tests {
         let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
         assert!(err.contains("usage: rm"));
 
-        let err = run_inner(&[
-            "--sync".to_string(),
-            "bad".to_string(),
-            "alpha".to_string(),
-        ])
-        .expect_err("bad sync value with separate arg");
+        let err = run_inner(&["--sync".to_string(), "bad".to_string(), "alpha".to_string()])
+            .expect_err("bad sync value with separate arg");
         assert!(err.contains("usage: rm"));
 
         let err = run_inner(&["--sync=bad".to_string(), "alpha".to_string()])

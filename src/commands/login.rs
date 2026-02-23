@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use std::io::{self, BufRead, Write};
 
 use super::data::ensure_mock_blob;
@@ -305,7 +304,7 @@ fn persist_blob_after_login(
     session: &Session,
     key: &[u8; KDF_HASH_LEN],
 ) -> std::result::Result<(), String> {
-    let use_mock = env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1");
+    let use_mock = crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1");
     let store = ConfigStore::from_current();
     persist_blob_after_login_with_fetch(&store, use_mock, session, key, fetch_blob)
 }
@@ -418,8 +417,8 @@ fn calculate_trust_id_with_store(store: &ConfigStore, force: bool) -> Result<Opt
 fn calculate_trust_label() -> std::result::Result<String, String> {
     #[cfg(unix)]
     {
-        let uts = nix::sys::utsname::uname()
-            .map_err(|_| "Failed to determine uname.".to_string())?;
+        let uts =
+            nix::sys::utsname::uname().map_err(|_| "Failed to determine uname.".to_string())?;
         let nodename = uts.nodename().to_string_lossy();
         let sysname = uts.sysname().to_string_lossy();
         let release = uts.release().to_string_lossy();
@@ -428,11 +427,12 @@ fn calculate_trust_label() -> std::result::Result<String, String> {
 
     #[cfg(not(unix))]
     {
-        let hostname = env::var("HOSTNAME")
-            .or_else(|_| env::var("COMPUTERNAME"))
+        let hostname = crate::lpenv::var("HOSTNAME")
+            .or_else(|_| crate::lpenv::var("COMPUTERNAME"))
             .unwrap_or_else(|_| "unknown-host".to_string());
-        let sysname = env::var("OS").unwrap_or_else(|_| "UnknownOS".to_string());
-        let release = env::var("OS_VERSION").unwrap_or_else(|_| "unknown-release".to_string());
+        let sysname = crate::lpenv::var("OS").unwrap_or_else(|_| "UnknownOS".to_string());
+        let release =
+            crate::lpenv::var("OS_VERSION").unwrap_or_else(|_| "unknown-release".to_string());
         Ok(format!("{hostname} - {sysname} {release}"))
     }
 }

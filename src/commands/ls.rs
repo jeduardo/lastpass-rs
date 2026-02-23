@@ -3,6 +3,7 @@
 use std::io::IsTerminal;
 
 use crate::blob::Account;
+use crate::commands::argparse::parse_sync_option;
 use crate::commands::data::load_blob;
 use crate::format::format_account;
 use crate::format::get_display_fullname;
@@ -29,11 +30,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut output_format: Option<String> = None;
 
     while let Some(arg) = iter.next() {
-        if arg == "--sync" {
-            let _ = iter.next().ok_or_else(|| usage.to_string())?;
-            continue;
-        }
-        if arg.starts_with("--sync=") {
+        if parse_sync_option(arg, &mut iter, usage)?.is_some() {
             continue;
         }
         if arg == "--long" || arg == "-l" {
@@ -373,6 +370,12 @@ mod tests {
     #[test]
     fn run_inner_rejects_invalid_option_combinations() {
         let err = run_inner(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: ls"));
+
+        let err = run_inner(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: ls"));
+
+        let err = run_inner(&["--sync=bad".to_string()]).expect_err("bad sync value");
         assert!(err.contains("usage: ls"));
 
         let err = run_inner(&["--format".to_string()]).expect_err("missing format value");

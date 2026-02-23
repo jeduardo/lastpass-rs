@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::env;
 
 use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, USER_AGENT};
@@ -35,7 +34,7 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn from_env() -> Result<Self> {
-        if env::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+        if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
             Ok(Self::mock())
         } else {
             Self::real()

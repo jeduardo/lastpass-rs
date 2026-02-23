@@ -189,7 +189,7 @@ fn agent_start(key: &[u8; KDF_HASH_LEN]) -> Result<()> {
     if config_exists("plaintext_key") {
         return Ok(());
     }
-    if env::var("LPASS_AGENT_DISABLE").as_deref() == Ok("1") {
+    if crate::lpenv::var("LPASS_AGENT_DISABLE").as_deref() == Ok("1") {
         return Ok(());
     }
 
@@ -272,7 +272,7 @@ fn agent_socket_path() -> Result<PathBuf> {
 }
 
 fn agent_timeout() -> Option<Duration> {
-    let value = env::var("LPASS_AGENT_TIMEOUT")
+    let value = crate::lpenv::var("LPASS_AGENT_TIMEOUT")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(60 * 60);

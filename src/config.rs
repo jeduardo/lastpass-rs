@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::env;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -35,11 +34,11 @@ impl ConfigEnv {
             return env;
         }
         Self {
-            lpass_home: env::var_os("LPASS_HOME").map(PathBuf::from),
-            xdg_data_home: env::var_os("XDG_DATA_HOME").map(PathBuf::from),
-            xdg_config_home: env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-            xdg_runtime_dir: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
-            home: env::var_os("HOME").map(PathBuf::from),
+            lpass_home: crate::lpenv::var_os("LPASS_HOME").map(PathBuf::from),
+            xdg_data_home: crate::lpenv::var_os("XDG_DATA_HOME").map(PathBuf::from),
+            xdg_config_home: crate::lpenv::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            xdg_runtime_dir: crate::lpenv::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+            home: crate::lpenv::var_os("HOME").map(PathBuf::from),
         }
     }
 }
@@ -569,7 +568,10 @@ mod tests {
 
         let runtime_path =
             config_path_for_type_with_env(&env, ConfigType::Runtime, "agent.sock").expect("path");
-        assert_eq!(runtime_path, runtime.path().join("lpass").join("agent.sock"));
+        assert_eq!(
+            runtime_path,
+            runtime.path().join("lpass").join("agent.sock")
+        );
     }
 
     #[test]
@@ -669,8 +671,8 @@ mod tests {
 
         config_write_encrypted_buffer("secret-bin", b"value", &key)
             .expect("write encrypted buffer");
-        let decrypted = config_read_encrypted_buffer("secret-bin", &key)
-            .expect("read encrypted buffer");
+        let decrypted =
+            config_read_encrypted_buffer("secret-bin", &key).expect("read encrypted buffer");
         assert_eq!(decrypted.as_deref(), Some(b"value".as_slice()));
     }
 
@@ -700,7 +702,13 @@ mod tests {
         let bad = temp.path().join("bad");
         fs::create_dir_all(&bad).expect("create dir");
         let err = store.unlink("bad").expect_err("unlink should error");
-        assert!(matches!(err, LpassError::Io { context: "unlink", .. }));
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "unlink",
+                ..
+            }
+        ));
     }
 
     #[cfg(unix)]
@@ -720,7 +728,13 @@ mod tests {
         let err = store
             .read_buffer("protected/file")
             .expect_err("open should fail");
-        assert!(matches!(err, LpassError::Io { context: "open", .. }));
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "open",
+                ..
+            }
+        ));
 
         let perms = fs::Permissions::from_mode(0o700);
         fs::set_permissions(&dir, perms).expect("restore perms");
@@ -759,7 +773,13 @@ mod tests {
         let err = store
             .mtime("protected/file")
             .expect_err("mtime should error");
-        assert!(matches!(err, LpassError::Io { context: "stat", .. }));
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "stat",
+                ..
+            }
+        ));
 
         let perms = fs::Permissions::from_mode(0o700);
         fs::set_permissions(&protected, perms).expect("restore perms");
