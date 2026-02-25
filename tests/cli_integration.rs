@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -121,6 +122,7 @@ fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
         local_version: false,
         shares: Vec::new(),
         accounts: vec![account],
+        attachments: Vec::new(),
     };
     let json = serde_json::to_vec(&blob).expect("blob json");
     store
@@ -176,6 +178,7 @@ fn ls_uses_saved_env_file_for_mock_mode() {
         local_version: false,
         shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 
@@ -199,6 +202,8 @@ fn alias_expands_before_dispatch_in_cli_flow() {
     let key = [4u8; KDF_HASH_LEN];
     write_session_and_blob(&home, &key);
     let store = store_for(&home);
+    let clip_file = home.join("alias-clip.out");
+    let clip_command = format!("cat > {}", clip_file.display());
     store
         .write_string("alias.passclip", "show --password -c")
         .expect("alias write");
@@ -206,12 +211,18 @@ fn alias_expands_before_dispatch_in_cli_flow() {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
+        .env("LPASS_CLIPBOARD_COMMAND", clip_command)
         .args(["passclip", "team/entry"])
         .output()
         .expect("run alias command");
     assert_eq!(output.status.code().unwrap_or(-1), 0);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("secret"));
+    assert!(
+        output.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let copied = fs::read_to_string(&clip_file).expect("read copied value");
+    assert_eq!(copied, "secret");
 
     let _ = temp;
 }
@@ -244,6 +255,7 @@ fn duplicate_accepts_sync_and_color_flags() {
         local_version: false,
         shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 
@@ -287,6 +299,7 @@ fn rm_accepts_space_separated_sync_and_color_flags() {
         local_version: false,
         shares: Vec::new(),
         accounts: vec![account("0001", "alpha", "team")],
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 
@@ -313,6 +326,7 @@ fn rm_reports_ambiguous_match() {
             account("0001", "dup", "team"),
             account("0002", "dup", "other"),
         ],
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 
@@ -424,6 +438,7 @@ fn ls_includes_empty_shared_folders_from_blob_metadata() {
             readonly: false,
         }],
         accounts: Vec::new(),
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 
@@ -458,6 +473,7 @@ fn rm_rejects_readonly_shared_entries() {
             readonly: true,
         }],
         accounts: vec![shared],
+        attachments: Vec::new(),
     };
     write_mock_blob(&home, &blob);
 

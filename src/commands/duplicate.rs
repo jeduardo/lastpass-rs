@@ -139,6 +139,7 @@ mod tests {
                 account("0002", "beta", ""),
                 account("0007", "gamma", "team"),
             ],
+            attachments: Vec::new(),
         }
     }
 
@@ -175,6 +176,7 @@ mod tests {
             local_version: false,
             shares: Vec::new(),
             accounts: vec![account("0005", "alpha", ""), account("0001", "beta", "")],
+            attachments: Vec::new(),
         };
         assert_eq!(next_id(&blob), "0006");
     }

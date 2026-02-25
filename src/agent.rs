@@ -136,7 +136,7 @@ pub fn agent_kill() -> Result<()> {
         };
 
         if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
-            if pid > 0 {
+            if pid > 0 && pid != std::process::id() as i32 {
                 let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
             }
         }
@@ -153,6 +153,10 @@ pub fn agent_kill() -> Result<()> {
 
 pub fn agent_try_ask_decryption_key() -> Result<[u8; KDF_HASH_LEN]> {
     agent_ask()
+}
+
+pub fn agent_load_on_disk_key() -> Result<[u8; KDF_HASH_LEN]> {
+    agent_load_key()
 }
 
 fn verify_key(key: &[u8; KDF_HASH_LEN]) -> Result<bool> {
@@ -390,7 +394,7 @@ mod tests {
     use crate::kdf::kdf_decryption_key;
     use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::net::UnixStream;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use tempfile::TempDir;
 
     fn test_config_env(temp: &TempDir) -> ConfigEnv {
@@ -428,6 +432,7 @@ mod tests {
 
     #[test]
     fn agent_timeout_has_default_when_env_missing() {
+        let _guard = crate::lpenv::begin_test_overrides();
         assert_eq!(agent_timeout(), Some(Duration::from_secs(60 * 60)));
     }
 
@@ -439,6 +444,95 @@ mod tests {
 
         crate::lpenv::set_override_for_tests("LPASS_AGENT_TIMEOUT", "invalid");
         assert_eq!(agent_timeout(), Some(Duration::from_secs(60 * 60)));
+    }
+
+    #[test]
+    fn verify_key_returns_false_when_verify_entry_is_missing() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let key = [1u8; KDF_HASH_LEN];
+        assert!(!verify_key(&key).expect("verify"));
+    }
+
+    #[test]
+    fn run_agent_with_short_timeout_exits_and_cleans_socket_file() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_AGENT_TIMEOUT", "1");
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let key = [3u8; KDF_HASH_LEN];
+
+        if let Err(err) = run_agent(&key) {
+            if matches!(
+                err,
+                LpassError::Io {
+                    context: "bind",
+                    ref source
+                } if source.kind() == std::io::ErrorKind::PermissionDenied
+            ) {
+                return;
+            }
+            panic!("run agent: {err}");
+        }
+
+        let socket = agent_socket_path().expect("socket path");
+        assert!(!socket.exists(), "socket must be removed after timeout");
+    }
+
+    #[test]
+    fn agent_ask_reads_pid_handshake_and_key_from_socket() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let socket = agent_socket_path().expect("socket path");
+        let listener = match UnixListener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("bind listener: {err}"),
+        };
+        let expected_key = [42u8; KDF_HASH_LEN];
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            if socket_send_pid() {
+                let mut pid = [0u8; 4];
+                stream.read_exact(&mut pid).expect("read pid");
+                stream.write_all(&pid).expect("write pid");
+            }
+            stream.write_all(&expected_key).expect("write key");
+        });
+
+        let key = agent_ask().expect("agent ask");
+        assert_eq!(key, expected_key);
+        server.join().expect("join server");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[test]
+    fn agent_kill_handles_pid_exchange_and_removes_socket() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let socket = agent_socket_path().expect("socket path");
+        let listener = match UnixListener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("bind listener: {err}"),
+        };
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            if socket_send_pid() {
+                let mut pid = [0u8; 4];
+                stream.read_exact(&mut pid).expect("read pid");
+                stream.write_all(&pid).expect("write pid");
+            }
+        });
+
+        agent_kill().expect("agent kill");
+        server.join().expect("join server");
+        assert!(!socket.exists(), "socket should be removed");
     }
 
     #[test]

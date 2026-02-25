@@ -2,14 +2,21 @@
 
 use std::collections::HashMap;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, USER_AGENT};
 
+use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
 use crate::error::{LpassError, Result};
 use crate::kdf::kdf_login_key;
 use crate::session::Session;
 
 pub const LASTPASS_SERVER: &str = "lastpass.com";
+const MOCK_ATTACH_KEY_HEX: &str =
+    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+const MOCK_ATTACH_STORAGE_KEY_TEXT: &str = "mock-storage-0001-text";
+const MOCK_ATTACH_STORAGE_KEY_BIN: &str = "mock-storage-0001-bin";
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -213,6 +220,21 @@ impl MockTransport {
             ),
             "getaccts.php" => String::new(),
             "show_website.php" => String::new(),
+            "getattach.php" => {
+                let Some(storage_key) = map.get("getattach") else {
+                    return HttpResponse {
+                        status: 200,
+                        body: String::new(),
+                    };
+                };
+                if storage_key == MOCK_ATTACH_STORAGE_KEY_TEXT {
+                    mock_attachment_ciphertext(b"demo")
+                } else if storage_key == MOCK_ATTACH_STORAGE_KEY_BIN {
+                    mock_attachment_ciphertext(&[0, 1, 2])
+                } else {
+                    String::new()
+                }
+            }
             _ => "<response><error message=\"unimplemented\"/></response>".to_string(),
         };
 
@@ -234,6 +256,23 @@ fn params_to_map(params: &[(&str, &str)]) -> HashMap<String, String> {
         map.insert((*key).to_string(), (*value).to_string());
     }
     map
+}
+
+fn mock_attachment_ciphertext(bytes: &[u8]) -> String {
+    let Ok(raw_key) = hex::decode(MOCK_ATTACH_KEY_HEX) else {
+        return String::new();
+    };
+    if raw_key.len() != 32 {
+        return String::new();
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&raw_key);
+
+    let plain_b64 = BASE64_STD.encode(bytes);
+    let Ok(encrypted) = aes_encrypt_lastpass(plain_b64.as_bytes(), &key) else {
+        return String::new();
+    };
+    serde_json::to_string(&base64_lastpass_encode(&encrypted)).unwrap_or_default()
 }
 
 #[cfg(test)]

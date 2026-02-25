@@ -5,15 +5,22 @@ mod unix_tests {
     use std::os::unix::net::UnixStream;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 
     fn unique_test_home() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
-        std::env::temp_dir().join(format!("lpass-agent-cov-{nanos}"))
+        let seq = NEXT_TEST_HOME_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "lpass-agent-cov-{}-{nanos}-{seq}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -52,7 +59,20 @@ mod unix_tests {
             return;
         }
 
-        let mut stream = UnixStream::connect(&socket_path).expect("connect socket");
+        let mut connected = None;
+        for _ in 0..120 {
+            match UnixStream::connect(&socket_path) {
+                Ok(stream) => {
+                    connected = Some(stream);
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(err) => panic!("connect socket: {err}"),
+            }
+        }
+        let mut stream = connected.expect("connect socket");
         if !cfg!(any(
             target_os = "linux",
             target_os = "android",

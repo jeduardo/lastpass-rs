@@ -9,7 +9,7 @@ Status legend:
 Execution order:
 1. `01-foundation-alias-env-option-parsing.md` (`done`)
 2. `02-blob-sync-and-shares-data-model.md` (`done`)
-3. `03-show-command-parity.md` (`todo`)
+3. `03-show-command-parity.md` (`done`)
 4. `04-generate-command-parity.md` (`todo`)
 5. `05-sync-import-export-parity.md` (`todo`)
 6. `06-passwd-command-parity.md` (`todo`)

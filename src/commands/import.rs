@@ -313,6 +313,7 @@ mod tests {
             local_version: false,
             shares: Vec::new(),
             accounts: vec![new_import_account()],
+            attachments: Vec::new(),
         };
         blob.accounts[0].name = "entry".to_string();
         blob.accounts[0].username = "u".to_string();

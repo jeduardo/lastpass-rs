@@ -242,6 +242,7 @@ mod tests {
             local_version: false,
             shares: Vec::new(),
             accounts: vec![account("0002", "a", ""), account("0010", "b", "")],
+            attachments: Vec::new(),
         };
         assert_eq!(next_id(&blob), "0011");
     }
