@@ -163,7 +163,7 @@ fn show_password_short_option_works_with_shared_style_fullname() {
         .expect("spawn lpass add");
     {
         let stdin = add.stdin.as_mut().expect("stdin available");
-        write!(stdin, "Password: {password}\n").expect("write add stdin");
+        writeln!(stdin, "Password: {password}").expect("write add stdin");
     }
     let add_output = add.wait_with_output().expect("wait add output");
     assert_eq!(

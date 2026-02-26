@@ -55,10 +55,10 @@ fn run(home: &Path, args: &[&str], stdin: Option<&str>, editor: Option<(&Path, &
         let mut child = command.spawn().expect("spawn lpass");
         {
             let input = child.stdin.as_mut().expect("stdin available");
-            if let Err(err) = input.write_all(stdin_value.as_bytes()) {
-                if err.kind() != std::io::ErrorKind::BrokenPipe {
-                    panic!("write stdin: {err}");
-                }
+            if let Err(err) = input.write_all(stdin_value.as_bytes())
+                && err.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                panic!("write stdin: {err}");
             }
         }
         child.wait_with_output().expect("wait output")
