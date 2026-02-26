@@ -95,12 +95,10 @@ fn parse_element_attributes(
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                 if e.name().as_ref() == element_name {
                     let mut attrs = std::collections::HashMap::new();
-                    for attr in e.attributes().with_checks(false) {
-                        if let Ok(attr) = attr {
-                            let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
-                            if let Ok(value) = attr.unescape_value() {
-                                attrs.insert(key, value.to_string());
-                            }
+                    for attr in e.attributes().with_checks(false).flatten() {
+                        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                        if let Ok(value) = attr.unescape_value() {
+                            attrs.insert(key, value.to_string());
                         }
                     }
                     return Some(attrs);

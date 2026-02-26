@@ -354,10 +354,11 @@ fn new_account(name: &str, choice: EditChoice, note_type: NoteType, is_app: bool
     };
 
     let mut fields = Vec::new();
-    if note_type != NoteType::None && choice == EditChoice::Any {
-        if let Some(note_name) = note_type_display_name(note_type) {
-            fields.push(make_field("NoteType", note_name));
-        }
+    if note_type != NoteType::None
+        && choice == EditChoice::Any
+        && let Some(note_name) = note_type_display_name(note_type)
+    {
+        fields.push(make_field("NoteType", note_name));
     }
     if is_app {
         fields.push(make_field("Application", ""));
@@ -560,10 +561,11 @@ fn build_account(parsed: &ParsedEntry, entry_name: &str) -> Account {
     };
 
     let mut fields = parsed.fields.clone();
-    if parsed.note_type != NoteType::None && !parsed.has_note_type_field {
-        if let Some(note_name) = note_type_display_name(parsed.note_type) {
-            fields.push(make_field("NoteType", note_name));
-        }
+    if parsed.note_type != NoteType::None
+        && !parsed.has_note_type_field
+        && let Some(note_name) = note_type_display_name(parsed.note_type)
+    {
+        fields.push(make_field("NoteType", note_name));
     }
 
     let mut account = Account {

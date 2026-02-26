@@ -20,9 +20,7 @@ const AGENT_ARG: &str = "__agent";
 const VERIFY_STRING: &str = "`lpass` was written by LastPass.\n";
 
 pub fn maybe_run_agent(args: &[String]) -> Option<i32> {
-    let Some(arg) = args.get(1) else {
-        return None;
-    };
+    let arg = args.get(1)?;
     if arg != AGENT_ARG {
         return None;
     }
@@ -65,15 +63,15 @@ pub fn agent_save(username: &str, iterations: u32, key: &[u8; KDF_HASH_LEN]) -> 
 }
 
 pub fn agent_is_available() -> bool {
-    if let Ok(Some(buffer)) = config_read_buffer("plaintext_key") {
-        if buffer.len() == KDF_HASH_LEN {
-            let mut key = [0u8; KDF_HASH_LEN];
-            key.copy_from_slice(&buffer);
-            let valid = verify_key(&key).unwrap_or(false);
-            key.zeroize();
-            if valid {
-                return true;
-            }
+    if let Ok(Some(buffer)) = config_read_buffer("plaintext_key")
+        && buffer.len() == KDF_HASH_LEN
+    {
+        let mut key = [0u8; KDF_HASH_LEN];
+        key.copy_from_slice(&buffer);
+        let valid = verify_key(&key).unwrap_or(false);
+        key.zeroize();
+        if valid {
+            return true;
         }
     }
 
@@ -132,14 +130,15 @@ pub fn agent_kill() -> Result<()> {
             Some(u32::from_ne_bytes(buf))
         };
 
-        if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
-            if pid > 0 && pid != std::process::id() as i32 {
-                let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
-            }
+        if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok())
+            && pid > 0
+            && pid != std::process::id() as i32
+        {
+            let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
         }
 
         let _ = fs::remove_file(&path);
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(unix))]
@@ -248,10 +247,10 @@ fn run_agent(key: &[u8; KDF_HASH_LEN]) -> Result<()> {
                 let _ = handle_client(stream, key);
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                if let Some(deadline) = deadline {
-                    if Instant::now() >= deadline {
-                        break;
-                    }
+                if let Some(deadline) = deadline
+                    && Instant::now() >= deadline
+                {
+                    break;
                 }
                 thread::sleep(Duration::from_millis(50));
             }
@@ -286,7 +285,7 @@ fn agent_timeout() -> Option<Duration> {
 
 #[cfg(test)]
 fn socket_send_pid() -> bool {
-    !(cfg!(any(
+    cfg!(not(any(
         target_os = "linux",
         target_os = "android",
         target_os = "cygwin"
@@ -319,7 +318,7 @@ fn agent_ask() -> Result<[u8; KDF_HASH_LEN]> {
         stream
             .read_exact(&mut key)
             .map_err(|err| LpassError::io("read key", err))?;
-        return Ok(key);
+        Ok(key)
     }
 
     #[cfg(not(unix))]
@@ -371,7 +370,7 @@ fn peer_allowed(stream: &std::os::unix::net::UnixStream) -> Result<bool> {
         use nix::unistd::getpeereid;
         let (uid, gid) =
             getpeereid(stream).map_err(|err| LpassError::io("peer credentials", err.into()))?;
-        return Ok(uid == getuid() && gid == getgid());
+        Ok(uid == getuid() && gid == getgid())
     }
 }
 

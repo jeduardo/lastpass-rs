@@ -613,10 +613,10 @@ fn fetch_attachment_ciphertext(
         ("token".to_string(), session.token.clone()),
         ("getattach".to_string(), attachment.storagekey.clone()),
     ];
-    if let Some(share_id) = account.share_id.as_deref() {
-        if !share_id.is_empty() {
-            params.push(("sharedfolderid".to_string(), share_id.to_string()));
-        }
+    if let Some(share_id) = account.share_id.as_deref()
+        && !share_id.is_empty()
+    {
+        params.push(("sharedfolderid".to_string(), share_id.to_string()));
     }
 
     let params_ref: Vec<(&str, &str)> = params
@@ -677,12 +677,11 @@ fn attachment_is_binary(data: &[u8]) -> bool {
 fn copy_to_clipboard(data: &[u8]) -> Result<(), String> {
     let fallback_message = "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.";
 
-    if let Ok(command) = crate::lpenv::var("LPASS_CLIPBOARD_COMMAND") {
-        if !command.trim().is_empty() {
-            run_shell_clipboard_command(&command, data)
-                .map_err(|_| fallback_message.to_string())?;
-            return Ok(());
-        }
+    if let Ok(command) = crate::lpenv::var("LPASS_CLIPBOARD_COMMAND")
+        && !command.trim().is_empty()
+    {
+        run_shell_clipboard_command(&command, data).map_err(|_| fallback_message.to_string())?;
+        return Ok(());
     }
 
     if run_default_clipboard_commands(data, &DEFAULT_CLIPBOARD_COMMANDS) {

@@ -65,14 +65,13 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
 }
 
 fn find_unique_account_index(accounts: &[Account], name: &str) -> Result<usize, String> {
-    if name != "0" {
-        if let Some((idx, _)) = accounts
+    if name != "0"
+        && let Some((idx, _)) = accounts
             .iter()
             .enumerate()
             .find(|(_, account)| account.id.eq_ignore_ascii_case(name))
-        {
-            return Ok(idx);
-        }
+    {
+        return Ok(idx);
     }
 
     let matches: Vec<usize> = accounts

@@ -414,14 +414,11 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
             let name = &line[..colon_pos];
             let value = &line[colon_pos + 1..];
 
-            if !note_has_field(note_type, name)
-                && current_field.is_some()
-                && note_field_is_multiline(
-                    note_type,
-                    expanded.fields[current_field.unwrap()].name.as_str(),
-                )
+            if let Some(current_idx) = current_field
+                && !note_has_field(note_type, name)
+                && note_field_is_multiline(note_type, expanded.fields[current_idx].name.as_str())
             {
-                let field = &mut expanded.fields[current_field.unwrap()];
+                let field = &mut expanded.fields[current_idx];
                 field.value.push('\n');
                 field.value.push_str(line);
             } else if name == "Username" {

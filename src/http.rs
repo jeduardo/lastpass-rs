@@ -115,21 +115,21 @@ fn post_real(
     let url = format!("https://{server}/{page}");
 
     let mut request = client.post(url).header(USER_AGENT, user_agent());
-    if let Some(session) = session {
-        if !session.session_id.is_empty() {
-            request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
-        }
+    if let Some(session) = session
+        && !session.session_id.is_empty()
+    {
+        request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
     }
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {
         context: "http post",
-        source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
+        source: std::io::Error::other("http request failed"),
     })?;
 
     let status = response.status().as_u16();
     let body = response.text().map_err(|_| LpassError::Io {
         context: "http read",
-        source: std::io::Error::new(std::io::ErrorKind::Other, "http response read failed"),
+        source: std::io::Error::other("http response read failed"),
     })?;
 
     Ok(HttpResponse { status, body })
@@ -149,15 +149,15 @@ fn post_real_bytes(
     let url = format!("https://{server}/{page}");
 
     let mut request = client.post(url).header(USER_AGENT, user_agent());
-    if let Some(session) = session {
-        if !session.session_id.is_empty() {
-            request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
-        }
+    if let Some(session) = session
+        && !session.session_id.is_empty()
+    {
+        request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
     }
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {
         context: "http post",
-        source: std::io::Error::new(std::io::ErrorKind::Other, "http request failed"),
+        source: std::io::Error::other("http request failed"),
     })?;
 
     let status = response.status().as_u16();
@@ -165,7 +165,7 @@ fn post_real_bytes(
         .bytes()
         .map_err(|_| LpassError::Io {
             context: "http read",
-            source: std::io::Error::new(std::io::ErrorKind::Other, "http response read failed"),
+            source: std::io::Error::other("http response read failed"),
         })?
         .to_vec();
 

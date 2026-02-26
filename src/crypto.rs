@@ -132,7 +132,7 @@ pub fn decrypt_private_key(private_key_enc: &str, key: &[u8; 32]) -> Result<Vec<
     let decrypted = if private_key_enc.starts_with('!') {
         aes_decrypt_base64_lastpass(private_key_enc, key)?
     } else {
-        if private_key_enc.len() % 2 != 0 {
+        if !private_key_enc.len().is_multiple_of(2) {
             return Err(LpassError::Crypto("invalid private key format"));
         }
         let mut encrypted = Vec::with_capacity(1 + 16 + private_key_enc.len() / 2);

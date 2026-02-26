@@ -44,7 +44,7 @@ fn run_inner(args: &[String]) -> std::result::Result<i32, String> {
             false,
             "You have used the --plaintext-key option. This option will greatly reduce the security of your passwords. You are advised, instead, to use the agent, whose timeout can be disabled by setting LPASS_AGENT_TIMEOUT=0. Are you sure you would like to do this?",
         )
-        .map_err(|err| format!("{err}"))?
+        .map_err(|err| err.to_string())?
     {
         return Err("Login aborted. Try again without --plaintext-key.".to_string());
     }
@@ -422,7 +422,7 @@ fn calculate_trust_label() -> std::result::Result<String, String> {
         let nodename = uts.nodename().to_string_lossy();
         let sysname = uts.sysname().to_string_lossy();
         let release = uts.release().to_string_lossy();
-        return Ok(format!("{nodename} - {sysname} {release}"));
+        Ok(format!("{nodename} - {sysname} {release}"))
     }
 
     #[cfg(not(unix))]

@@ -127,7 +127,7 @@ fn parse_import_accounts(input: &str) -> Result<Vec<Account>, String> {
         if let Some(idx) = fav_idx {
             account.fav = record
                 .get(idx)
-                .map(|value| value.chars().next() == Some('1'))
+                .map(|value| value.starts_with('1'))
                 .unwrap_or(false);
         }
 

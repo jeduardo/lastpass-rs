@@ -91,7 +91,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     }
 
     let mut accounts: Vec<&Account> = listing_accounts.iter().collect();
-    accounts.sort_by(|a, b| get_display_fullname(a).cmp(&get_display_fullname(b)));
+    accounts.sort_by_key(|a| get_display_fullname(a));
 
     let group_filter = match group.as_deref() {
         Some("(none)") => Some(""),
@@ -171,15 +171,15 @@ fn insert_account(root: &mut LsNode, account: &Account) {
 
     let mut components: Vec<&str> = Vec::new();
     let mut remainder = dirname.as_str();
-    if let Some(share_name) = account.share_name.as_deref() {
-        if remainder.starts_with(share_name) {
-            components.extend(parse_path_components(share_name));
-            remainder = if remainder.len() > share_name.len() {
-                &remainder[share_name.len() + 1..]
-            } else {
-                ""
-            };
-        }
+    if let Some(share_name) = account.share_name.as_deref()
+        && remainder.starts_with(share_name)
+    {
+        components.extend(parse_path_components(share_name));
+        remainder = if remainder.len() > share_name.len() {
+            &remainder[share_name.len() + 1..]
+        } else {
+            ""
+        };
     }
     components.extend(parse_path_components(remainder));
 

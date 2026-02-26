@@ -105,15 +105,14 @@ fn generate_password(len: usize) -> String {
 }
 
 fn find_account_index(blob: &Blob, name: &str) -> Option<usize> {
-    if name != "0" {
-        if let Some((idx, _)) = blob
+    if name != "0"
+        && let Some((idx, _)) = blob
             .accounts
             .iter()
             .enumerate()
             .find(|(_, acct)| acct.id.eq_ignore_ascii_case(name))
-        {
-            return Some(idx);
-        }
+    {
+        return Some(idx);
     }
 
     blob.accounts
@@ -172,10 +171,10 @@ fn split_group(full: &str) -> (String, String) {
 fn next_id(blob: &Blob) -> String {
     let mut max_id = 0u32;
     for account in &blob.accounts {
-        if let Ok(value) = account.id.parse::<u32>() {
-            if value > max_id {
-                max_id = value;
-            }
+        if let Ok(value) = account.id.parse::<u32>()
+            && value > max_id
+        {
+            max_id = value;
         }
     }
     format!("{:04}", max_id.saturating_add(1))

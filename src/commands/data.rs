@@ -474,10 +474,10 @@ pub(crate) fn ensure_mock_blob() -> Result<()> {
 }
 
 fn load_mock_blob() -> Result<Blob> {
-    if let Some(buffer) = config_read_buffer("blob")? {
-        if let Ok(blob) = serde_json::from_slice::<Blob>(&buffer) {
-            return Ok(blob);
-        }
+    if let Some(buffer) = config_read_buffer("blob")?
+        && let Ok(blob) = serde_json::from_slice::<Blob>(&buffer)
+    {
+        return Ok(blob);
     }
 
     let blob = mock_blob();
@@ -566,6 +566,7 @@ fn mock_blob() -> Blob {
     blob
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mock_account(
     id: &str,
     name: &str,
