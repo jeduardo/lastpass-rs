@@ -269,6 +269,8 @@ fn next_id_value(blob: &Blob) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::{NamedTempFile, TempDir};
 
     #[test]
     fn parse_csv_records_handles_quotes_and_commas() {
@@ -304,6 +306,20 @@ mod tests {
         assert_eq!(account.group, "team");
         assert_eq!(account.fullname, "team/entry");
         assert!(account.fav);
+    }
+
+    #[test]
+    fn parse_import_accounts_handles_empty_and_header_only_csv() {
+        assert!(parse_import_accounts("").expect("empty").is_empty());
+        let accounts = parse_import_accounts("name,url\n").expect("header-only");
+        assert!(accounts.is_empty());
+    }
+
+    #[test]
+    fn parse_csv_records_handles_cr_without_lf() {
+        let records = parse_csv_records("name,url\rvalue,https://x\r\n").expect("parse csv");
+        assert_eq!(records.len(), 1);
+        assert!(records[0][1].contains('\r'));
     }
 
     #[test]
@@ -343,5 +359,47 @@ mod tests {
 
         let err = run_inner(&["--bogus".to_string()]).expect_err("unknown flag");
         assert!(err.contains("usage: import"));
+    }
+
+    #[test]
+    fn run_reports_errors_for_missing_file() {
+        let status = run(&["/definitely/missing.csv".to_string()]);
+        assert_eq!(status, 1);
+    }
+
+    #[test]
+    fn run_inner_imports_from_file_in_mock_mode() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let file = NamedTempFile::new().expect("temp csv");
+        fs::write(
+            file.path(),
+            "url,username,password,extra,name,grouping,fav\nhttps://x,u,p,n,entry,team,1\n",
+        )
+        .expect("write csv");
+
+        let status = run_inner(&[
+            "--sync=no".to_string(),
+            "--keep-dupes".to_string(),
+            file.path().to_string_lossy().to_string(),
+        ])
+        .expect("import");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn next_id_value_uses_highest_numeric_id() {
+        let mut blob = Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: vec![new_import_account(), new_import_account()],
+            attachments: Vec::new(),
+        };
+        blob.accounts[0].id = "0003".to_string();
+        blob.accounts[1].id = "n/a".to_string();
+        assert_eq!(next_id_value(&blob), 3);
     }
 }

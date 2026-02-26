@@ -17,10 +17,7 @@ mod unix_tests {
             .expect("time went backwards")
             .as_nanos();
         let seq = NEXT_TEST_HOME_ID.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "lpass-agent-cov-{}-{nanos}-{seq}",
-            std::process::id()
-        ))
+        PathBuf::from(format!("/tmp/lpacov-{}-{nanos}-{seq}", std::process::id()))
     }
 
     #[test]

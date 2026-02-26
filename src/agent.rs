@@ -111,7 +111,16 @@ pub fn agent_kill() -> Result<()> {
             Err(err) => return Err(LpassError::io("connect", err)),
         };
 
-        let pid = if socket_send_pid() {
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
+        let pid = {
+            use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
+            let creds = getsockopt(&stream, PeerCredentials)
+                .map_err(|err| LpassError::io("peer credentials", err.into()))?;
+            Some(creds.pid() as u32)
+        };
+
+        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+        let pid = {
             let this_pid = std::process::id();
             stream
                 .write_all(&this_pid.to_ne_bytes())
@@ -121,18 +130,6 @@ pub fn agent_kill() -> Result<()> {
                 .read_exact(&mut buf)
                 .map_err(|err| LpassError::io("read pid", err))?;
             Some(u32::from_ne_bytes(buf))
-        } else {
-            #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
-            {
-                use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
-                let creds = getsockopt(&stream, PeerCredentials)
-                    .map_err(|err| LpassError::io("peer credentials", err.into()))?;
-                Some(creds.pid() as u32)
-            }
-            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
-            {
-                None
-            }
         };
 
         if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
@@ -287,6 +284,7 @@ fn agent_timeout() -> Option<Duration> {
     }
 }
 
+#[cfg(test)]
 fn socket_send_pid() -> bool {
     !(cfg!(any(
         target_os = "linux",
@@ -304,7 +302,8 @@ fn agent_ask() -> Result<[u8; KDF_HASH_LEN]> {
         let mut stream =
             UnixStream::connect(&path).map_err(|err| LpassError::io("connect", err))?;
 
-        if socket_send_pid() {
+        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+        {
             let pid = std::process::id();
             stream
                 .write_all(&pid.to_ne_bytes())
@@ -338,7 +337,8 @@ fn handle_client(
         return Ok(());
     }
 
-    if socket_send_pid() {
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+    {
         let _ = read_pid(&mut stream);
         let pid = std::process::id();
         stream
@@ -395,6 +395,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::{UnixListener, UnixStream};
+    use tempfile::Builder;
     use tempfile::TempDir;
 
     fn test_config_env(temp: &TempDir) -> ConfigEnv {
@@ -405,6 +406,13 @@ mod tests {
             xdg_runtime_dir: Some(runtime),
             ..ConfigEnv::default()
         }
+    }
+
+    fn short_tempdir() -> TempDir {
+        Builder::new()
+            .prefix("lpa")
+            .tempdir_in("/tmp")
+            .expect("tempdir")
     }
 
     #[test]
@@ -419,15 +427,10 @@ mod tests {
 
     #[test]
     fn socket_send_pid_matches_platform_contract() {
-        if cfg!(any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "cygwin"
-        )) {
-            assert!(!socket_send_pid());
-        } else {
-            assert!(socket_send_pid());
-        }
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
+        assert!(!socket_send_pid());
+        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+        assert!(socket_send_pid());
     }
 
     #[test]
@@ -449,7 +452,7 @@ mod tests {
     #[test]
     fn verify_key_returns_false_when_verify_entry_is_missing() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
         let key = [1u8; KDF_HASH_LEN];
         assert!(!verify_key(&key).expect("verify"));
@@ -459,7 +462,7 @@ mod tests {
     fn run_agent_with_short_timeout_exits_and_cleans_socket_file() {
         let _override_guard = crate::lpenv::begin_test_overrides();
         crate::lpenv::set_override_for_tests("LPASS_AGENT_TIMEOUT", "1");
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
         let key = [3u8; KDF_HASH_LEN];
 
@@ -483,7 +486,7 @@ mod tests {
     #[test]
     fn agent_ask_reads_pid_handshake_and_key_from_socket() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
         let socket = agent_socket_path().expect("socket path");
         let listener = match UnixListener::bind(&socket) {
@@ -495,7 +498,8 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
-            if socket_send_pid() {
+            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+            {
                 let mut pid = [0u8; 4];
                 stream.read_exact(&mut pid).expect("read pid");
                 stream.write_all(&pid).expect("write pid");
@@ -512,7 +516,7 @@ mod tests {
     #[test]
     fn agent_kill_handles_pid_exchange_and_removes_socket() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
         let socket = agent_socket_path().expect("socket path");
         let listener = match UnixListener::bind(&socket) {
@@ -523,7 +527,8 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
-            if socket_send_pid() {
+            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+            {
                 let mut pid = [0u8; 4];
                 stream.read_exact(&mut pid).expect("read pid");
                 stream.write_all(&pid).expect("write pid");
@@ -538,7 +543,7 @@ mod tests {
     #[test]
     fn agent_get_decryption_key_prefers_valid_plaintext_key() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
 
         let key = [9u8; KDF_HASH_LEN];
@@ -551,7 +556,7 @@ mod tests {
     #[test]
     fn agent_get_decryption_key_falls_back_to_askpass_loaded_key() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
 
         let askpass = temp.path().join("askpass.sh");
@@ -576,9 +581,83 @@ mod tests {
     }
 
     #[test]
+    fn agent_load_on_disk_key_reports_missing_username_and_verify() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = short_tempdir();
+        let _config_guard = set_test_env(test_config_env(&temp));
+
+        config_write_string("iterations", "2").expect("write iterations");
+        let err = agent_load_on_disk_key().expect_err("missing username");
+        assert!(format!("{err}").contains("missing username"));
+
+        config_write_string("username", "user@example.com").expect("write username");
+        let err = agent_load_on_disk_key().expect_err("missing verify");
+        assert!(format!("{err}").contains("missing verify"));
+    }
+
+    #[test]
+    fn agent_get_decryption_key_uses_running_agent_socket() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = short_tempdir();
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let socket = agent_socket_path().expect("socket path");
+        let listener = match UnixListener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("bind listener: {err}"),
+        };
+        let expected_key = [11u8; KDF_HASH_LEN];
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+            {
+                let mut pid = [0u8; 4];
+                stream.read_exact(&mut pid).expect("read pid");
+                stream.write_all(&pid).expect("write pid");
+            }
+            stream.write_all(&expected_key).expect("write key");
+        });
+
+        let got = agent_get_decryption_key().expect("load key via agent");
+        assert_eq!(got, expected_key);
+        server.join().expect("join server");
+        let _ = std::fs::remove_file(socket);
+    }
+
+    #[test]
+    fn agent_is_available_true_when_agent_socket_responds() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = short_tempdir();
+        let _config_guard = set_test_env(test_config_env(&temp));
+        let socket = agent_socket_path().expect("socket path");
+        let listener = match UnixListener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("bind listener: {err}"),
+        };
+        let expected_key = [12u8; KDF_HASH_LEN];
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+            {
+                let mut pid = [0u8; 4];
+                stream.read_exact(&mut pid).expect("read pid");
+                stream.write_all(&pid).expect("write pid");
+            }
+            stream.write_all(&expected_key).expect("write key");
+        });
+
+        assert!(agent_is_available());
+        server.join().expect("join server");
+        let _ = std::fs::remove_file(socket);
+    }
+
+    #[test]
     fn agent_is_available_checks_plaintext_key_validity() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
 
         let key = [4u8; KDF_HASH_LEN];
@@ -596,7 +675,8 @@ mod tests {
         let (mut client, server) = UnixStream::pair().expect("socket pair");
         let worker = std::thread::spawn(move || handle_client(server, &key));
 
-        if socket_send_pid() {
+        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
+        {
             client
                 .write_all(&1234u32.to_ne_bytes())
                 .expect("write pid request");
@@ -624,7 +704,7 @@ mod tests {
     #[test]
     fn agent_ask_and_agent_kill_handle_missing_socket() {
         let _override_guard = crate::lpenv::begin_test_overrides();
-        let temp = TempDir::new().expect("tempdir");
+        let temp = short_tempdir();
         let _config_guard = set_test_env(test_config_env(&temp));
 
         let err = agent_ask().expect_err("missing socket should fail");

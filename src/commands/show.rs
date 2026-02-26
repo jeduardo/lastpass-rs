@@ -843,6 +843,8 @@ fn escape_json(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::blob::Field;
+    use crate::config::{config_write_buffer, config_write_encrypted_string};
+    use crate::session::{Session, session_save};
     use tempfile::TempDir;
 
     fn account(id: &str, name: &str, group: &str) -> Account {
@@ -889,6 +891,26 @@ mod tests {
             size: "4".to_string(),
             filename: String::new(),
         }
+    }
+
+    fn write_plaintext_key_and_verify(key: &[u8; KDF_HASH_LEN]) {
+        config_write_buffer("plaintext_key", key).expect("plaintext key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
+            .expect("verify");
+    }
+
+    fn write_session(key: &[u8; KDF_HASH_LEN]) {
+        let session = Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "token".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        session_save(&session, key).expect("session save");
     }
 
     #[test]
@@ -1085,6 +1107,84 @@ mod tests {
     }
 
     #[test]
+    fn run_inner_with_mock_covers_common_choice_paths() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--username".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("username"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--password".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("password"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--url".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("url"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--id".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("id"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--name".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("name"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--notes".to_string(),
+                "test-group/test-note".to_string(),
+            ])
+            .expect("notes"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--field=Hostname".to_string(),
+                "test-group/test-note".to_string(),
+            ])
+            .expect("field"),
+            0
+        );
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "test-group/test-account".to_string()
+            ])
+            .expect("all"),
+            0
+        );
+    }
+
+    #[test]
     fn format_json_escapes_quoted_fields() {
         let mut acct = account("0003", "quoted", "team");
         acct.note = "line1\n\"line2\"".to_string();
@@ -1111,5 +1211,111 @@ mod tests {
         assert!(run_inner(&["--attach".to_string()]).is_err());
         assert!(run_inner(&["--format".to_string()]).is_err());
         assert!(run_inner(&["--title-format".to_string()]).is_err());
+    }
+
+    #[test]
+    fn run_inner_mock_covers_all_json_clip_and_error_choices() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "cat > /dev/null");
+        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
+
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--all".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("all output"),
+            0
+        );
+
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--json".to_string(),
+                "--clip".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("json clip"),
+            0
+        );
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "--field".to_string(),
+            "NoSuchField".to_string(),
+            "test-group/test-account".to_string(),
+        ])
+        .expect_err("missing field");
+        assert!(err.contains("Could not find specified field"));
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "--attach".to_string(),
+            "missing".to_string(),
+            "test-group/test-account".to_string(),
+        ])
+        .expect_err("missing attachment");
+        assert!(err.contains("Could not find specified attachment"));
+    }
+
+    #[test]
+    fn fetch_attachment_ciphertext_reports_missing_session_and_empty_variants() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let key = [7u8; KDF_HASH_LEN];
+        write_plaintext_key_and_verify(&key);
+        let mut acct = account("0001", "entry", "team");
+        acct.attachkey = "00".repeat(32);
+        let mut att = attachment("1", "0001");
+        att.storagekey = "mock-storage-0001-text".to_string();
+
+        let err = fetch_attachment_ciphertext(&acct, &att).expect_err("missing session");
+        assert!(err.contains("Could not find session"));
+
+        write_session(&key);
+
+        acct.share_id = Some("share-123".to_string());
+        att.storagekey = "does-not-exist".to_string();
+        let err = fetch_attachment_ciphertext(&acct, &att).expect_err("empty body");
+        assert!(err.contains("Could not load attachment"));
+
+        att.storagekey = "mock-storage-0001-empty-json".to_string();
+        let err = fetch_attachment_ciphertext(&acct, &att).expect_err("empty parsed payload");
+        assert!(err.contains("Could not load attachment"));
+    }
+
+    #[test]
+    fn format_json_handles_multiple_accounts() {
+        let a = account("0001", "alpha", "team");
+        let b = account("0002", "beta", "ops");
+        let json = format_json(&[&a, &b]);
+        assert!(json.contains("\"id\": \"0001\""));
+        assert!(json.contains("\"id\": \"0002\""));
+        assert!(json.contains("},\n  {"));
+    }
+
+    #[test]
+    fn fix_ascii_armor_leaves_malformed_values_unchanged() {
+        let no_begin = "plain text".to_string();
+        assert_eq!(fix_ascii_armor(no_begin.clone()), no_begin);
+
+        let missing_header_end = "-----BEGIN TEST payload -----END TEST-----".to_string();
+        assert_eq!(
+            fix_ascii_armor(missing_header_end.clone()),
+            missing_header_end
+        );
+
+        let missing_trailer = "-----BEGIN TEST----- payload".to_string();
+        assert_eq!(fix_ascii_armor(missing_trailer.clone()), missing_trailer);
+
+        let no_trailer_suffix = "-----BEGIN TEST----- payload -----END TEST----".to_string();
+        assert_eq!(fix_ascii_armor(no_trailer_suffix.clone()), no_trailer_suffix);
     }
 }

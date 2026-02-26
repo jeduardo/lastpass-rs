@@ -88,6 +88,9 @@ jobs:
       - name: Generate coverage report
         run: cargo coverage
 
+      - name: Normalize LCOV totals
+        run: python3 scripts/normalize_lcov_totals.py coverage/lcov.info
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

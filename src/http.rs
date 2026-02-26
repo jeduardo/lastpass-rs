@@ -17,6 +17,7 @@ const MOCK_ATTACH_KEY_HEX: &str =
     "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 const MOCK_ATTACH_STORAGE_KEY_TEXT: &str = "mock-storage-0001-text";
 const MOCK_ATTACH_STORAGE_KEY_BIN: &str = "mock-storage-0001-bin";
+const MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON: &str = "mock-storage-0001-empty-json";
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -231,6 +232,8 @@ impl MockTransport {
                     mock_attachment_ciphertext(b"demo")
                 } else if storage_key == MOCK_ATTACH_STORAGE_KEY_BIN {
                     mock_attachment_ciphertext(&[0, 1, 2])
+                } else if storage_key == MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON {
+                    "\"\"".to_string()
                 } else {
                     String::new()
                 }
@@ -345,6 +348,72 @@ mod tests {
             .expect("response");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"1000".to_vec());
+    }
+
+    #[test]
+    fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        let response = super::post_lastpass("iterations.php", None, &[("email", "u@example.com")])
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "1000");
+    }
+
+    #[test]
+    fn mock_getattach_handles_missing_and_unknown_storage_keys() {
+        let client = HttpClient::mock();
+
+        let missing = client
+            .post_lastpass(None, "getattach.php", None, &[])
+            .expect("response");
+        assert_eq!(missing.status, 200);
+        assert!(missing.body.is_empty());
+
+        let unknown = client
+            .post_lastpass(
+                None,
+                "getattach.php",
+                None,
+                &[("getattach", "does-not-exist")],
+            )
+            .expect("response");
+        assert_eq!(unknown.status, 200);
+        assert!(unknown.body.is_empty());
+    }
+
+    #[test]
+    fn mock_getattach_known_keys_return_encrypted_payloads() {
+        let client = HttpClient::mock();
+        let text = client
+            .post_lastpass(
+                None,
+                "getattach.php",
+                None,
+                &[("getattach", MOCK_ATTACH_STORAGE_KEY_TEXT)],
+            )
+            .expect("response");
+        assert!(!text.body.is_empty());
+
+        let bin = client
+            .post_lastpass(
+                None,
+                "getattach.php",
+                None,
+                &[("getattach", MOCK_ATTACH_STORAGE_KEY_BIN)],
+            )
+            .expect("response");
+        assert!(!bin.body.is_empty());
+
+        let empty_json = client
+            .post_lastpass(
+                None,
+                "getattach.php",
+                None,
+                &[("getattach", MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON)],
+            )
+            .expect("response");
+        assert_eq!(empty_json.body, "\"\"");
     }
 
     #[test]

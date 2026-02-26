@@ -633,6 +633,7 @@ fn parse_yes_no(value: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     fn account() -> Account {
         Account {
@@ -959,5 +960,129 @@ mod tests {
 
         let err = run_inner(&["--field".to_string(), "x".to_string()]).expect_err("missing target");
         assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_rejects_extra_positionals_and_missing_values() {
+        let err = parse_edit_args(&["a".to_string(), "b".to_string()]).expect_err("extra arg");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--field".to_string(), "x".to_string()]).expect_err("missing name");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--sync".to_string(), "x".to_string()]).expect_err("bad sync");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--color".to_string(), "x".to_string()]).expect_err("bad color");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn helper_functions_cover_remaining_small_branches() {
+        let acct = account();
+        let args = EditArgs {
+            name: acct.fullname.clone(),
+            choice: EditChoice::Username,
+            field: None,
+            non_interactive: false,
+            sync_mode: SyncMode::No,
+        };
+        assert_eq!(make_editor_initial_text(&acct, &args, false), "alice\n");
+        assert_eq!(
+            make_editor_initial_text(
+                &acct,
+                &EditArgs {
+                    choice: EditChoice::Password,
+                    ..args.clone()
+                },
+                false
+            ),
+            "secret\n"
+        );
+        assert_eq!(
+            make_editor_initial_text(
+                &acct,
+                &EditArgs {
+                    choice: EditChoice::Url,
+                    ..args.clone()
+                },
+                false
+            ),
+            "https://example.com\n"
+        );
+        assert_eq!(
+            make_editor_initial_text(
+                &acct,
+                &EditArgs {
+                    choice: EditChoice::Name,
+                    ..args
+                },
+                false
+            ),
+            "team/entry\n"
+        );
+
+        let secure = new_account("folder/new-note", true);
+        assert_eq!(secure.url, "http://sn");
+        let plain = new_account("new-entry", false);
+        assert_eq!(plain.url, "");
+        assert_eq!(split_group("a/b/c"), ("a/b".to_string(), "c".to_string()));
+
+        let mut with_crlf = "value\r\n".to_string();
+        trim_single_trailing_newline(&mut with_crlf);
+        assert_eq!(with_crlf, "value");
+
+        let mut target = account();
+        apply_choice_value(&mut target, EditChoice::Username, None, "u2", false).expect("user");
+        apply_choice_value(&mut target, EditChoice::Password, None, "p2", false).expect("pw");
+        apply_choice_value(&mut target, EditChoice::Url, None, "https://x", false).expect("url");
+        apply_choice_value(&mut target, EditChoice::Notes, None, "n2", false).expect("notes");
+        apply_choice_value(&mut target, EditChoice::Name, None, "ops/db", false).expect("name");
+        apply_choice_value(&mut target, EditChoice::Any, None, "ignored", false).expect("any");
+        assert_eq!(target.username, "u2");
+        assert_eq!(target.password, "p2");
+        assert_eq!(target.url, "https://x");
+        assert_eq!(target.note, "n2");
+        assert_eq!(target.fullname, "ops/db");
+
+        apply_fullname(&mut target, "   ");
+        assert_eq!(target.fullname, "ops/db");
+
+        assert!(is_valid_field_name(NoteType::None, "Random"));
+        assert!(!is_valid_field_name(NoteType::Server, "Random"));
+    }
+
+    #[test]
+    fn run_inner_mock_reports_readonly_and_non_secure_field_errors() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let mut blob = crate::commands::data::load_blob(SyncMode::No).expect("blob");
+        let first = blob
+            .accounts
+            .iter_mut()
+            .find(|item| item.fullname == "test-group/test-account")
+            .expect("mock account");
+        first.share_readonly = true;
+        first.share_name = Some("Shared".to_string());
+        crate::commands::data::save_blob(&blob).expect("save blob");
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "--username".to_string(),
+            "test-group/test-account".to_string(),
+        ])
+        .expect_err("readonly");
+        assert!(err.contains("readonly shared entry"));
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "--field=Hostname".to_string(),
+            "test-group/test-reprompt-account".to_string(),
+        ])
+        .expect_err("field unsupported");
+        assert!(err.contains("not secure notes"));
     }
 }

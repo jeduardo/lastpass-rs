@@ -152,6 +152,7 @@ fn csv_cell(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::blob::Account;
+    use tempfile::TempDir;
 
     fn account() -> Account {
         Account {
@@ -201,6 +202,10 @@ mod tests {
         assert_eq!(export_value(&account, "fav"), "1");
         assert_eq!(export_value(&account, "attachpresent"), "1");
         assert_eq!(export_value(&account, "id"), "42");
+        assert_eq!(export_value(&account, "group"), "team");
+        assert_eq!(export_value(&account, "fullname"), "team/entry");
+        assert_eq!(export_value(&account, "last_touch"), "yesterday");
+        assert_eq!(export_value(&account, "last_modified_gmt"), "now");
         assert_eq!(export_value(&account, "unknown"), "");
     }
 
@@ -244,5 +249,35 @@ mod tests {
 
         let err = run_inner(&["--fields".to_string()]).expect_err("missing fields value");
         assert!(err.contains("usage: export"));
+    }
+
+    #[test]
+    fn run_inner_accepts_color_and_exports_in_mock_mode() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let status = run_inner(&[
+            "--sync=no".to_string(),
+            "--color".to_string(),
+            "never".to_string(),
+        ])
+        .expect("default export");
+        assert_eq!(status, 0);
+
+        let status = run_inner(&[
+            "--sync=no".to_string(),
+            "--color=always".to_string(),
+            "--fields".to_string(),
+            "name,grouping,fav,attachpresent".to_string(),
+        ])
+        .expect("custom fields export");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn bool_str_returns_zero_for_false() {
+        assert_eq!(bool_str(false), "0");
     }
 }
