@@ -1,6 +1,6 @@
 # Task 03: `show` Command Full Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Close remaining `show` gaps: regex/fixed searches, multi-match behavior, clipboard, attachments, and strict flag behavior.
@@ -34,3 +34,13 @@ Acceptance criteria:
 - `show` options and outputs match C for implemented paths.
 - `show` no longer silently ignores parity-critical flags.
 - New tests cover regex/fixed, multi-match, clip, and attach cases.
+
+Progress notes:
+- Implemented `--basic-regexp/-G` and `--fixed-strings/-F` search modes.
+- Implemented C-like multi-match behavior and `--expand-multi/-x` handling.
+- Implemented non-ignored `--clip/-c` output path, including `LPASS_CLIPBOARD_COMMAND`.
+- Implemented attachment metadata parsing (`ATTA`) and `show --attach=...` output/decrypt flow.
+- Implemented C-style interactive binary attachment prompt flow (`y/n/s`, default save), save-to-file behavior, and write confirmation output.
+- Added parity tests for regex/fixed search, multi-match, clip, and attach paths.
+- Added protected-entry (`pwprotect`) authentication check before output.
+- Added parity coverage for `--clip` with `--json`.

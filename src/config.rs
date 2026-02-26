@@ -45,7 +45,7 @@ impl ConfigEnv {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_ENV: std::cell::RefCell<Option<ConfigEnv>> = std::cell::RefCell::new(None);
+    static TEST_ENV: std::cell::RefCell<Option<ConfigEnv>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -285,9 +285,7 @@ fn get_xdg_dir(env: &ConfigEnv, xdg_var: &str) -> Option<PathBuf> {
         _ => {}
     }
 
-    if env.xdg_runtime_dir.is_none() {
-        return None;
-    }
+    env.xdg_runtime_dir.as_ref()?;
 
     let home = env.home.as_ref()?;
     match xdg_var {

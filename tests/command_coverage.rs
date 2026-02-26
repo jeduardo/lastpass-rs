@@ -36,10 +36,10 @@ fn run_with_mock(home: &Path, args: &[&str], stdin: Option<&str>, http_mock: boo
         let mut child = command.spawn().expect("spawn lpass");
         {
             let input = child.stdin.as_mut().expect("stdin available");
-            if let Err(err) = input.write_all(stdin_value.as_bytes()) {
-                if err.kind() != std::io::ErrorKind::BrokenPipe {
-                    panic!("write stdin: {err}");
-                }
+            if let Err(err) = input.write_all(stdin_value.as_bytes())
+                && err.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                panic!("write stdin: {err}");
             }
         }
         child.wait_with_output().expect("wait output")
@@ -269,9 +269,13 @@ fn secure_note_edit_paths_work() {
     assert_eq!(edit_any.status.code().unwrap_or(-1), 0);
 
     let show_all = run(&home, &["show", "--sync=no", "secure-note"], None);
-    let show_text = String::from_utf8_lossy(&show_all.stdout);
-    assert!(show_text.contains("Reprompt: Yes"), "{show_text}");
-    assert!(show_text.contains("Notes: updated note"), "{show_text}");
+    assert_eq!(show_all.status.code().unwrap_or(-1), 1);
+    assert!(
+        String::from_utf8_lossy(&show_all.stderr)
+            .contains("Could not authenticate for protected entry."),
+        "stderr: {}",
+        String::from_utf8_lossy(&show_all.stderr)
+    );
 
     let _ = fs::remove_dir_all(&home);
 }

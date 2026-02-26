@@ -1,6 +1,7 @@
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(coverage)");
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/modules/lastpass-cli/HEAD");
     println!("cargo:rerun-if-changed=lastpass-cli");

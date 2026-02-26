@@ -92,12 +92,12 @@ Per-command checklist:
 
 - `show`
 
-  - default output, `--json`, `--all|--username|--password|--url|--notes|--field|--id|--name`: :white_check_mark: (basic parity)
+  - default output, `--json`, `--all|--username|--password|--url|--notes|--field|--id|--name`: :white_check_mark: (parity)
   - `--color`: :white_check_mark:
-  - `--attach`, `--clip`: TODO
-  - `--basic-regexp/-G`, `--fixed-strings/-F`, `--expand-multi/-x`: TODO
+  - `--attach`, `--clip`: :white_check_mark:
+  - `--basic-regexp/-G`, `--fixed-strings/-F`, `--expand-multi/-x`: :white_check_mark:
   - `--title-format/-t`, `--format/-o`: :white_check_mark: (basic parity)
-  - strict multi-match behavior/output parity: TODO
+  - strict multi-match behavior/output parity: :white_check_mark:
 
 - `logout`
 
@@ -235,11 +235,11 @@ Implementation status for environment variables (source audited from `lastpass-c
 | `LPASS_AUTO_SYNC_TIME` | Auto-sync freshness window (seconds) for blob cache. | ✅ Implemented |
 | `LPASS_PINENTRY` | Pinentry executable override. | ❌ Not implemented yet |
 | `LPASS_DISABLE_PINENTRY` | Disable pinentry fallback and use tty prompt path. | ❌ Not implemented yet |
-| `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ❌ Not implemented yet |
+| `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ✅ Implemented (`show --clip`) |
 | `LPASS_LOG_LEVEL` | Debug logging verbosity level. | ❌ Not implemented yet |
 | `SECURE_TMPDIR` | Secure temp dir override used by editor workflows. | ❌ Not implemented yet |
 | `TMPDIR` | Fallback temp dir for secure editing path. | ❌ Not implemented yet |
-| `SHELL` | Shell used to execute clipboard command wrappers. | ❌ Not implemented yet |
+| `SHELL` | Shell used to execute clipboard command wrappers. | ✅ Implemented (`show --clip`) |
 | `TERM` | TTY type passed to pinentry integration. | ❌ Not implemented yet |
 | `DISPLAY` | Display target passed to pinentry integration. | ❌ Not implemented yet |
 | `LPASS_HTTP_MOCK` | Rust-only mock HTTP/test mode toggle (`1` enables mock). | ✅ Implemented (Rust extension) |

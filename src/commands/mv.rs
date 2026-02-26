@@ -57,29 +57,21 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let idx = find_unique_account_index(&blob.accounts, name)?;
     let shares = collect_shares(&blob.accounts, &blob.shares);
     update_location(&mut blob.accounts[idx], folder, &shares);
-    if blob.accounts[idx].share_readonly {
-        let share_name = blob.accounts[idx]
-            .share_name
-            .as_deref()
-            .unwrap_or("(unknown)");
-        return Err(format!(
-            "You do not have access to move {} into {}",
-            blob.accounts[idx].name, share_name
-        ));
+    if let Some(err) = readonly_move_error(&blob.accounts[idx]) {
+        return Err(err);
     }
     save_blob(&blob).map_err(|err| format!("{err}"))?;
     Ok(0)
 }
 
 fn find_unique_account_index(accounts: &[Account], name: &str) -> Result<usize, String> {
-    if name != "0" {
-        if let Some((idx, _)) = accounts
+    if name != "0"
+        && let Some((idx, _)) = accounts
             .iter()
             .enumerate()
             .find(|(_, account)| account.id.eq_ignore_ascii_case(name))
-        {
-            return Ok(idx);
-        }
+    {
+        return Ok(idx);
     }
 
     let matches: Vec<usize> = accounts
@@ -139,10 +131,8 @@ fn update_location(account: &mut Account, folder: &str, shares: &[ShareRef]) {
         let share_name = &share.name;
         let group = if folder == *share_name {
             String::new()
-        } else if folder.starts_with(&(share_name.to_string() + "/")) {
-            folder[share_name.len() + 1..].to_string()
         } else {
-            folder.clone()
+            folder[share_name.len() + 1..].to_string()
         };
         account.share_name = Some(share_name.clone());
         account.share_id = share.id.clone();
@@ -179,9 +169,21 @@ fn infer_share<'a>(folder: &str, shares: &'a [ShareRef]) -> Option<&'a ShareRef>
     None
 }
 
+fn readonly_move_error(account: &Account) -> Option<String> {
+    if !account.share_readonly {
+        return None;
+    }
+    let share_name = account.share_name.as_deref().unwrap_or("(unknown)");
+    Some(format!(
+        "You do not have access to move {} into {}",
+        account.name, share_name
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     fn account(id: &str, name: &str, fullname: &str, share_name: Option<&str>) -> Account {
         Account {
@@ -310,6 +312,32 @@ mod tests {
     }
 
     #[test]
+    fn collect_shares_prefers_explicit_share_metadata() {
+        let shares = vec![Share {
+            id: "abc".to_string(),
+            name: "Shared".to_string(),
+            readonly: true,
+        }];
+        let out = collect_shares(&[], &shares);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id.as_deref(), Some("abc"));
+        assert_eq!(out[0].name, "Shared");
+        assert!(out[0].readonly);
+    }
+
+    #[test]
+    fn readonly_move_error_reports_share_name() {
+        let mut acct = account("1", "entry", "Team/entry", Some("Team"));
+        acct.share_readonly = true;
+        let err = readonly_move_error(&acct).expect("readonly error");
+        assert!(err.contains("move entry into Team"));
+        assert_eq!(
+            readonly_move_error(&account("2", "entry", "entry", None)),
+            None
+        );
+    }
+
+    #[test]
     fn find_unique_account_reports_missing() {
         let accounts = vec![account("100", "alpha", "team/alpha", None)];
         let err = find_unique_account_index(&accounts, "missing").expect_err("missing");
@@ -337,5 +365,65 @@ mod tests {
         let err = run_inner(&["--sync".to_string(), "auto".to_string(), "a".to_string()])
             .expect_err("missing destination");
         assert!(err.contains("usage: mv"));
+    }
+
+    #[test]
+    fn run_and_parse_color_paths() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        assert_eq!(run(&["--color".to_string()]), 1);
+
+        let err = run_inner(&[
+            "--color".to_string(),
+            "never".to_string(),
+            "entry".to_string(),
+            "group".to_string(),
+        ])
+        .expect_err("runtime error after parse");
+        assert!(err.contains("Unable to find account"));
+
+        let err = run_inner(&[
+            "--color=always".to_string(),
+            "entry".to_string(),
+            "group".to_string(),
+        ])
+        .expect_err("runtime error after parse");
+        assert!(err.contains("Unable to find account"));
+    }
+
+    #[test]
+    fn run_inner_reports_readonly_move_error_in_mock_mode() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let mut blob = load_blob(SyncMode::No).expect("mock blob");
+        let account = blob
+            .accounts
+            .iter_mut()
+            .find(|item| item.fullname == "test-group/test-account")
+            .expect("account");
+        account.share_readonly = true;
+        account.share_name = Some("Shared Team".to_string());
+        save_blob(&blob).expect("save blob");
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "test-group/test-account".to_string(),
+            "Shared Team/target".to_string(),
+        ])
+        .expect_err("readonly move should fail");
+        assert!(err.contains("You do not have access to move"));
+    }
+
+    #[test]
+    fn find_unique_account_allows_name_zero_without_id_match() {
+        let accounts = vec![account("10", "0", "0", None)];
+        let idx = find_unique_account_index(&accounts, "0").expect("match by name");
+        assert_eq!(idx, 0);
     }
 }

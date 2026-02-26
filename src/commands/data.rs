@@ -474,10 +474,10 @@ pub(crate) fn ensure_mock_blob() -> Result<()> {
 }
 
 fn load_mock_blob() -> Result<Blob> {
-    if let Some(buffer) = config_read_buffer("blob")? {
-        if let Ok(blob) = serde_json::from_slice::<Blob>(&buffer) {
-            return Ok(blob);
-        }
+    if let Some(buffer) = config_read_buffer("blob")?
+        && let Ok(blob) = serde_json::from_slice::<Blob>(&buffer)
+    {
+        return Ok(blob);
     }
 
     let blob = mock_blob();
@@ -516,6 +516,7 @@ fn mock_blob() -> Blob {
         local_version: false,
         shares: Vec::new(),
         accounts: Vec::new(),
+        attachments: Vec::new(),
     };
 
     blob.accounts.push(mock_account(
@@ -565,6 +566,7 @@ fn mock_blob() -> Blob {
     blob
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mock_account(
     id: &str,
     name: &str,
@@ -613,12 +615,12 @@ fn mock_account(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{session_load, session_save};
     use crate::config::{
         ConfigEnv, config_path, config_read_encrypted_buffer, config_unlink, config_write_buffer,
         config_write_encrypted_buffer, config_write_encrypted_string, set_test_env,
     };
     use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+    use crate::session::{session_load, session_save};
     use filetime::{FileTime, set_file_mtime};
     use tempfile::TempDir;
 
@@ -1208,7 +1210,9 @@ mod tests {
         session_save(&session, &key).expect("save session");
         let version = fetch_remote_blob_version(&client, &mut session, &key).expect("version");
         assert_eq!(version, 123);
-        let saved_session = session_load(&key).expect("session load").expect("has session");
+        let saved_session = session_load(&key)
+            .expect("session load")
+            .expect("has session");
         assert_eq!(saved_session.uid, "57747756");
 
         let local = Blob {
@@ -1225,6 +1229,7 @@ mod tests {
                 "",
                 false,
             )],
+            attachments: Vec::new(),
         };
         let buffer = serde_json::to_vec_pretty(&local).expect("json");
         config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write local blob");
@@ -1285,6 +1290,7 @@ mod tests {
             local_version: false,
             shares: Vec::new(),
             accounts: Vec::new(),
+            attachments: Vec::new(),
         };
         save_blob(&blob).expect("save blob");
 

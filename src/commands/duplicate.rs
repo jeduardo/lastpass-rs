@@ -59,15 +59,14 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
 }
 
 fn find_account_index(blob: &Blob, name: &str) -> Option<usize> {
-    if name != "0" {
-        if let Some((idx, _)) = blob
+    if name != "0"
+        && let Some((idx, _)) = blob
             .accounts
             .iter()
             .enumerate()
             .find(|(_, acct)| acct.id.eq_ignore_ascii_case(name))
-        {
-            return Some(idx);
-        }
+    {
+        return Some(idx);
     }
 
     blob.accounts
@@ -80,10 +79,10 @@ fn find_account_index(blob: &Blob, name: &str) -> Option<usize> {
 fn next_id(blob: &Blob) -> String {
     let mut max_id = 0u32;
     for account in &blob.accounts {
-        if let Ok(value) = account.id.parse::<u32>() {
-            if value > max_id {
-                max_id = value;
-            }
+        if let Ok(value) = account.id.parse::<u32>()
+            && value > max_id
+        {
+            max_id = value;
         }
     }
     format!("{:04}", max_id.saturating_add(1))
@@ -139,6 +138,7 @@ mod tests {
                 account("0002", "beta", ""),
                 account("0007", "gamma", "team"),
             ],
+            attachments: Vec::new(),
         }
     }
 
@@ -175,6 +175,7 @@ mod tests {
             local_version: false,
             shares: Vec::new(),
             accounts: vec![account("0005", "alpha", ""), account("0001", "beta", "")],
+            attachments: Vec::new(),
         };
         assert_eq!(next_id(&blob), "0006");
     }

@@ -49,12 +49,24 @@ pub struct Account {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Attachment {
+    pub id: String,
+    pub parent: String,
+    pub mimetype: String,
+    pub storagekey: String,
+    pub size: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Blob {
     pub version: u64,
     pub local_version: bool,
     #[serde(default)]
     pub shares: Vec<Share>,
     pub accounts: Vec<Account>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +130,16 @@ pub fn blob_parse(
                         .unwrap_or(key);
                     let field = parse_field(&mut chunk, account_key)?;
                     blob.accounts[idx].fields.push(field);
+                }
+            }
+            "ATTA" => {
+                let attachment = parse_attachment(&mut chunk)?;
+                if blob
+                    .accounts
+                    .iter()
+                    .any(|account| account.id == attachment.parent)
+                {
+                    blob.attachments.push(attachment);
                 }
             }
             _ => {}
@@ -316,6 +338,17 @@ fn parse_field(chunk: &mut ChunkCursor<'_>, key: &[u8; KDF_HASH_LEN]) -> Result<
         value,
         value_encrypted,
         checked,
+    })
+}
+
+fn parse_attachment(chunk: &mut ChunkCursor<'_>) -> Result<Attachment> {
+    Ok(Attachment {
+        id: read_plain_string(chunk)?,
+        parent: read_plain_string(chunk)?,
+        mimetype: read_plain_string(chunk)?,
+        storagekey: read_plain_string(chunk)?,
+        size: read_plain_string(chunk)?,
+        filename: read_plain_string(chunk)?,
     })
 }
 
@@ -519,6 +552,25 @@ mod tests {
         push_item(&mut acct, b"");
         push_item(&mut acct, b"");
         push_chunk(out, "ACCT", &acct);
+    }
+
+    fn push_attachment_chunk(
+        out: &mut Vec<u8>,
+        id: &[u8],
+        parent: &[u8],
+        mimetype: &[u8],
+        storagekey: &[u8],
+        size: &[u8],
+        filename: &[u8],
+    ) {
+        let mut atta = Vec::new();
+        push_item(&mut atta, id);
+        push_item(&mut atta, parent);
+        push_item(&mut atta, mimetype);
+        push_item(&mut atta, storagekey);
+        push_item(&mut atta, size);
+        push_item(&mut atta, filename);
+        push_chunk(out, "ATTA", &atta);
     }
 
     #[test]
@@ -729,9 +781,11 @@ mod tests {
         push_item(&mut body, b"ignored");
         push_item(&mut body, b"1");
         let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
-        assert!(parse_share(&mut chunk, Some(b"invalid-private-key"))
-            .expect("invalid share payload")
-            .is_none());
+        assert!(
+            parse_share(&mut chunk, Some(b"invalid-private-key"))
+                .expect("invalid share payload")
+                .is_none()
+        );
     }
 
     #[test]
@@ -843,7 +897,10 @@ mod tests {
         assert_eq!(account.group, "");
         assert_eq!(account.fullname, "");
         assert_eq!(account.attachkey, "attach-secret");
-        assert_eq!(account.attachkey_encrypted.as_deref(), Some(attach_b64.as_str()));
+        assert_eq!(
+            account.attachkey_encrypted.as_deref(),
+            Some(attach_b64.as_str())
+        );
         assert!(account.attachpresent);
     }
 
@@ -870,9 +927,50 @@ mod tests {
         push_item(&mut body, b"!not-valid-ciphertext");
         push_item(&mut body, b"10");
         let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
-        let (value, encrypted) = read_crypt_string(&mut chunk, &[8u8; KDF_HASH_LEN]).expect("crypt");
+        let (value, encrypted) =
+            read_crypt_string(&mut chunk, &[8u8; KDF_HASH_LEN]).expect("crypt");
         assert_eq!(value, "");
         assert!(encrypted.is_some());
         assert!(!read_boolean(&mut chunk).expect("invalid bool"));
+    }
+
+    #[test]
+    fn blob_parse_includes_only_attachments_for_known_accounts() {
+        let key = [4u8; KDF_HASH_LEN];
+        let mut blob_bytes = Vec::new();
+        push_chunk(&mut blob_bytes, "LPAV", b"1");
+
+        let name = aes_encrypt_lastpass(b"attachment-entry", &key).expect("name");
+        push_minimal_account_chunk(&mut blob_bytes, &key, &name);
+
+        push_attachment_chunk(
+            &mut blob_bytes,
+            b"att-1",
+            b"0001",
+            b"text/plain",
+            b"storage-known",
+            b"4",
+            b"known.txt",
+        );
+        push_attachment_chunk(
+            &mut blob_bytes,
+            b"att-2",
+            b"9999",
+            b"text/plain",
+            b"storage-unknown",
+            b"4",
+            b"unknown.txt",
+        );
+
+        let blob = blob_parse(&blob_bytes, &key, None).expect("blob parse");
+        assert_eq!(blob.accounts.len(), 1);
+        assert_eq!(blob.attachments.len(), 1);
+        let attachment = &blob.attachments[0];
+        assert_eq!(attachment.id, "att-1");
+        assert_eq!(attachment.parent, "0001");
+        assert_eq!(attachment.mimetype, "text/plain");
+        assert_eq!(attachment.storagekey, "storage-known");
+        assert_eq!(attachment.size, "4");
+        assert_eq!(attachment.filename, "known.txt");
     }
 }

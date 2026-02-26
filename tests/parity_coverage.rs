@@ -174,7 +174,14 @@ fn login_warning_failure_and_option_error_paths() {
         None,
         &["show", "--attach=1", "test-group/test-account"],
     );
-    assert_eq!(show_attach.status.code().unwrap_or(-1), 0);
+    assert_eq!(show_attach.status.code().unwrap_or(-1), 1);
+    let show_attach_stderr = String::from_utf8_lossy(&show_attach.stderr);
+    assert!(
+        show_attach_stderr.contains("Could not find specified attachment")
+            || show_attach_stderr.contains("Could not find session")
+            || show_attach_stderr.contains("missing iterations"),
+        "stderr: {show_attach_stderr}"
+    );
 
     let status_bad = run(&home, None, &["status", "unexpected"]);
     assert_eq!(status_bad.status.code().unwrap_or(-1), 1);
