@@ -46,6 +46,14 @@ enum BinaryAttachmentAction {
     Save,
 }
 
+const DEFAULT_CLIPBOARD_COMMANDS: [(&str, &[&str]); 5] = [
+    ("wl-copy", &[]),
+    ("xclip", &["-selection", "clipboard", "-in"]),
+    ("xsel", &["--clipboard", "--input"]),
+    ("pbcopy", &[]),
+    ("putclip", &["--dos"]),
+];
+
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
@@ -199,108 +207,14 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     for account in matches {
         let display = expand_notes(account).unwrap_or_else(|| account.clone());
         match choice {
-            ShowChoice::All => {
-                emit_line(
-                    &terminal::render_stdout(&format_account(&title_format, &display)),
-                    clip,
-                    &mut clipboard_data,
-                )?;
-
-                if !display.username.is_empty() {
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some("Username"),
-                            Some(&display.username),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                if !display.password.is_empty() {
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some("Password"),
-                            Some(&display.password),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                if !display.url.is_empty() && display.url != "http://" {
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some("URL"),
-                            Some(&display.url),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                for field in &display.fields {
-                    let field_value = pretty_field_value(field);
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some(&field.name),
-                            Some(&field_value),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                for attachment in attachments_for_account(&blob.attachments, &display.id) {
-                    let field_name = format!("att-{}", attachment.id);
-                    let filename = attachment_filename(&display, attachment)
-                        .unwrap_or_else(|| "unknown".to_string());
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some(&field_name),
-                            Some(&filename),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                if display.pwprotect {
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some("Reprompt"),
-                            Some("Yes"),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-
-                if !display.note.is_empty() {
-                    emit_line(
-                        &terminal::render_stdout(&format_field(
-                            &field_format,
-                            &display,
-                            Some("Notes"),
-                            Some(&display.note),
-                        )),
-                        clip,
-                        &mut clipboard_data,
-                    )?;
-                }
-            }
+            ShowChoice::All => emit_all_output(
+                &display,
+                &blob.attachments,
+                &title_format,
+                &field_format,
+                clip,
+                &mut clipboard_data,
+            )?,
             ShowChoice::Username => {
                 emit_value(&display.username, clip, &mut clipboard_data)?;
             }
@@ -388,6 +302,94 @@ fn emit_bytes(data: &[u8], clip: bool, clipboard: &mut Vec<u8>) -> Result<(), St
     Ok(())
 }
 
+fn emit_all_output(
+    display: &Account,
+    attachments: &[Attachment],
+    title_format: &str,
+    field_format: &str,
+    clip: bool,
+    clipboard_data: &mut Vec<u8>,
+) -> Result<(), String> {
+    let title = terminal::render_stdout(&format_account(title_format, display));
+    emit_line(&title, clip, clipboard_data)?;
+
+    if !display.username.is_empty() {
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some("Username"),
+            Some(&display.username),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    if !display.password.is_empty() {
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some("Password"),
+            Some(&display.password),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    if !display.url.is_empty() && display.url != "http://" {
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some("URL"),
+            Some(&display.url),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    for field in &display.fields {
+        let field_value = pretty_field_value(field);
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some(&field.name),
+            Some(&field_value),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    for attachment in attachments_for_account(attachments, &display.id) {
+        let field_name = format!("att-{}", attachment.id);
+        let filename =
+            attachment_filename(display, attachment).unwrap_or_else(|| "unknown".to_string());
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some(&field_name),
+            Some(&filename),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    if display.pwprotect {
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some("Reprompt"),
+            Some("Yes"),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    if !display.note.is_empty() {
+        let value = terminal::render_stdout(&format_field(
+            field_format,
+            display,
+            Some("Notes"),
+            Some(&display.note),
+        ));
+        emit_line(&value, clip, clipboard_data)?;
+    }
+
+    Ok(())
+}
+
 fn authenticate_protected_entries(matches: &[&Account]) -> Result<(), String> {
     if !matches.iter().any(|account| account.pwprotect) {
         return Ok(());
@@ -397,10 +399,18 @@ fn authenticate_protected_entries(matches: &[&Account]) -> Result<(), String> {
         .map_err(|_| "Could not authenticate for protected entry.".to_string())?;
     let current_key = agent_get_decryption_key()
         .map_err(|_| "Could not authenticate for protected entry.".to_string())?;
-    if prompted_key != current_key {
-        return Err("Current key is not on-disk key.".to_string());
+    ensure_current_key_matches(prompted_key, current_key)
+}
+
+fn ensure_current_key_matches(
+    prompted_key: [u8; KDF_HASH_LEN],
+    current_key: [u8; KDF_HASH_LEN],
+) -> Result<(), String> {
+    if prompted_key == current_key {
+        Ok(())
+    } else {
+        Err("Current key is not on-disk key.".to_string())
     }
-    Ok(())
 }
 
 fn ask_binary_attachment_action(filename: &str) -> Result<BinaryAttachmentAction, String> {
@@ -668,28 +678,28 @@ fn copy_to_clipboard(data: &[u8]) -> Result<(), String> {
     let fallback_message = "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.";
 
     if let Ok(command) = crate::lpenv::var("LPASS_CLIPBOARD_COMMAND") {
-        run_shell_clipboard_command(&command, data).map_err(|_| fallback_message.to_string())?;
-        return Ok(());
-    }
-
-    let default_commands: [(&str, &[&str]); 5] = [
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard", "-in"]),
-        ("xsel", &["--clipboard", "--input"]),
-        ("pbcopy", &[]),
-        ("putclip", &["--dos"]),
-    ];
-
-    for (program, args) in default_commands {
-        match run_clipboard_command(program, args, data) {
-            Ok(status) if status.success() => return Ok(()),
-            Ok(_) => continue,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => continue,
+        if !command.trim().is_empty() {
+            run_shell_clipboard_command(&command, data)
+                .map_err(|_| fallback_message.to_string())?;
+            return Ok(());
         }
     }
 
+    if run_default_clipboard_commands(data, &DEFAULT_CLIPBOARD_COMMANDS) {
+        return Ok(());
+    }
+
     Err(fallback_message.to_string())
+}
+
+fn run_default_clipboard_commands(data: &[u8], commands: &[(&str, &[&str])]) -> bool {
+    for (program, args) in commands {
+        match run_clipboard_command(program, args, data) {
+            Ok(status) if status.success() => return true,
+            _ => continue,
+        }
+    }
+    false
 }
 
 fn run_shell_clipboard_command(command: &str, data: &[u8]) -> std::io::Result<()> {
@@ -714,9 +724,11 @@ fn run_clipboard_command(
         .stderr(Stdio::null())
         .spawn()?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(data)?;
-    }
+    child
+        .stdin
+        .take()
+        .map(|mut stdin| stdin.write_all(data))
+        .transpose()?;
 
     child.wait()
 }
@@ -842,8 +854,10 @@ fn escape_json(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob::Attachment;
     use crate::blob::Field;
     use crate::config::{config_write_buffer, config_write_encrypted_string};
+    use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
     use crate::session::{Session, session_save};
     use tempfile::TempDir;
 
@@ -987,6 +1001,9 @@ mod tests {
             checked: true,
         };
         assert_eq!(pretty_field_value(&checkbox), "Checked");
+        let mut unchecked = checkbox.clone();
+        unchecked.checked = false;
+        assert_eq!(pretty_field_value(&unchecked), "Unchecked");
 
         let radio = Field {
             name: "radio".to_string(),
@@ -996,6 +1013,9 @@ mod tests {
             checked: false,
         };
         assert_eq!(pretty_field_value(&radio), "choice, Unchecked");
+        let mut radio_checked = radio.clone();
+        radio_checked.checked = true;
+        assert_eq!(pretty_field_value(&radio_checked), "choice, Checked");
 
         let armor = Field {
             name: "key".to_string(),
@@ -1099,11 +1119,12 @@ mod tests {
             "entry".to_string(),
         ])
         .expect_err("must fail without local config");
-        assert!(
-            err.contains("missing iterations")
-                || err.contains("Could not find")
-                || err.contains("Unable to fetch blob")
-        );
+        let accepted = [
+            "missing iterations",
+            "Could not find",
+            "Unable to fetch blob",
+        ];
+        assert!(accepted.iter().any(|needle| err.contains(needle)));
     }
 
     #[test]
@@ -1263,6 +1284,78 @@ mod tests {
     }
 
     #[test]
+    fn run_inner_all_renders_fields_attachments_and_notes_in_mock_mode() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let mut blob = crate::commands::data::load_blob(SyncMode::No).expect("load blob");
+        let entry = blob
+            .accounts
+            .iter_mut()
+            .find(|account| account.fullname == "test-group/test-account")
+            .expect("mock entry");
+        entry.note = "line one\nline two".to_string();
+        entry.fields.push(Field {
+            name: "Environment".to_string(),
+            field_type: "text".to_string(),
+            value: "prod".to_string(),
+            value_encrypted: None,
+            checked: false,
+        });
+
+        let attach_key = [9u8; KDF_HASH_LEN];
+        entry.attachkey = hex::encode(attach_key);
+        entry.attachpresent = true;
+
+        let encrypted_filename = aes_encrypt_lastpass(b"sample.txt", &attach_key).expect("encrypt");
+        blob.attachments.push(Attachment {
+            id: "77".to_string(),
+            parent: entry.id.clone(),
+            mimetype: "text/plain".to_string(),
+            storagekey: "mock-storage-0001-text".to_string(),
+            size: "4".to_string(),
+            filename: base64_lastpass_encode(&encrypted_filename),
+        });
+        crate::commands::data::save_blob(&blob).expect("save blob");
+
+        let status = run_inner(&[
+            "--sync=no".to_string(),
+            "--all".to_string(),
+            "test-group/test-account".to_string(),
+        ])
+        .expect("show --all");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn run_clipboard_command_writes_input_and_succeeds() {
+        let status = run_clipboard_command("/bin/cat", &[], b"value").expect("run cat");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn run_default_clipboard_commands_handles_success_and_failure() {
+        let success =
+            run_default_clipboard_commands(b"value", &[("/bin/false", &[]), ("/bin/cat", &[])]);
+        assert!(success);
+
+        let failure = run_default_clipboard_commands(b"value", &[("/bin/false", &[])]);
+        assert!(!failure);
+    }
+
+    #[test]
+    fn emit_all_output_includes_reprompt_when_enabled() {
+        let mut acct = account("0009", "entry", "team");
+        acct.pwprotect = true;
+        let mut clipboard = Vec::new();
+        emit_all_output(&acct, &[], "%an", "%fn: %fv", true, &mut clipboard).expect("emit all");
+        let out = String::from_utf8(clipboard).expect("utf8");
+        assert!(out.contains("Reprompt: Yes"));
+    }
+
+    #[test]
     fn fetch_attachment_ciphertext_reports_missing_session_and_empty_variants() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
@@ -1306,6 +1399,9 @@ mod tests {
         let no_begin = "plain text".to_string();
         assert_eq!(fix_ascii_armor(no_begin.clone()), no_begin);
 
+        let long_plain = "this is intentionally long and does not start with begin".to_string();
+        assert_eq!(fix_ascii_armor(long_plain.clone()), long_plain);
+
         let missing_header_end = "-----BEGIN TEST payload -----END TEST-----".to_string();
         assert_eq!(
             fix_ascii_armor(missing_header_end.clone()),
@@ -1316,6 +1412,28 @@ mod tests {
         assert_eq!(fix_ascii_armor(missing_trailer.clone()), missing_trailer);
 
         let no_trailer_suffix = "-----BEGIN TEST----- payload -----END TEST----".to_string();
-        assert_eq!(fix_ascii_armor(no_trailer_suffix.clone()), no_trailer_suffix);
+        assert_eq!(
+            fix_ascii_armor(no_trailer_suffix.clone()),
+            no_trailer_suffix
+        );
+    }
+
+    #[test]
+    fn fix_ascii_armor_keeps_space_after_colon() {
+        let armor = "-----BEGIN TEST----- key: value -----END TEST-----".to_string();
+        let fixed = fix_ascii_armor(armor);
+        assert!(fixed.contains(": value"));
+    }
+
+    #[test]
+    fn ensure_current_key_matches_reports_mismatch() {
+        let err = ensure_current_key_matches([1u8; KDF_HASH_LEN], [2u8; KDF_HASH_LEN])
+            .expect_err("must reject mismatch");
+        assert!(err.contains("Current key is not on-disk key."));
+    }
+
+    #[test]
+    fn ensure_current_key_matches_accepts_equal_keys() {
+        assert!(ensure_current_key_matches([3u8; KDF_HASH_LEN], [3u8; KDF_HASH_LEN]).is_ok());
     }
 }

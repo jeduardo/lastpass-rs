@@ -262,19 +262,14 @@ fn params_to_map(params: &[(&str, &str)]) -> HashMap<String, String> {
 }
 
 fn mock_attachment_ciphertext(bytes: &[u8]) -> String {
-    let Ok(raw_key) = hex::decode(MOCK_ATTACH_KEY_HEX) else {
-        return String::new();
-    };
-    if raw_key.len() != 32 {
-        return String::new();
-    }
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&raw_key);
+    let raw_key = hex::decode(MOCK_ATTACH_KEY_HEX).expect("valid mock attachment key");
+    let key: [u8; 32] = raw_key
+        .as_slice()
+        .try_into()
+        .expect("mock attachment key must be 32 bytes");
 
     let plain_b64 = BASE64_STD.encode(bytes);
-    let Ok(encrypted) = aes_encrypt_lastpass(plain_b64.as_bytes(), &key) else {
-        return String::new();
-    };
+    let encrypted = aes_encrypt_lastpass(plain_b64.as_bytes(), &key).unwrap_or_default();
     serde_json::to_string(&base64_lastpass_encode(&encrypted)).unwrap_or_default()
 }
 

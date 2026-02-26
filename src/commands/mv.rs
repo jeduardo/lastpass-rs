@@ -373,7 +373,7 @@ mod tests {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
         crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
-        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "0");
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
 
         assert_eq!(run(&["--color".to_string()]), 1);
 
@@ -384,12 +384,7 @@ mod tests {
             "group".to_string(),
         ])
         .expect_err("runtime error after parse");
-        assert!(
-            err.contains("missing iterations")
-                || err.contains("Could not find")
-                || err.contains("Unable to fetch blob")
-                || err.contains("Unable to find account")
-        );
+        assert!(err.contains("Unable to find account"));
 
         let err = run_inner(&[
             "--color=always".to_string(),
@@ -397,12 +392,33 @@ mod tests {
             "group".to_string(),
         ])
         .expect_err("runtime error after parse");
-        assert!(
-            err.contains("missing iterations")
-                || err.contains("Could not find")
-                || err.contains("Unable to fetch blob")
-                || err.contains("Unable to find account")
-        );
+        assert!(err.contains("Unable to find account"));
+    }
+
+    #[test]
+    fn run_inner_reports_readonly_move_error_in_mock_mode() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        let mut blob = load_blob(SyncMode::No).expect("mock blob");
+        let account = blob
+            .accounts
+            .iter_mut()
+            .find(|item| item.fullname == "test-group/test-account")
+            .expect("account");
+        account.share_readonly = true;
+        account.share_name = Some("Shared Team".to_string());
+        save_blob(&blob).expect("save blob");
+
+        let err = run_inner(&[
+            "--sync=no".to_string(),
+            "test-group/test-account".to_string(),
+            "Shared Team/target".to_string(),
+        ])
+        .expect_err("readonly move should fail");
+        assert!(err.contains("You do not have access to move"));
     }
 
     #[test]

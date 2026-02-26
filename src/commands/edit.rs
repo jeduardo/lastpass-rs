@@ -967,13 +967,15 @@ mod tests {
         let err = parse_edit_args(&["a".to_string(), "b".to_string()]).expect_err("extra arg");
         assert!(err.contains("usage: edit"));
 
-        let err = parse_edit_args(&["--field".to_string(), "x".to_string()]).expect_err("missing name");
+        let err =
+            parse_edit_args(&["--field".to_string(), "x".to_string()]).expect_err("missing name");
         assert!(err.contains("usage: edit"));
 
         let err = parse_edit_args(&["--sync".to_string(), "x".to_string()]).expect_err("bad sync");
         assert!(err.contains("usage: edit"));
 
-        let err = parse_edit_args(&["--color".to_string(), "x".to_string()]).expect_err("bad color");
+        let err =
+            parse_edit_args(&["--color".to_string(), "x".to_string()]).expect_err("bad color");
         assert!(err.contains("usage: edit"));
     }
 
