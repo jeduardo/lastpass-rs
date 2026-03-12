@@ -228,6 +228,152 @@ fn alias_expands_before_dispatch_in_cli_flow() {
 }
 
 #[test]
+fn generate_clip_uses_clipboard_and_suppresses_stdout() {
+    let (temp, home) = unique_test_home();
+    let clip_file = home.join("generate-clip.out");
+    let clip_command = format!("cat > {}", clip_file.display());
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![account("0001", "entry", "team")],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_CLIPBOARD_COMMAND", clip_command)
+        .args(["generate", "--sync=no", "--clip", "team/entry", "18"])
+        .output()
+        .expect("run generate");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    assert!(
+        output.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let copied = fs::read_to_string(&clip_file).expect("read copied password");
+    assert!(copied.ends_with('\n'));
+    assert_eq!(copied.trim().len(), 18);
+
+    let show = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["show", "--sync=no", "--password", "team/entry"])
+        .output()
+        .expect("run show");
+    assert_eq!(show.status.code().unwrap_or(-1), 0);
+    assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), copied.trim());
+
+    let _ = temp;
+}
+
+#[test]
+fn generate_no_symbols_outputs_only_alnum_characters() {
+    let (temp, home) = unique_test_home();
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![account("0001", "entry", "team")],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["generate", "--sync=no", "--no-symbols", "team/entry", "64"])
+        .output()
+        .expect("run generate");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let password = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    assert_eq!(password.len(), 64);
+    assert!(password.chars().all(|ch| ch.is_ascii_alphanumeric()));
+
+    let _ = temp;
+}
+
+#[test]
+fn generate_updates_secure_note_fields() {
+    let (temp, home) = unique_test_home();
+    let mut secure_note = account("0001", "server-note", "team");
+    secure_note.url = "http://sn".to_string();
+    secure_note.note =
+        "NoteType: Server\nHostname:server.example.com\nUsername:old-user\nPassword:old-pass"
+            .to_string();
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![secure_note],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let generate = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args([
+            "generate",
+            "--sync=no",
+            "--username=new-user",
+            "--url=https://example.com",
+            "team/server-note",
+            "24",
+        ])
+        .output()
+        .expect("run generate");
+    assert_eq!(generate.status.code().unwrap_or(-1), 0);
+    let password = String::from_utf8_lossy(&generate.stdout).trim().to_string();
+    assert_eq!(password.len(), 24);
+
+    let show_user = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["show", "--sync=no", "--username", "team/server-note"])
+        .output()
+        .expect("run show user");
+    assert_eq!(show_user.status.code().unwrap_or(-1), 0);
+    assert_eq!(
+        String::from_utf8_lossy(&show_user.stdout).trim(),
+        "new-user"
+    );
+
+    let show_url = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["show", "--sync=no", "--url", "team/server-note"])
+        .output()
+        .expect("run show url");
+    assert_eq!(show_url.status.code().unwrap_or(-1), 0);
+    assert_eq!(
+        String::from_utf8_lossy(&show_url.stdout).trim(),
+        "https://example.com"
+    );
+
+    let show_password = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["show", "--sync=no", "--password", "team/server-note"])
+        .output()
+        .expect("run show password");
+    assert_eq!(show_password.status.code().unwrap_or(-1), 0);
+    assert_eq!(
+        String::from_utf8_lossy(&show_password.stdout).trim(),
+        password
+    );
+
+    let _ = temp;
+}
+
+#[test]
 fn rm_removes_account_with_mock_env() {
     let (temp, home) = unique_test_home();
     let exe = env!("CARGO_BIN_EXE_lpass");
@@ -484,6 +630,41 @@ fn rm_rejects_readonly_shared_entries() {
         .args(["rm", "Team/entry"])
         .output()
         .expect("run rm");
+    assert_eq!(output.status.code().unwrap_or(-1), 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("readonly shared entry"), "stderr: {stderr}");
+
+    let _ = temp;
+}
+
+#[test]
+fn generate_rejects_readonly_shared_entries() {
+    let (temp, home) = unique_test_home();
+    let mut shared = account("0001", "entry", "Team");
+    shared.share_name = Some("Team".to_string());
+    shared.share_id = Some("77".to_string());
+    shared.share_readonly = true;
+
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![Share {
+            id: "77".to_string(),
+            name: "Team".to_string(),
+            readonly: true,
+        }],
+        accounts: vec![shared],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["generate", "--sync=no", "Team/entry", "20"])
+        .output()
+        .expect("run generate");
     assert_eq!(output.status.code().unwrap_or(-1), 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("readonly shared entry"), "stderr: {stderr}");
