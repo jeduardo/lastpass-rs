@@ -126,10 +126,10 @@ Per-command checklist:
 
 - `generate`
 
-  - default generation path: :white_check_mark: (partial parity)
-  - short option parity (`-U`, `-L`): TODO
-  - `--clip`: TODO
-  - symbol set parity (`default` vs `--no-symbols`): TODO
+  - default generation path: :white_check_mark: (parity)
+  - `--clip`: :white_check_mark:
+  - symbol set parity (`default` vs `--no-symbols`): :white_check_mark:
+  - readonly shared-entry rejection and secure-note update flow: :white_check_mark:
 
 - `export`
 

@@ -2,6 +2,7 @@
 
 mod add;
 mod argparse;
+mod clipboard;
 mod data;
 mod duplicate;
 mod edit;

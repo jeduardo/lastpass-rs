@@ -315,7 +315,7 @@ fn usage_and_error_paths_are_reported() {
 
     let generate_bad = run(&home, &["generate", "name", "abc"], None);
     assert_eq!(generate_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&generate_bad.stderr).contains("length must be a number"));
+    assert!(String::from_utf8_lossy(&generate_bad.stderr).contains("usage: generate"));
 
     let export_bad = run(&home, &["export", "unexpected"], None);
     assert_eq!(export_bad.status.code().unwrap_or(-1), 1);

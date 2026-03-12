@@ -127,7 +127,7 @@ fn fetch_and_store_blob(
     let params = [
         ("mobile", "1"),
         ("requestsrc", "cli"),
-        ("hasplugin", env!("CARGO_PKG_VERSION")),
+        ("hasplugin", crate::version::generated_version()),
     ];
     let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
     if response.body.is_empty() {
@@ -314,7 +314,7 @@ fn refresh_blob_from_server(
     let params = [
         ("mobile", "1"),
         ("requestsrc", "cli"),
-        ("hasplugin", env!("CARGO_PKG_VERSION")),
+        ("hasplugin", crate::version::generated_version()),
     ];
     let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
     if response.body.is_empty() {

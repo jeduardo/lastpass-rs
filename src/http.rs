@@ -173,7 +173,7 @@ fn post_real_bytes(
 }
 
 fn user_agent() -> String {
-    format!("LastPass-CLI/{}", env!("CARGO_PKG_VERSION"))
+    format!("LastPass-CLI/{}", crate::version::generated_version())
 }
 
 struct MockTransport {
@@ -422,7 +422,7 @@ mod tests {
     fn user_agent_contains_crate_version() {
         let ua = user_agent();
         assert!(ua.starts_with("LastPass-CLI/"));
-        assert!(ua.contains(env!("CARGO_PKG_VERSION")));
+        assert!(ua.contains(crate::version::generated_version()));
     }
 
     #[test]

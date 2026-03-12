@@ -1,6 +1,6 @@
 # Task 04: `generate` Command Full Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Bring `generate` to C parity for charset behavior, clipboard support, readonly checks, and update semantics.
@@ -32,3 +32,9 @@ Acceptance criteria:
 - `generate` output length and symbol policy match C.
 - `--clip` path works and is tested.
 - Readonly shared entries are rejected with parity-compatible behavior.
+
+Completed notes:
+- Matched upstream password charset selection for both default and `--no-symbols`.
+- Implemented clipboard output with stdout suppression, plus tests for clipboard command integration.
+- Reused the edit-style mutation path for existing entries, including secure-note expansion/collapse and readonly shared-entry rejection.
+- Added unit and CLI coverage for parser errors, share assignment, secure notes, clipboard behavior, and readonly failures.

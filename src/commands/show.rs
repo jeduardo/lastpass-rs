@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use std::io::Write;
-use std::process::{Command, Stdio};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
@@ -10,6 +9,7 @@ use regex::RegexBuilder;
 use crate::agent::{agent_get_decryption_key, agent_load_on_disk_key};
 use crate::blob::{Account, Attachment};
 use crate::commands::argparse::parse_sync_option;
+use crate::commands::clipboard::copy_to_clipboard;
 use crate::commands::data::{SyncMode, load_blob};
 use crate::crypto::aes_decrypt_base64_lastpass;
 use crate::format::{format_account, format_field};
@@ -45,14 +45,6 @@ enum BinaryAttachmentAction {
     Skip,
     Save,
 }
-
-const DEFAULT_CLIPBOARD_COMMANDS: [(&str, &[&str]); 5] = [
-    ("wl-copy", &[]),
-    ("xclip", &["-selection", "clipboard", "-in"]),
-    ("xsel", &["--clipboard", "--input"]),
-    ("pbcopy", &[]),
-    ("putclip", &["--dos"]),
-];
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -674,64 +666,6 @@ fn attachment_is_binary(data: &[u8]) -> bool {
         .any(|byte| !byte.is_ascii_graphic() && *byte != b' ')
 }
 
-fn copy_to_clipboard(data: &[u8]) -> Result<(), String> {
-    let fallback_message = "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.";
-
-    if let Ok(command) = crate::lpenv::var("LPASS_CLIPBOARD_COMMAND")
-        && !command.trim().is_empty()
-    {
-        run_shell_clipboard_command(&command, data).map_err(|_| fallback_message.to_string())?;
-        return Ok(());
-    }
-
-    if run_default_clipboard_commands(data, &DEFAULT_CLIPBOARD_COMMANDS) {
-        return Ok(());
-    }
-
-    Err(fallback_message.to_string())
-}
-
-fn run_default_clipboard_commands(data: &[u8], commands: &[(&str, &[&str])]) -> bool {
-    for (program, args) in commands {
-        match run_clipboard_command(program, args, data) {
-            Ok(status) if status.success() => return true,
-            _ => continue,
-        }
-    }
-    false
-}
-
-fn run_shell_clipboard_command(command: &str, data: &[u8]) -> std::io::Result<()> {
-    let shell = crate::lpenv::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let status = run_clipboard_command(&shell, &["-c", command], data)?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other("clipboard command failed"))
-    }
-}
-
-fn run_clipboard_command(
-    program: &str,
-    args: &[&str],
-    data: &[u8],
-) -> std::io::Result<std::process::ExitStatus> {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    child
-        .stdin
-        .take()
-        .map(|mut stdin| stdin.write_all(data))
-        .transpose()?;
-
-    child.wait()
-}
-
 fn pretty_field_value(field: &crate::blob::Field) -> String {
     if field.field_type == "checkbox" {
         return if field.checked {
@@ -1053,23 +987,6 @@ mod tests {
     }
 
     #[test]
-    fn run_shell_clipboard_command_surfaces_nonzero_status() {
-        let _guard = crate::lpenv::begin_test_overrides();
-        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
-        let err = run_shell_clipboard_command("exit 1", b"v").expect_err("must fail");
-        assert_eq!(err.kind(), std::io::ErrorKind::Other);
-    }
-
-    #[test]
-    fn copy_to_clipboard_maps_failed_custom_command_to_user_error() {
-        let _guard = crate::lpenv::begin_test_overrides();
-        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "exit 1");
-        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
-        let err = copy_to_clipboard(b"v").expect_err("must fail");
-        assert!(err.contains("Unable to copy contents to clipboard"));
-    }
-
-    #[test]
     fn parse_binary_attachment_response_supports_default_and_options() {
         assert_eq!(
             parse_binary_attachment_response("\n"),
@@ -1326,22 +1243,6 @@ mod tests {
         ])
         .expect("show --all");
         assert_eq!(status, 0);
-    }
-
-    #[test]
-    fn run_clipboard_command_writes_input_and_succeeds() {
-        let status = run_clipboard_command("/bin/cat", &[], b"value").expect("run cat");
-        assert!(status.success());
-    }
-
-    #[test]
-    fn run_default_clipboard_commands_handles_success_and_failure() {
-        let success =
-            run_default_clipboard_commands(b"value", &[("/bin/false", &[]), ("/bin/cat", &[])]);
-        assert!(success);
-
-        let failure = run_default_clipboard_commands(b"value", &[("/bin/false", &[])]);
-        assert!(!failure);
     }
 
     #[test]

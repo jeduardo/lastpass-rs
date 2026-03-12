@@ -285,7 +285,7 @@ fn fetch_blob_with_client(
     let params = [
         ("mobile", "1"),
         ("requestsrc", "cli"),
-        ("hasplugin", env!("CARGO_PKG_VERSION")),
+        ("hasplugin", crate::version::generated_version()),
     ];
     let response = client
         .post_lastpass_bytes(None, "getaccts.php", Some(session), &params)
