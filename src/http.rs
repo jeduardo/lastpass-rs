@@ -56,7 +56,7 @@ impl HttpClient {
             .user_agent(user_agent())
             .gzip(false)
             .build()
-            .map_err(|_| LpassError::Crypto("failed to build http client"))?;
+            .map_err(map_build_client_error)?;
         Ok(Self {
             transport: Transport::Real(client),
         })
@@ -107,7 +107,8 @@ pub fn post_lastpass(
     session: Option<&Session>,
     params: &[(&str, &str)],
 ) -> Result<HttpResponse> {
-    HttpClient::from_env()?.post_lastpass(None, page, session, params)
+    let client = HttpClient::from_env()?;
+    client.post_lastpass(None, page, session, params)
 }
 
 fn post_real(
@@ -185,6 +186,10 @@ fn user_agent() -> String {
     format!("LastPass-CLI/{}", crate::version::generated_version())
 }
 
+fn map_build_client_error(_: reqwest::Error) -> LpassError {
+    LpassError::Crypto("failed to build http client")
+}
+
 struct MockTransport {
     username: String,
     login_hash: String,
@@ -194,13 +199,24 @@ struct MockTransport {
     overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
 
+#[cfg(test)]
+fn lock_overrides<'a>(
+    result: std::sync::LockResult<
+        std::sync::MutexGuard<'a, HashMap<String, VecDeque<HttpResponse>>>,
+    >,
+) -> std::sync::MutexGuard<'a, HashMap<String, VecDeque<HttpResponse>>> {
+    match result {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 impl MockTransport {
     fn new() -> Self {
         let username = "user@example.com".to_string();
         let password = "123456";
         let iterations = 1000;
-        let login_hash =
-            kdf_login_key(&username, password, iterations).unwrap_or_else(|_| "".to_string());
+        let login_hash = mock_login_hash(&username, password, iterations);
         let uid = "57747756".to_string();
         Self {
             username,
@@ -215,10 +231,7 @@ impl MockTransport {
     #[cfg(test)]
     fn with_overrides(overrides: &[(&str, u16, &str)]) -> Self {
         let transport = Self::new();
-        let mut map = match transport.overrides.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut map = lock_overrides(transport.overrides.lock());
         for (page, status, body) in overrides {
             map.entry((*page).to_string())
                 .or_insert_with(VecDeque::new)
@@ -233,10 +246,7 @@ impl MockTransport {
 
     #[cfg(test)]
     fn override_response(&self, page: &str) -> Option<HttpResponse> {
-        let mut map = match self.overrides.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut map = lock_overrides(self.overrides.lock());
         let responses = map.get_mut(page)?;
         let response = responses.pop_front();
         if responses.is_empty() {
@@ -312,6 +322,11 @@ impl MockTransport {
     }
 }
 
+fn mock_login_hash(username: &str, password: &str, iterations: u32) -> String {
+    kdf_login_key(username, password, iterations)
+        .expect("fixed mock credentials should derive a login hash")
+}
+
 fn params_to_map(params: &[(&str, &str)]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for (key, value) in params {
@@ -335,6 +350,57 @@ fn mock_attachment_ciphertext(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Once};
+    use std::thread;
+
+    use rcgen::generate_simple_self_signed;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::{ServerConfig, ServerConnection, StreamOwned};
+
+    fn install_crypto_provider() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
+
+    fn insecure_client() -> Client {
+        Client::builder()
+            .danger_accept_invalid_certs(true)
+            .user_agent(user_agent())
+            .build()
+            .expect("client")
+    }
+
+    fn spawn_https_server(response: Vec<u8>) -> (String, thread::JoinHandle<()>) {
+        install_crypto_provider();
+
+        let cert =
+            generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("generate cert");
+        let cert_der = CertificateDer::from(cert.cert.der().to_vec());
+        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()));
+        let config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(vec![cert_der], key_der)
+                .expect("server config"),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let handle = thread::spawn(move || {
+            let (tcp, _) = listener.accept().expect("accept");
+            let conn = ServerConnection::new(config).expect("server connection");
+            let mut tls = StreamOwned::new(conn, tcp);
+            let mut buf = [0u8; 4096];
+            let _ = tls.read(&mut buf);
+            tls.write_all(&response).expect("write response");
+            tls.flush().expect("flush response");
+        });
+        (format!("127.0.0.1:{}", addr.port()), handle)
+    }
 
     #[test]
     fn mock_iterations() {
@@ -402,6 +468,16 @@ mod tests {
             .expect("response");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"1000".to_vec());
+    }
+
+    #[test]
+    fn mock_show_website_returns_empty_body() {
+        let client = HttpClient::mock();
+        let response = client
+            .post_lastpass(None, "show_website.php", None, &[])
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert!(response.body.is_empty());
     }
 
     #[test]
@@ -485,6 +561,19 @@ mod tests {
     }
 
     #[test]
+    fn map_build_client_error_returns_crypto_error() {
+        let err = Client::builder()
+            .user_agent("\n")
+            .build()
+            .expect_err("builder must reject invalid user agent");
+        let mapped = map_build_client_error(err);
+        assert!(matches!(
+            mapped,
+            LpassError::Crypto("failed to build http client")
+        ));
+    }
+
+    #[test]
     fn mock_with_overrides_returns_custom_responses_in_sequence() {
         let client = HttpClient::mock_with_overrides(&[
             ("lastpass/api.php", 500, "first"),
@@ -505,12 +594,49 @@ mod tests {
     }
 
     #[test]
+    fn mock_lastpass_api_returns_fail_without_uploadaccounts_cmd() {
+        let client = HttpClient::mock();
+        let response = client
+            .post_lastpass(None, "lastpass/api.php", None, &[("cmd", "other")])
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "<lastpass rc=\"FAIL\"><error/></lastpass>");
+    }
+
+    #[test]
+    fn lock_overrides_recovers_from_poisoned_mutex() {
+        let transport = MockTransport::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = transport.overrides.lock().expect("lock");
+            panic!("poison");
+        }));
+
+        {
+            let mut map = lock_overrides(transport.overrides.lock());
+            map.insert(
+                "page".to_string(),
+                VecDeque::from([HttpResponse {
+                    status: 200,
+                    body: "ok".to_string(),
+                }]),
+            );
+        }
+
+        let response = transport
+            .override_response("page")
+            .expect("override response");
+        assert_eq!(response.body, "ok");
+    }
+
+    #[test]
     fn real_client_can_be_constructed() {
         let client = HttpClient::real().expect("client");
-        match client.transport {
-            Transport::Real(_) => {}
-            Transport::Mock(_) => panic!("expected real transport"),
-        }
+        assert!(client.is_real_transport());
+    }
+
+    #[test]
+    fn mock_client_reports_mock_transport() {
+        assert!(!HttpClient::mock().is_real_transport());
     }
 
     #[test]
@@ -536,6 +662,48 @@ mod tests {
         ));
     }
 
+    impl HttpClient {
+        fn is_real_transport(&self) -> bool {
+            match self.transport {
+                Transport::Real(_) => true,
+                Transport::Mock(_) => false,
+            }
+        }
+    }
+
+    #[test]
+    fn post_real_returns_response_body_on_success() {
+        let (server, handle) =
+            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+        let client = insecure_client();
+
+        let response = post_real(&client, Some(&server), "login.php", None, &[("k", "v")])
+            .expect("request should succeed");
+        handle.join().expect("join server");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "ok");
+    }
+
+    #[test]
+    fn post_real_reports_read_errors_after_successful_send() {
+        let (server, handle) =
+            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort".to_vec());
+        let client = insecure_client();
+
+        let err = post_real(&client, Some(&server), "login.php", None, &[("k", "v")])
+            .expect_err("body read should fail");
+        handle.join().expect("join server");
+
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "http read",
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn post_real_bytes_returns_io_error_when_request_fails() {
         let client = Client::builder()
@@ -554,6 +722,39 @@ mod tests {
             err,
             LpassError::Io {
                 context: "http post",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn post_real_bytes_returns_response_body_on_success() {
+        let (server, handle) =
+            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n\x00\x01ok".to_vec());
+        let client = insecure_client();
+
+        let response = post_real_bytes(&client, Some(&server), "login.php", None, &[("k", "v")])
+            .expect("request should succeed");
+        handle.join().expect("join server");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"\x00\x01ok".to_vec());
+    }
+
+    #[test]
+    fn post_real_bytes_reports_read_errors_after_successful_send() {
+        let (server, handle) =
+            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort".to_vec());
+        let client = insecure_client();
+
+        let err = post_real_bytes(&client, Some(&server), "login.php", None, &[("k", "v")])
+            .expect_err("body read should fail");
+        handle.join().expect("join server");
+
+        assert!(matches!(
+            err,
+            LpassError::Io {
+                context: "http read",
                 ..
             }
         ));
