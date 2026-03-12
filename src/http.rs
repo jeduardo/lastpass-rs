@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::VecDeque;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
@@ -63,6 +65,13 @@ impl HttpClient {
     pub fn mock() -> Self {
         Self {
             transport: Transport::Mock(MockTransport::new()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mock_with_overrides(overrides: &[(&str, u16, &str)]) -> Self {
+        Self {
+            transport: Transport::Mock(MockTransport::with_overrides(overrides)),
         }
     }
 
@@ -181,6 +190,8 @@ struct MockTransport {
     login_hash: String,
     iterations: u32,
     uid: String,
+    #[cfg(test)]
+    overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
 
 impl MockTransport {
@@ -196,10 +207,50 @@ impl MockTransport {
             login_hash,
             iterations,
             uid,
+            #[cfg(test)]
+            overrides: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
+    #[cfg(test)]
+    fn with_overrides(overrides: &[(&str, u16, &str)]) -> Self {
+        let transport = Self::new();
+        let mut map = match transport.overrides.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for (page, status, body) in overrides {
+            map.entry((*page).to_string())
+                .or_insert_with(VecDeque::new)
+                .push_back(HttpResponse {
+                    status: *status,
+                    body: (*body).to_string(),
+                });
+        }
+        drop(map);
+        transport
+    }
+
+    #[cfg(test)]
+    fn override_response(&self, page: &str) -> Option<HttpResponse> {
+        let mut map = match self.overrides.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let responses = map.get_mut(page)?;
+        let response = responses.pop_front();
+        if responses.is_empty() {
+            map.remove(page);
+        }
+        response
+    }
+
     fn respond(&self, page: &str, params: &[(&str, &str)]) -> HttpResponse {
+        #[cfg(test)]
+        if let Some(response) = self.override_response(page) {
+            return response;
+        }
+
         let map = params_to_map(params);
         let body = match page {
             "iterations.php" => self.iterations.to_string(),
@@ -221,6 +272,14 @@ impl MockTransport {
             ),
             "getaccts.php" => String::new(),
             "show_website.php" => String::new(),
+            "loglogin.php" => String::new(),
+            "lastpass/api.php" => {
+                if map.get("cmd").map(String::as_str) == Some("uploadaccounts") {
+                    "<lastpass rc=\"OK\"><ok/></lastpass>".to_string()
+                } else {
+                    "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
+                }
+            }
             "getattach.php" => {
                 let Some(storage_key) = map.get("getattach") else {
                     return HttpResponse {
@@ -423,6 +482,26 @@ mod tests {
         let ua = user_agent();
         assert!(ua.starts_with("LastPass-CLI/"));
         assert!(ua.contains(crate::version::generated_version()));
+    }
+
+    #[test]
+    fn mock_with_overrides_returns_custom_responses_in_sequence() {
+        let client = HttpClient::mock_with_overrides(&[
+            ("lastpass/api.php", 500, "first"),
+            ("lastpass/api.php", 200, "second"),
+        ]);
+
+        let first = client
+            .post_lastpass(None, "lastpass/api.php", None, &[])
+            .expect("first");
+        assert_eq!(first.status, 500);
+        assert_eq!(first.body, "first");
+
+        let second = client
+            .post_lastpass(None, "lastpass/api.php", None, &[])
+            .expect("second");
+        assert_eq!(second.status, 200);
+        assert_eq!(second.body, "second");
     }
 
     #[test]

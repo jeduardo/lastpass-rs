@@ -532,9 +532,13 @@ mod tests {
         };
 
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
+            {
+                let _ = listener.accept().expect("accept");
+            }
             #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
             {
+                let (mut stream, _) = listener.accept().expect("accept");
                 let mut pid = [0u8; 4];
                 stream.read_exact(&mut pid).expect("read pid");
                 stream.write_all(&pid).expect("write pid");

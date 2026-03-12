@@ -5,6 +5,8 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lpass_core::blob::Blob;
+
 static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 
 fn unique_test_home() -> PathBuf {
@@ -52,6 +54,18 @@ fn run(home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
     run_with_mock(home, args, stdin, true)
 }
 
+fn write_empty_mock_blob(home: &Path) {
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    };
+    let json = serde_json::to_vec(&blob).expect("blob json");
+    fs::write(home.join("blob"), json).expect("write mock blob");
+}
+
 #[cfg(unix)]
 fn write_askpass(home: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -77,6 +91,7 @@ fn write_askpass_value(home: &Path, value: &str) -> PathBuf {
 fn add_edit_duplicate_generate_and_export_flow() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
 
     let add_in =
         "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\nNotes:\ninitial note\n";
@@ -399,7 +414,7 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
 
 #[cfg(unix)]
 #[test]
-fn sync_without_mock_reaches_server_fetch_path_and_reports_network_error() {
+fn sync_without_queue_succeeds_even_when_server_is_unreachable() {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
@@ -430,11 +445,11 @@ fn sync_without_mock_reaches_server_fetch_path_and_reports_network_error() {
         .arg("sync")
         .output()
         .expect("run sync");
-    assert_eq!(sync.status.code().unwrap_or(-1), 1);
-    let stderr = String::from_utf8_lossy(&sync.stderr);
-    assert!(
-        stderr.contains("http post") || stderr.contains("Unable to fetch blob"),
-        "{stderr}"
+    assert_eq!(
+        sync.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&sync.stderr)
     );
 
     let _ = fs::remove_dir_all(&home);

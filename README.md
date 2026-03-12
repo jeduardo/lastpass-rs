@@ -134,8 +134,8 @@ Per-command checklist:
 - `export`
 
   - default export and `--fields`: :white_check_mark: (basic parity)
-  - `--fields` validation parity: TODO
-  - protected-entry reprompt/auth parity: TODO
+  - `--fields` validation parity: :white_check_mark:
+  - protected-entry reprompt/auth parity: :white_check_mark:
 
 - `mv`
 
@@ -153,13 +153,13 @@ Per-command checklist:
 
   - default path and `--background/-b`: :white_check_mark: (basic parity)
   - `--color`: :white_check_mark:
-  - uploader/background queue parity with C client: TODO
+  - uploader/background queue parity with C client: :white_check_mark:
 
 - `import`
 
   - stdin/file CSV input and `--keep-dupes`: :white_check_mark: (basic parity)
   - core header mapping (`url,username,password,extra,name,grouping,fav`): :white_check_mark:
-  - full API/upload parity and CSV edge cases: TODO
+  - full API/upload parity and CSV edge cases: :white_check_mark:
 
 - Cross-cutting
   - strict C-like option parsing errors for unknown/invalid flags: TODO

@@ -70,6 +70,11 @@ pub fn parse_error_cause(xml: &str, attr_name: &str) -> Option<String> {
     parse_error_attribute(xml, attr_name)
 }
 
+pub fn parse_lastpass_api_ok(xml: &str) -> Option<bool> {
+    let attrs = parse_element_attributes(xml, b"lastpass")?;
+    Some(attrs.get("rc").map(String::as_str) == Some("OK"))
+}
+
 fn parse_ok_attributes(xml: &str) -> Option<std::collections::HashMap<String, String>> {
     parse_element_attributes(xml, b"ok")
 }
@@ -159,5 +164,28 @@ mod tests {
         let session = parse_ok_session(xml).expect("session");
         assert!(session.url_encryption_enabled);
         assert!(!session.url_logging_enabled);
+    }
+
+    #[test]
+    fn parse_ok_session_returns_none_for_missing_required_attributes() {
+        assert!(parse_ok_session("<response><ok uid=\"1\" sessionid=\"2\"/></response>").is_none());
+    }
+
+    #[test]
+    fn parse_lastpass_api_ok_status() {
+        assert_eq!(
+            parse_lastpass_api_ok("<lastpass rc=\"OK\"><ok/></lastpass>"),
+            Some(true)
+        );
+        assert_eq!(
+            parse_lastpass_api_ok("<lastpass rc=\"FAIL\"><error/></lastpass>"),
+            Some(false)
+        );
+        assert_eq!(parse_lastpass_api_ok("<response/>"), None);
+    }
+
+    #[test]
+    fn parse_error_cause_returns_none_for_malformed_xml() {
+        assert_eq!(parse_error_cause("<response><error", "message"), None);
     }
 }

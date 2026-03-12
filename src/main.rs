@@ -5,6 +5,9 @@ fn main() {
     if let Some(code) = lpass_core::agent::maybe_run_agent(&args) {
         std::process::exit(code);
     }
+    if let Some(code) = lpass_core::upload_queue::maybe_run_uploader(&args) {
+        std::process::exit(code);
+    }
     let exit_code = lpass_core::cli::run(args);
     std::process::exit(exit_code);
 }

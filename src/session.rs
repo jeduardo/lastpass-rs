@@ -132,6 +132,7 @@ pub fn session_kill() -> Result<()> {
     let _ = store.unlink("uploader.pid");
     let _ = store.unlink("session_ff_url_encryption");
     let _ = store.unlink("session_ff_url_logging");
+    let _ = crate::upload_queue::kill();
     let _ = crate::agent::agent_kill();
     let _ = store.unlink("agent.sock");
 
