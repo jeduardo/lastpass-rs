@@ -435,7 +435,7 @@ mod tests {
     use super::*;
     use std::fs;
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::symlink;
     use tempfile::TempDir;
 
     fn env_with_home(home: &Path) -> ConfigEnv {
@@ -443,6 +443,11 @@ mod tests {
             home: Some(home.to_path_buf()),
             ..ConfigEnv::default()
         }
+    }
+
+    #[cfg(unix)]
+    fn create_symlink_loop(path: &Path) {
+        symlink(path.file_name().expect("file name"), path).expect("create symlink loop");
     }
 
     #[test]
@@ -718,14 +723,10 @@ mod tests {
             ..ConfigEnv::default()
         });
 
-        let dir = temp.path().join("protected");
-        fs::create_dir_all(&dir).expect("create dir");
-        let perms = fs::Permissions::from_mode(0o000);
-        fs::set_permissions(&dir, perms).expect("set perms");
+        let looping = temp.path().join("looping");
+        create_symlink_loop(&looping);
 
-        let err = store
-            .read_buffer("protected/file")
-            .expect_err("open should fail");
+        let err = store.read_buffer("looping").expect_err("open should fail");
         assert!(matches!(
             err,
             LpassError::Io {
@@ -733,9 +734,6 @@ mod tests {
                 ..
             }
         ));
-
-        let perms = fs::Permissions::from_mode(0o700);
-        fs::set_permissions(&dir, perms).expect("restore perms");
     }
 
     #[test]
@@ -763,14 +761,10 @@ mod tests {
             ..ConfigEnv::default()
         });
 
-        let protected = temp.path().join("protected");
-        fs::create_dir_all(&protected).expect("create dir");
-        let perms = fs::Permissions::from_mode(0o000);
-        fs::set_permissions(&protected, perms).expect("set perms");
+        let looping = temp.path().join("looping");
+        create_symlink_loop(&looping);
 
-        let err = store
-            .mtime("protected/file")
-            .expect_err("mtime should error");
+        let err = store.mtime("looping").expect_err("mtime should error");
         assert!(matches!(
             err,
             LpassError::Io {
@@ -778,8 +772,5 @@ mod tests {
                 ..
             }
         ));
-
-        let perms = fs::Permissions::from_mode(0o700);
-        fs::set_permissions(&protected, perms).expect("restore perms");
     }
 }

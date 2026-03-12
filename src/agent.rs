@@ -95,7 +95,7 @@ pub fn agent_kill() -> Result<()> {
         use nix::unistd::Pid;
 
         let path = agent_socket_path()?;
-        let mut stream = match UnixStream::connect(&path) {
+        let stream = match UnixStream::connect(&path) {
             Ok(stream) => stream,
             Err(err)
                 if matches!(
@@ -119,6 +119,7 @@ pub fn agent_kill() -> Result<()> {
 
         #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "cygwin")))]
         let pid = {
+            let mut stream = stream;
             let this_pid = std::process::id();
             stream
                 .write_all(&this_pid.to_ne_bytes())
@@ -374,7 +375,13 @@ fn peer_allowed(stream: &std::os::unix::net::UnixStream) -> Result<bool> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(
+    unix,
+    any(
+        test,
+        not(any(target_os = "linux", target_os = "android", target_os = "cygwin"))
+    )
+))]
 fn read_pid(stream: &mut std::os::unix::net::UnixStream) -> Result<u32> {
     let mut buf = [0u8; 4];
     stream
