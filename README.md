@@ -30,6 +30,7 @@ Implemented (working, with ongoing parity improvements):
 
 - `login`
 - `logout`
+- `passwd`
 - `status`
 - `ls`
 - `show`
@@ -45,7 +46,6 @@ Implemented (working, with ongoing parity improvements):
 
 Planned / not fully implemented yet:
 
-- `passwd`
 - `share`
 
 ## Implementation status
@@ -54,6 +54,7 @@ Audit source of truth:
 
 - `lastpass-cli/cmd-login.c`
 - `lastpass-cli/cmd-logout.c`
+- `lastpass-cli/cmd-passwd.c`
 - `lastpass-cli/cmd-status.c`
 - `lastpass-cli/cmd-ls.c`
 - `lastpass-cli/cmd-show.c`
@@ -105,6 +106,12 @@ Per-command checklist:
   - remote logout flow (`agent_ask` gated, best-effort server call): :white_check_mark:
   - `--force/-f`, `--color`: :white_check_mark:
   - exact interactive prompt text parity: :white_check_mark:
+
+- `passwd`
+
+  - master password change flow and validation: :white_check_mark:
+  - re-encryption progress, upload, and forced logout: :white_check_mark:
+  - API/XML parity for `getacctschangepw` and `updatepassword`: :white_check_mark:
 
 - `add`
 

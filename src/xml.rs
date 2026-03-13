@@ -5,6 +5,38 @@ use quick_xml::events::Event;
 
 use crate::session::Session;
 
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct PwChangeInfo {
+    pub reencrypt_id: String,
+    pub token: String,
+    pub privkey_encrypted: String,
+    pub new_privkey_encrypted: String,
+    pub new_privkey_hash: String,
+    pub new_key_hash: String,
+    pub fields: Vec<PwChangeField>,
+    pub su_keys: Vec<PwChangeSuKey>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct PwChangeField {
+    pub old_ctext: String,
+    pub new_ctext: String,
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct PwChangeSuKey {
+    pub uid: String,
+    pub sharing_key: Vec<u8>,
+    pub new_enc_key: String,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PwChangeParseError {
+    IncorrectPassword,
+    Invalid,
+}
+
 pub fn parse_ok_session(xml: &str) -> Option<Session> {
     let attrs = parse_ok_attributes(xml)?;
     let uid = attrs.get("uid")?.to_string();
@@ -75,6 +107,32 @@ pub fn parse_lastpass_api_ok(xml: &str) -> Option<bool> {
     Some(attrs.get("rc").map(String::as_str) == Some("OK"))
 }
 
+pub fn parse_pwchange(xml: &str) -> std::result::Result<PwChangeInfo, PwChangeParseError> {
+    let root_attrs =
+        parse_element_attributes(xml, b"lastpass").ok_or(PwChangeParseError::Invalid)?;
+    if root_attrs.get("rc").map(String::as_str) != Some("OK") {
+        return Err(PwChangeParseError::IncorrectPassword);
+    }
+
+    let data_attrs = parse_element_attributes(xml, b"data").ok_or(PwChangeParseError::Invalid)?;
+    let data = data_attrs
+        .get("xml")
+        .ok_or(PwChangeParseError::Invalid)?
+        .clone();
+    let (reencrypt_id, privkey_encrypted, fields) = parse_pwchange_data(&data)?;
+
+    Ok(PwChangeInfo {
+        reencrypt_id,
+        token: data_attrs.get("token").cloned().unwrap_or_default(),
+        privkey_encrypted,
+        new_privkey_encrypted: String::new(),
+        new_privkey_hash: String::new(),
+        new_key_hash: String::new(),
+        fields,
+        su_keys: parse_pwchange_su_keys(&data_attrs),
+    })
+}
+
 fn parse_ok_attributes(xml: &str) -> Option<std::collections::HashMap<String, String>> {
     parse_element_attributes(xml, b"ok")
 }
@@ -86,6 +144,68 @@ fn parse_error_attribute(xml: &str, attr_name: &str) -> Option<String> {
 
 fn parse_flag(attrs: &std::collections::HashMap<String, String>, key: &str) -> bool {
     attrs.get(key).map(String::as_str) == Some("1")
+}
+
+fn parse_pwchange_data(
+    data: &str,
+) -> std::result::Result<(String, String, Vec<PwChangeField>), PwChangeParseError> {
+    let Some((reencrypt_id, rest)) = split_pwchange_line(data) else {
+        return Err(PwChangeParseError::Invalid);
+    };
+    let Some((privkey_encrypted, rest)) = split_pwchange_line(rest) else {
+        return Err(PwChangeParseError::Invalid);
+    };
+
+    let mut fields = Vec::new();
+    for token in rest.split('\n').filter(|line| !line.is_empty()) {
+        if token.starts_with("endmarker") {
+            break;
+        }
+
+        let (old_ctext, optional) = if let Some((value, suffix)) = token.split_once('\t') {
+            (value.to_string(), suffix.starts_with('0'))
+        } else {
+            (token.to_string(), false)
+        };
+
+        fields.push(PwChangeField {
+            old_ctext,
+            new_ctext: String::new(),
+            optional,
+        });
+    }
+
+    Ok((reencrypt_id.to_string(), privkey_encrypted.to_string(), fields))
+}
+
+fn split_pwchange_line(data: &str) -> Option<(&str, &str)> {
+    let newline = data.find('\n')?;
+    Some((&data[..newline], &data[newline + 1..]))
+}
+
+fn parse_pwchange_su_keys(
+    attrs: &std::collections::HashMap<String, String>,
+) -> Vec<PwChangeSuKey> {
+    let mut su_keys = Vec::new();
+    for idx in 0.. {
+        let sukey = format!("sukey{idx}");
+        let suuid = format!("suuid{idx}");
+        let Some(key_hex) = attrs.get(&sukey) else {
+            break;
+        };
+        let Some(uid) = attrs.get(&suuid) else {
+            break;
+        };
+        let Ok(sharing_key) = hex::decode(key_hex) else {
+            break;
+        };
+        su_keys.push(PwChangeSuKey {
+            uid: uid.clone(),
+            sharing_key,
+            new_enc_key: String::new(),
+        });
+    }
+    su_keys
 }
 
 fn parse_element_attributes(
@@ -187,5 +307,40 @@ mod tests {
     #[test]
     fn parse_error_cause_returns_none_for_malformed_xml() {
         assert_eq!(parse_error_cause("<response><error", "message"), None);
+    }
+
+    #[test]
+    fn parse_pwchange_success() {
+        let xml = "<lastpass rc=\"OK\"><data token=\"tok\" sukey0=\"0102\" suuid0=\"77\" xml=\"rid&#10;priv&#10;old-a&#10;old-b&#9;0&#10;endmarker&#10;\"/></lastpass>";
+        let info = parse_pwchange(xml).expect("pwchange");
+        assert_eq!(info.reencrypt_id, "rid");
+        assert_eq!(info.token, "tok");
+        assert_eq!(info.privkey_encrypted, "priv");
+        assert_eq!(info.fields.len(), 2);
+        assert!(!info.fields[0].optional);
+        assert!(info.fields[1].optional);
+        assert_eq!(info.su_keys.len(), 1);
+        assert_eq!(info.su_keys[0].uid, "77");
+        assert_eq!(info.su_keys[0].sharing_key, vec![1, 2]);
+    }
+
+    #[test]
+    fn parse_pwchange_rejects_incorrect_password() {
+        let err = parse_pwchange("<lastpass rc=\"FAIL\"><error/></lastpass>").expect_err("fail");
+        assert_eq!(err, PwChangeParseError::IncorrectPassword);
+    }
+
+    #[test]
+    fn parse_pwchange_rejects_invalid_payload() {
+        let err = parse_pwchange("<lastpass rc=\"OK\"><data token=\"tok\" xml=\"rid\"/></lastpass>")
+            .expect_err("invalid");
+        assert_eq!(err, PwChangeParseError::Invalid);
+    }
+
+    #[test]
+    fn parse_pwchange_stops_su_key_scan_on_invalid_hex() {
+        let xml = "<lastpass rc=\"OK\"><data token=\"tok\" sukey0=\"not-hex\" suuid0=\"77\" sukey1=\"0102\" suuid1=\"88\" xml=\"rid&#10;priv&#10;endmarker&#10;\"/></lastpass>";
+        let info = parse_pwchange(xml).expect("pwchange");
+        assert!(info.su_keys.is_empty());
     }
 }

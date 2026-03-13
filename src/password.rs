@@ -5,7 +5,21 @@ use std::process::Command;
 use crate::error::{LpassError, Result};
 
 pub fn prompt_password(username: &str) -> Result<String> {
-    let prompt = "Master Password";
+    prompt_password_with_description(
+        "Master Password",
+        None,
+        &format!(
+            "Please enter the LastPass master password for <{}>.",
+            username
+        ),
+    )
+}
+
+pub fn prompt_password_with_description(
+    prompt: &str,
+    error: Option<&str>,
+    description: &str,
+) -> Result<String> {
     if let Some(askpass) = askpass_program_from_env() {
         let output = Command::new(askpass)
             .arg(prompt)
@@ -17,10 +31,11 @@ pub fn prompt_password(username: &str) -> Result<String> {
         return Ok(decode_password_output(output.stdout));
     }
 
-    eprintln!(
-        "Please enter the LastPass master password for <{}>.",
-        username
-    );
+    eprintln!("{}", description);
+    eprintln!();
+    if let Some(error) = error {
+        eprintln!("{}", error);
+    }
     rpassword::prompt_password(format!("{prompt}: "))
         .map_err(|err| LpassError::io("password prompt", err))
 }

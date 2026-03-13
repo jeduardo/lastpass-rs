@@ -13,6 +13,7 @@ mod login;
 mod logout;
 mod ls;
 mod mv;
+mod passwd;
 mod rm;
 mod show;
 mod status;
@@ -28,13 +29,14 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "import" => import::run(args),
         "login" => login::run(args),
         "logout" => logout::run(args),
+        "passwd" => passwd::run(args),
         "show" => show::run(args),
         "ls" => ls::run(args),
         "mv" => mv::run(args),
         "rm" => rm::run(args),
         "status" => status::run(args),
         "sync" => sync::run(args),
-        "passwd" | "share" => not_implemented(command),
+        "share" => not_implemented(command),
         _ => 1,
     }
 }
@@ -50,7 +52,6 @@ mod tests {
 
     #[test]
     fn run_reports_unimplemented_and_unknown_commands() {
-        assert_eq!(run("passwd", &[]), 1);
         assert_eq!(run("share", &[]), 1);
         assert_eq!(run("unknown", &[]), 1);
     }

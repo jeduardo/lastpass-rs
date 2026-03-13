@@ -25,6 +25,7 @@
 ## Development expectations
 - Implement features in incremental, testable steps.
 - Prefer compatibility with existing CLI behavior, flags, and outputs.
+- Treat `lastpass-cli/` as a read-only git submodule reference. Do not modify files inside the submodule, including its tests, unless the user explicitly asks for submodule changes.
 
 ## Fidelity directives (C client parity)
 - Before considering a command complete, verify parity against the C implementation for:

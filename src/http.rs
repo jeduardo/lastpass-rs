@@ -9,9 +9,9 @@ use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, USER_AGENT};
 
-use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, encrypt_private_key};
 use crate::error::{LpassError, Result};
-use crate::kdf::kdf_login_key;
+use crate::kdf::{kdf_decryption_key, kdf_login_key};
 use crate::session::Session;
 
 pub const LASTPASS_SERVER: &str = "lastpass.com";
@@ -20,6 +20,9 @@ const MOCK_ATTACH_KEY_HEX: &str =
 const MOCK_ATTACH_STORAGE_KEY_TEXT: &str = "mock-storage-0001-text";
 const MOCK_ATTACH_STORAGE_KEY_BIN: &str = "mock-storage-0001-bin";
 const MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON: &str = "mock-storage-0001-empty-json";
+const MOCK_PRIVATE_KEY_HEX: &str = "30820276020100300d06092a864886f70d0101010500048202603082025c02010002818100a1a227a8887870284bd831eb4a16dbba04c1092ce93e821b1523dcac45c84e34ea07139bee3a21b703fe78a3765995944c6646f4820341486a0f1c4472050110099b28b410d89d9fe2ebc2af752e95efdbaa9393a70dd09024719ea4fbb98c4498f7feced228a29462239f955ae0d028bb0cc5a641bdedc66f67fd2b5b4514d5020301000102818100920fadd4df962e8c4b958feeb6e217276f5a5d874733647142d64879290a4c9a068de48b7968f0c4a908514e2e09e060c5f57ad34395db6dabe201c25c62e7447dd91d051e1c614eaae5e51c90c6dc155665b91adc40c9b00dbcbcf7c3b86076274b7c0f411df082369e46788062afd6f6838be1eb0e92835d07ce9b3c80da55024100d49e0f79d17befdf79005e7f80a1cfe9b6c0875a1e157e1c0b8aac538e6bd387854718c0d1b5a75a1d73606be981ec4e7652c973dbfd3f650223b6787126fdb3024100c29cf9f94b7d3d48eaec0d7c6d7b91ec1c745ec6ae49f6d18550a1d63ef3864849eb8f4aac735f3c546514724c1e071d2b237927646c69bef2fffd14694b2f5702402a17385d17597fbd2fc920ec00dd07b9eed1e279b6a6ee9642baab2ec76d152d28f750312bd2d85480ac0c94905f86166a5a2d4360739c0f350338e6531032fd02400f081ceeba7bf3eddbe75bab4eb18ab5d804cd053f950af16800b05f6201614fd815cfbd8ed0627cc070064245cad3f5d6cd28a0784b3f67b6513b750624fe85024004ddedf0e84ddafcc86999697526fb0cad99928334f656f38ac14854db2551be0a683984f85dde12e1a5be921d1d86f5f53210a0c0f8e9de8495a10fee4d4fd3";
+const MOCK_PWCHANGE_REENCRYPT_ID: &str = "mock-reencrypt-id";
+const MOCK_PWCHANGE_TOKEN: &str = "mock-pwchange-token";
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -193,8 +196,10 @@ fn map_build_client_error(_: reqwest::Error) -> LpassError {
 struct MockTransport {
     username: String,
     login_hash: String,
+    decryption_key: [u8; 32],
     iterations: u32,
     uid: String,
+    private_key_enc: String,
     #[cfg(test)]
     overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
@@ -217,12 +222,19 @@ impl MockTransport {
         let password = "123456";
         let iterations = 1000;
         let login_hash = mock_login_hash(&username, password, iterations);
+        let decryption_key = kdf_decryption_key(&username, password, iterations)
+            .expect("fixed mock credentials should derive a decryption key");
         let uid = "57747756".to_string();
+        let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("valid mock private key");
+        let private_key_enc = encrypt_private_key(&private_key, &decryption_key)
+            .expect("fixed mock private key should encrypt");
         Self {
             username,
             login_hash,
+            decryption_key,
             iterations,
             uid,
+            private_key_enc,
             #[cfg(test)]
             overrides: std::sync::Mutex::new(HashMap::new()),
         }
@@ -269,8 +281,8 @@ impl MockTransport {
                 let hash = map.get("hash").cloned().unwrap_or_default();
                 if username == self.username && hash == self.login_hash {
                     format!(
-                        "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\"/></response>",
-                        self.uid
+                        "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\" privatekeyenc=\"{}\"/></response>",
+                        self.uid, self.private_key_enc
                     )
                 } else {
                     "<response><error message=\"invalid password\"/></response>".to_string()
@@ -283,13 +295,12 @@ impl MockTransport {
             "getaccts.php" => String::new(),
             "show_website.php" => String::new(),
             "loglogin.php" => String::new(),
-            "lastpass/api.php" => {
-                if map.get("cmd").map(String::as_str) == Some("uploadaccounts") {
-                    "<lastpass rc=\"OK\"><ok/></lastpass>".to_string()
-                } else {
-                    "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
-                }
-            }
+            "lastpass/api.php" => match map.get("cmd").map(String::as_str) {
+                Some("uploadaccounts") => "<lastpass rc=\"OK\"><ok/></lastpass>".to_string(),
+                Some("getacctschangepw") => self.respond_pwchange_start(&map),
+                Some("updatepassword") => self.respond_pwchange_complete(&map),
+                _ => "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string(),
+            },
             "getattach.php" => {
                 let Some(storage_key) = map.get("getattach") else {
                     return HttpResponse {
@@ -320,6 +331,60 @@ impl MockTransport {
             body: response.body.into_bytes(),
         }
     }
+
+    fn respond_pwchange_start(&self, map: &HashMap<String, String>) -> String {
+        let username = map.get("username").cloned().unwrap_or_default();
+        let hash = map.get("hash").cloned().unwrap_or_default();
+        if username != self.username || hash != self.login_hash {
+            return "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string();
+        }
+
+        let required = mock_pwchange_ciphertext(&self.decryption_key, b"required-field");
+        let optional = mock_pwchange_ciphertext(&self.decryption_key, b"optional-field");
+        let payload = format!(
+            "{MOCK_PWCHANGE_REENCRYPT_ID}\n{}\n{}\n{}\t0\nendmarker\n",
+            self.private_key_enc, required, optional
+        );
+
+        format!(
+            "<lastpass rc=\"OK\"><data token=\"{MOCK_PWCHANGE_TOKEN}\" xml=\"{}\"/></lastpass>",
+            escape_xml_attr(&payload)
+        )
+    }
+
+    fn respond_pwchange_complete(&self, map: &HashMap<String, String>) -> String {
+        let required = [
+            ("pwupdate", "1"),
+            ("email", self.username.as_str()),
+            ("token", MOCK_PWCHANGE_TOKEN),
+        ];
+        let has_required = required
+            .iter()
+            .all(|(key, value)| map.get(*key).map(String::as_str) == Some(*value));
+        let has_payload = map
+            .get("reencrypt")
+            .map(String::as_str)
+            .is_some_and(|value| value.starts_with(MOCK_PWCHANGE_REENCRYPT_ID));
+        let has_new_fields = [
+            "newprivatekeyenc",
+            "newuserkeyhexhash",
+            "newprivatekeyenchexhash",
+            "newpasswordhash",
+            "encrypted_username",
+            "origusername",
+            "wxhash",
+            "key_iterations",
+            "sukeycnt",
+        ]
+        .iter()
+        .all(|key| map.contains_key(*key));
+
+        if has_required && has_payload && has_new_fields {
+            "pwchangeok".to_string()
+        } else {
+            "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
+        }
+    }
 }
 
 fn mock_login_hash(username: &str, password: &str, iterations: u32) -> String {
@@ -345,6 +410,28 @@ fn mock_attachment_ciphertext(bytes: &[u8]) -> String {
     let plain_b64 = BASE64_STD.encode(bytes);
     let encrypted = aes_encrypt_lastpass(plain_b64.as_bytes(), &key).unwrap_or_default();
     serde_json::to_string(&base64_lastpass_encode(&encrypted)).unwrap_or_default()
+}
+
+fn mock_pwchange_ciphertext(key: &[u8; 32], bytes: &[u8]) -> String {
+    let encrypted = aes_encrypt_lastpass(bytes, key).unwrap_or_default();
+    base64_lastpass_encode(&encrypted)
+}
+
+fn escape_xml_attr(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\n' => escaped.push_str("&#10;"),
+            '\r' => escaped.push_str("&#13;"),
+            '\t' => escaped.push_str("&#9;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]

@@ -8,11 +8,11 @@ use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use rand::rngs::OsRng;
-use rsa::pkcs1::DecodeRsaPrivateKey;
-use rsa::pkcs8::DecodePrivateKey;
-use rsa::{Oaep, RsaPrivateKey};
+use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey};
+use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::error::{LpassError, Result};
 
@@ -166,6 +166,19 @@ pub fn decrypt_private_key(private_key_enc: &str, key: &[u8; 32]) -> Result<Vec<
     hex::decode(key_hex).map_err(|_| LpassError::Crypto("invalid private key"))
 }
 
+pub fn encrypt_private_key(private_key_der: &[u8], key: &[u8; 32]) -> Result<String> {
+    if private_key_der.is_empty() {
+        return Ok(String::new());
+    }
+
+    let payload = format!(
+        "{LP_PKEY_PREFIX}{}{LP_PKEY_SUFFIX}",
+        hex::encode(private_key_der)
+    );
+    let encrypted = aes_encrypt_lastpass(payload.as_bytes(), key)?;
+    Ok(base64_lastpass_encode(&encrypted))
+}
+
 pub fn rsa_decrypt_oaep(private_key_der: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
     let private_key = RsaPrivateKey::from_pkcs1_der(private_key_der)
         .or_else(|_| RsaPrivateKey::from_pkcs8_der(private_key_der))
@@ -173,6 +186,19 @@ pub fn rsa_decrypt_oaep(private_key_der: &[u8], ciphertext: &[u8]) -> Result<Vec
     private_key
         .decrypt(Oaep::new::<Sha1>(), ciphertext)
         .map_err(|_| LpassError::Crypto("RSA decrypt failed"))
+}
+
+pub fn rsa_encrypt_oaep(public_key_der: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
+    let public_key = RsaPublicKey::from_pkcs1_der(public_key_der)
+        .or_else(|_| RsaPublicKey::from_public_key_der(public_key_der))
+        .map_err(|_| LpassError::Crypto("invalid rsa public key"))?;
+    public_key
+        .encrypt(&mut OsRng, Oaep::new::<Sha1>(), plaintext)
+        .map_err(|_| LpassError::Crypto("RSA encrypt failed"))
+}
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 pub fn base64_lastpass_encode(bytes: &[u8]) -> String {
@@ -317,8 +343,31 @@ mod tests {
     }
 
     #[test]
+    fn encrypt_private_key_roundtrip() {
+        let key = [15u8; 32];
+        let private_key = vec![0x30, 0x82, 0x01, 0x0a, 0xde, 0xad, 0xbe, 0xef];
+        let encrypted = encrypt_private_key(&private_key, &key).expect("encrypt");
+        let decrypted = decrypt_private_key(&encrypted, &key).expect("decrypt");
+        assert_eq!(decrypted, private_key);
+    }
+
+    #[test]
     fn rsa_decrypt_oaep_rejects_invalid_private_key() {
         let err = rsa_decrypt_oaep(b"not-a-key", b"ciphertext").expect_err("must fail");
         assert!(matches!(err, LpassError::Crypto("invalid rsa private key")));
+    }
+
+    #[test]
+    fn rsa_encrypt_oaep_rejects_invalid_public_key() {
+        let err = rsa_encrypt_oaep(b"not-a-key", b"ciphertext").expect_err("must fail");
+        assert!(matches!(err, LpassError::Crypto("invalid rsa public key")));
+    }
+
+    #[test]
+    fn sha256_hex_matches_reference() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

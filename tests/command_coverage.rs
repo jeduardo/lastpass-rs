@@ -87,6 +87,19 @@ fn write_askpass_value(home: &Path, value: &str) -> PathBuf {
     askpass
 }
 
+#[cfg(unix)]
+fn write_passwd_askpass(home: &Path, new_value: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let askpass = home.join("askpass-passwd.sh");
+    let script = format!(
+        "#!/bin/sh\ncount_file=\"$(dirname \"$0\")/.askpass-passwd-count\"\ncount=0\nif [ -f \"$count_file\" ]; then\n  count=$(cat \"$count_file\")\nfi\ncount=$((count + 1))\necho \"$count\" > \"$count_file\"\nif [ \"$count\" -eq 1 ]; then\n  echo 123456\nelse\n  echo {new_value}\nfi\n"
+    );
+    fs::write(&askpass, script).expect("write askpass");
+    fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
+    askpass
+}
+
 #[test]
 fn add_edit_duplicate_generate_and_export_flow() {
     let home = unique_test_home();
@@ -500,6 +513,64 @@ fn login_status_and_logout_cycle() {
 
     let status_after = run(&home, &["status", "--quiet"], None);
     assert_eq!(status_after.status.code().unwrap_or(-1), 1);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn passwd_logs_out_after_successful_change() {
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let login_askpass = write_askpass(&home);
+    let login = Command::new(exe)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_HOME", &home)
+        .env("LPASS_ASKPASS", &login_askpass)
+        .args(["login", "--plaintext-key", "--force", "user@example.com"])
+        .output()
+        .expect("run login");
+    assert_eq!(
+        login.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+
+    let passwd_askpass = write_passwd_askpass(&home, "abcdefgh");
+    let passwd = Command::new(exe)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_HOME", &home)
+        .env("LPASS_ASKPASS", &passwd_askpass)
+        .arg("passwd")
+        .output()
+        .expect("run passwd");
+    assert_eq!(
+        passwd.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&passwd.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&passwd.stdout).contains("Password changed and logged out."),
+        "stdout: {}",
+        String::from_utf8_lossy(&passwd.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&passwd.stderr).contains("Re-encrypting"),
+        "stderr: {}",
+        String::from_utf8_lossy(&passwd.stderr)
+    );
+
+    let status = Command::new(exe)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_HOME", &home)
+        .args(["status", "--quiet"])
+        .output()
+        .expect("run status");
+    assert_eq!(status.status.code().unwrap_or(-1), 1);
 
     let _ = fs::remove_dir_all(&home);
 }
