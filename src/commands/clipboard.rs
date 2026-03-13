@@ -117,7 +117,8 @@ mod tests {
     fn run_shell_clipboard_command_maps_nonzero_status_after_successful_write() {
         let _guard = crate::lpenv::begin_test_overrides();
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
-        let err = run_shell_clipboard_command("cat >/dev/null; exit 1", b"v").expect_err("must fail");
+        let err =
+            run_shell_clipboard_command("cat >/dev/null; exit 1", b"v").expect_err("must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::Other);
     }
 
