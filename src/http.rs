@@ -9,9 +9,9 @@ use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, USER_AGENT};
 
-use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
+use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, encrypt_private_key};
 use crate::error::{LpassError, Result};
-use crate::kdf::kdf_login_key;
+use crate::kdf::{kdf_decryption_key, kdf_login_key};
 use crate::session::Session;
 
 pub const LASTPASS_SERVER: &str = "lastpass.com";
@@ -20,6 +20,9 @@ const MOCK_ATTACH_KEY_HEX: &str =
 const MOCK_ATTACH_STORAGE_KEY_TEXT: &str = "mock-storage-0001-text";
 const MOCK_ATTACH_STORAGE_KEY_BIN: &str = "mock-storage-0001-bin";
 const MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON: &str = "mock-storage-0001-empty-json";
+const MOCK_PRIVATE_KEY_HEX: &str = "30820276020100300d06092a864886f70d0101010500048202603082025c02010002818100a1a227a8887870284bd831eb4a16dbba04c1092ce93e821b1523dcac45c84e34ea07139bee3a21b703fe78a3765995944c6646f4820341486a0f1c4472050110099b28b410d89d9fe2ebc2af752e95efdbaa9393a70dd09024719ea4fbb98c4498f7feced228a29462239f955ae0d028bb0cc5a641bdedc66f67fd2b5b4514d5020301000102818100920fadd4df962e8c4b958feeb6e217276f5a5d874733647142d64879290a4c9a068de48b7968f0c4a908514e2e09e060c5f57ad34395db6dabe201c25c62e7447dd91d051e1c614eaae5e51c90c6dc155665b91adc40c9b00dbcbcf7c3b86076274b7c0f411df082369e46788062afd6f6838be1eb0e92835d07ce9b3c80da55024100d49e0f79d17befdf79005e7f80a1cfe9b6c0875a1e157e1c0b8aac538e6bd387854718c0d1b5a75a1d73606be981ec4e7652c973dbfd3f650223b6787126fdb3024100c29cf9f94b7d3d48eaec0d7c6d7b91ec1c745ec6ae49f6d18550a1d63ef3864849eb8f4aac735f3c546514724c1e071d2b237927646c69bef2fffd14694b2f5702402a17385d17597fbd2fc920ec00dd07b9eed1e279b6a6ee9642baab2ec76d152d28f750312bd2d85480ac0c94905f86166a5a2d4360739c0f350338e6531032fd02400f081ceeba7bf3eddbe75bab4eb18ab5d804cd053f950af16800b05f6201614fd815cfbd8ed0627cc070064245cad3f5d6cd28a0784b3f67b6513b750624fe85024004ddedf0e84ddafcc86999697526fb0cad99928334f656f38ac14854db2551be0a683984f85dde12e1a5be921d1d86f5f53210a0c0f8e9de8495a10fee4d4fd3";
+const MOCK_PWCHANGE_REENCRYPT_ID: &str = "mock-reencrypt-id";
+const MOCK_PWCHANGE_TOKEN: &str = "mock-pwchange-token";
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -123,13 +126,7 @@ fn post_real(
         .or(server)
         .unwrap_or(LASTPASS_SERVER);
     let url = format!("https://{server}/{page}");
-
-    let mut request = client.post(url).header(USER_AGENT, user_agent());
-    if let Some(session) = session
-        && !session.session_id.is_empty()
-    {
-        request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
-    }
+    let request = add_session_cookie(client.post(url).header(USER_AGENT, user_agent()), session);
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {
         context: "http post",
@@ -157,13 +154,7 @@ fn post_real_bytes(
         .or(server)
         .unwrap_or(LASTPASS_SERVER);
     let url = format!("https://{server}/{page}");
-
-    let mut request = client.post(url).header(USER_AGENT, user_agent());
-    if let Some(session) = session
-        && !session.session_id.is_empty()
-    {
-        request = request.header(COOKIE, format!("PHPSESSID={}", session.session_id));
-    }
+    let request = add_session_cookie(client.post(url).header(USER_AGENT, user_agent()), session);
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {
         context: "http post",
@@ -186,6 +177,18 @@ fn user_agent() -> String {
     format!("LastPass-CLI/{}", crate::version::generated_version())
 }
 
+fn add_session_cookie(
+    request: reqwest::blocking::RequestBuilder,
+    session: Option<&Session>,
+) -> reqwest::blocking::RequestBuilder {
+    match session
+        .and_then(|session| (!session.session_id.is_empty()).then_some(session.session_id.as_str()))
+    {
+        Some(session_id) => request.header(COOKIE, format!("PHPSESSID={session_id}")),
+        None => request,
+    }
+}
+
 fn map_build_client_error(_: reqwest::Error) -> LpassError {
     LpassError::Crypto("failed to build http client")
 }
@@ -193,8 +196,10 @@ fn map_build_client_error(_: reqwest::Error) -> LpassError {
 struct MockTransport {
     username: String,
     login_hash: String,
+    decryption_key: [u8; 32],
     iterations: u32,
     uid: String,
+    private_key_enc: String,
     #[cfg(test)]
     overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
@@ -217,12 +222,19 @@ impl MockTransport {
         let password = "123456";
         let iterations = 1000;
         let login_hash = mock_login_hash(&username, password, iterations);
+        let decryption_key = kdf_decryption_key(&username, password, iterations)
+            .expect("fixed mock credentials should derive a decryption key");
         let uid = "57747756".to_string();
+        let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("valid mock private key");
+        let private_key_enc = encrypt_private_key(&private_key, &decryption_key)
+            .expect("fixed mock private key should encrypt");
         Self {
             username,
             login_hash,
+            decryption_key,
             iterations,
             uid,
+            private_key_enc,
             #[cfg(test)]
             overrides: std::sync::Mutex::new(HashMap::new()),
         }
@@ -269,8 +281,8 @@ impl MockTransport {
                 let hash = map.get("hash").cloned().unwrap_or_default();
                 if username == self.username && hash == self.login_hash {
                     format!(
-                        "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\"/></response>",
-                        self.uid
+                        "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\" privatekeyenc=\"{}\"/></response>",
+                        self.uid, self.private_key_enc
                     )
                 } else {
                     "<response><error message=\"invalid password\"/></response>".to_string()
@@ -283,13 +295,12 @@ impl MockTransport {
             "getaccts.php" => String::new(),
             "show_website.php" => String::new(),
             "loglogin.php" => String::new(),
-            "lastpass/api.php" => {
-                if map.get("cmd").map(String::as_str) == Some("uploadaccounts") {
-                    "<lastpass rc=\"OK\"><ok/></lastpass>".to_string()
-                } else {
-                    "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
-                }
-            }
+            "lastpass/api.php" => match map.get("cmd").map(String::as_str) {
+                Some("uploadaccounts") => "<lastpass rc=\"OK\"><ok/></lastpass>".to_string(),
+                Some("getacctschangepw") => self.respond_pwchange_start(&map),
+                Some("updatepassword") => self.respond_pwchange_complete(&map),
+                _ => "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string(),
+            },
             "getattach.php" => {
                 let Some(storage_key) = map.get("getattach") else {
                     return HttpResponse {
@@ -320,6 +331,60 @@ impl MockTransport {
             body: response.body.into_bytes(),
         }
     }
+
+    fn respond_pwchange_start(&self, map: &HashMap<String, String>) -> String {
+        let username = map.get("username").cloned().unwrap_or_default();
+        let hash = map.get("hash").cloned().unwrap_or_default();
+        if username != self.username || hash != self.login_hash {
+            return "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string();
+        }
+
+        let required = mock_pwchange_ciphertext(&self.decryption_key, b"required-field");
+        let optional = mock_pwchange_ciphertext(&self.decryption_key, b"optional-field");
+        let payload = format!(
+            "{MOCK_PWCHANGE_REENCRYPT_ID}\n{}\n{}\n{}\t0\nendmarker\n",
+            self.private_key_enc, required, optional
+        );
+
+        format!(
+            "<lastpass rc=\"OK\"><data token=\"{MOCK_PWCHANGE_TOKEN}\" xml=\"{}\"/></lastpass>",
+            escape_xml_attr(&payload)
+        )
+    }
+
+    fn respond_pwchange_complete(&self, map: &HashMap<String, String>) -> String {
+        let required = [
+            ("pwupdate", "1"),
+            ("email", self.username.as_str()),
+            ("token", MOCK_PWCHANGE_TOKEN),
+        ];
+        let has_required = required
+            .iter()
+            .all(|(key, value)| map.get(*key).map(String::as_str) == Some(*value));
+        let has_payload = map
+            .get("reencrypt")
+            .map(String::as_str)
+            .is_some_and(|value| value.starts_with(MOCK_PWCHANGE_REENCRYPT_ID));
+        let has_new_fields = [
+            "newprivatekeyenc",
+            "newuserkeyhexhash",
+            "newprivatekeyenchexhash",
+            "newpasswordhash",
+            "encrypted_username",
+            "origusername",
+            "wxhash",
+            "key_iterations",
+            "sukeycnt",
+        ]
+        .iter()
+        .all(|key| map.contains_key(*key));
+
+        if has_required && has_payload && has_new_fields {
+            "pwchangeok".to_string()
+        } else {
+            "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
+        }
+    }
 }
 
 fn mock_login_hash(username: &str, password: &str, iterations: u32) -> String {
@@ -347,416 +412,28 @@ fn mock_attachment_ciphertext(bytes: &[u8]) -> String {
     serde_json::to_string(&base64_lastpass_encode(&encrypted)).unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::{Arc, Once};
-    use std::thread;
-
-    use rcgen::generate_simple_self_signed;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-    use rustls::{ServerConfig, ServerConnection, StreamOwned};
-
-    fn install_crypto_provider() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
-    }
-
-    fn insecure_client() -> Client {
-        Client::builder()
-            .danger_accept_invalid_certs(true)
-            .user_agent(user_agent())
-            .build()
-            .expect("client")
-    }
-
-    fn spawn_https_server(response: Vec<u8>) -> (String, thread::JoinHandle<()>) {
-        install_crypto_provider();
-
-        let cert =
-            generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
-                .expect("generate cert");
-        let cert_der = CertificateDer::from(cert.cert.der().to_vec());
-        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()));
-        let config = Arc::new(
-            ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(vec![cert_der], key_der)
-                .expect("server config"),
-        );
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-        let handle = thread::spawn(move || {
-            let (tcp, _) = listener.accept().expect("accept");
-            let conn = ServerConnection::new(config).expect("server connection");
-            let mut tls = StreamOwned::new(conn, tcp);
-            let mut buf = [0u8; 4096];
-            let _ = tls.read(&mut buf);
-            tls.write_all(&response).expect("write response");
-            tls.flush().expect("flush response");
-        });
-        (format!("127.0.0.1:{}", addr.port()), handle)
-    }
-
-    #[test]
-    fn mock_iterations() {
-        let client = HttpClient::mock();
-        let response = client
-            .post_lastpass(
-                None,
-                "iterations.php",
-                None,
-                &[("email", "user@example.com")],
-            )
-            .expect("response");
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body.trim(), "1000");
-    }
-
-    #[test]
-    fn mock_login_success() {
-        let client = HttpClient::mock();
-        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
-        let response = client
-            .post_lastpass(
-                None,
-                "login.php",
-                None,
-                &[("username", "user@example.com"), ("hash", &hash)],
-            )
-            .expect("response");
-        assert!(response.body.contains("<ok"));
-    }
-
-    #[test]
-    fn mock_login_failure() {
-        let client = HttpClient::mock();
-        let response = client
-            .post_lastpass(
-                None,
-                "login.php",
-                None,
-                &[("username", "user@example.com"), ("hash", "bad")],
-            )
-            .expect("response");
-        assert!(response.body.contains("invalid password"));
-    }
-
-    #[test]
-    fn mock_login_check_and_unknown_page_responses() {
-        let client = HttpClient::mock();
-        let ok = client
-            .post_lastpass(None, "login_check.php", None, &[])
-            .expect("response");
-        assert!(ok.body.contains("accts_version"));
-
-        let unknown = client
-            .post_lastpass(None, "unknown.php", None, &[])
-            .expect("response");
-        assert!(unknown.body.contains("unimplemented"));
-    }
-
-    #[test]
-    fn post_lastpass_bytes_returns_raw_body() {
-        let client = HttpClient::mock();
-        let response = client
-            .post_lastpass_bytes(None, "iterations.php", None, &[("email", "u@example.com")])
-            .expect("response");
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, b"1000".to_vec());
-    }
-
-    #[test]
-    fn mock_show_website_returns_empty_body() {
-        let client = HttpClient::mock();
-        let response = client
-            .post_lastpass(None, "show_website.php", None, &[])
-            .expect("response");
-        assert_eq!(response.status, 200);
-        assert!(response.body.is_empty());
-    }
-
-    #[test]
-    fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
-        let _guard = crate::lpenv::begin_test_overrides();
-        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
-        let response = super::post_lastpass("iterations.php", None, &[("email", "u@example.com")])
-            .expect("response");
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, "1000");
-    }
-
-    #[test]
-    fn mock_getattach_handles_missing_and_unknown_storage_keys() {
-        let client = HttpClient::mock();
-
-        let missing = client
-            .post_lastpass(None, "getattach.php", None, &[])
-            .expect("response");
-        assert_eq!(missing.status, 200);
-        assert!(missing.body.is_empty());
-
-        let unknown = client
-            .post_lastpass(
-                None,
-                "getattach.php",
-                None,
-                &[("getattach", "does-not-exist")],
-            )
-            .expect("response");
-        assert_eq!(unknown.status, 200);
-        assert!(unknown.body.is_empty());
-    }
-
-    #[test]
-    fn mock_getattach_known_keys_return_encrypted_payloads() {
-        let client = HttpClient::mock();
-        let text = client
-            .post_lastpass(
-                None,
-                "getattach.php",
-                None,
-                &[("getattach", MOCK_ATTACH_STORAGE_KEY_TEXT)],
-            )
-            .expect("response");
-        assert!(!text.body.is_empty());
-
-        let bin = client
-            .post_lastpass(
-                None,
-                "getattach.php",
-                None,
-                &[("getattach", MOCK_ATTACH_STORAGE_KEY_BIN)],
-            )
-            .expect("response");
-        assert!(!bin.body.is_empty());
-
-        let empty_json = client
-            .post_lastpass(
-                None,
-                "getattach.php",
-                None,
-                &[("getattach", MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON)],
-            )
-            .expect("response");
-        assert_eq!(empty_json.body, "\"\"");
-    }
-
-    #[test]
-    fn params_to_map_keeps_all_pairs() {
-        let map = params_to_map(&[("a", "1"), ("b", "2")]);
-        assert_eq!(map.get("a").map(String::as_str), Some("1"));
-        assert_eq!(map.get("b").map(String::as_str), Some("2"));
-    }
-
-    #[test]
-    fn user_agent_contains_crate_version() {
-        let ua = user_agent();
-        assert!(ua.starts_with("LastPass-CLI/"));
-        assert!(ua.contains(crate::version::generated_version()));
-    }
-
-    #[test]
-    fn map_build_client_error_returns_crypto_error() {
-        let err = Client::builder()
-            .user_agent("\n")
-            .build()
-            .expect_err("builder must reject invalid user agent");
-        let mapped = map_build_client_error(err);
-        assert!(matches!(
-            mapped,
-            LpassError::Crypto("failed to build http client")
-        ));
-    }
-
-    #[test]
-    fn mock_with_overrides_returns_custom_responses_in_sequence() {
-        let client = HttpClient::mock_with_overrides(&[
-            ("lastpass/api.php", 500, "first"),
-            ("lastpass/api.php", 200, "second"),
-        ]);
-
-        let first = client
-            .post_lastpass(None, "lastpass/api.php", None, &[])
-            .expect("first");
-        assert_eq!(first.status, 500);
-        assert_eq!(first.body, "first");
-
-        let second = client
-            .post_lastpass(None, "lastpass/api.php", None, &[])
-            .expect("second");
-        assert_eq!(second.status, 200);
-        assert_eq!(second.body, "second");
-    }
-
-    #[test]
-    fn mock_lastpass_api_returns_fail_without_uploadaccounts_cmd() {
-        let client = HttpClient::mock();
-        let response = client
-            .post_lastpass(None, "lastpass/api.php", None, &[("cmd", "other")])
-            .expect("response");
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, "<lastpass rc=\"FAIL\"><error/></lastpass>");
-    }
-
-    #[test]
-    fn lock_overrides_recovers_from_poisoned_mutex() {
-        let transport = MockTransport::new();
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = transport.overrides.lock().expect("lock");
-            panic!("poison");
-        }));
-
-        {
-            let mut map = lock_overrides(transport.overrides.lock());
-            map.insert(
-                "page".to_string(),
-                VecDeque::from([HttpResponse {
-                    status: 200,
-                    body: "ok".to_string(),
-                }]),
-            );
-        }
-
-        let response = transport
-            .override_response("page")
-            .expect("override response");
-        assert_eq!(response.body, "ok");
-    }
-
-    #[test]
-    fn real_client_can_be_constructed() {
-        let client = HttpClient::real().expect("client");
-        assert!(client.is_real_transport());
-    }
-
-    #[test]
-    fn mock_client_reports_mock_transport() {
-        assert!(!HttpClient::mock().is_real_transport());
-    }
-
-    #[test]
-    fn post_real_returns_io_error_when_request_fails() {
-        let client = Client::builder()
-            .user_agent(user_agent())
-            .build()
-            .expect("client");
-        let err = post_real(
-            &client,
-            Some("127.0.0.1:1"),
-            "login.php",
-            None,
-            &[("k", "v")],
-        )
-        .expect_err("request must fail");
-        assert!(matches!(
-            err,
-            LpassError::Io {
-                context: "http post",
-                ..
-            }
-        ));
-    }
-
-    impl HttpClient {
-        fn is_real_transport(&self) -> bool {
-            match self.transport {
-                Transport::Real(_) => true,
-                Transport::Mock(_) => false,
-            }
-        }
-    }
-
-    #[test]
-    fn post_real_returns_response_body_on_success() {
-        let (server, handle) =
-            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
-        let client = insecure_client();
-
-        let response = post_real(&client, Some(&server), "login.php", None, &[("k", "v")])
-            .expect("request should succeed");
-        handle.join().expect("join server");
-
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, "ok");
-    }
-
-    #[test]
-    fn post_real_reports_read_errors_after_successful_send() {
-        let (server, handle) =
-            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort".to_vec());
-        let client = insecure_client();
-
-        let err = post_real(&client, Some(&server), "login.php", None, &[("k", "v")])
-            .expect_err("body read should fail");
-        handle.join().expect("join server");
-
-        assert!(matches!(
-            err,
-            LpassError::Io {
-                context: "http read",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn post_real_bytes_returns_io_error_when_request_fails() {
-        let client = Client::builder()
-            .user_agent(user_agent())
-            .build()
-            .expect("client");
-        let err = post_real_bytes(
-            &client,
-            Some("127.0.0.1:1"),
-            "login.php",
-            None,
-            &[("k", "v")],
-        )
-        .expect_err("request must fail");
-        assert!(matches!(
-            err,
-            LpassError::Io {
-                context: "http post",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn post_real_bytes_returns_response_body_on_success() {
-        let (server, handle) =
-            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n\x00\x01ok".to_vec());
-        let client = insecure_client();
-
-        let response = post_real_bytes(&client, Some(&server), "login.php", None, &[("k", "v")])
-            .expect("request should succeed");
-        handle.join().expect("join server");
-
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, b"\x00\x01ok".to_vec());
-    }
-
-    #[test]
-    fn post_real_bytes_reports_read_errors_after_successful_send() {
-        let (server, handle) =
-            spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort".to_vec());
-        let client = insecure_client();
-
-        let err = post_real_bytes(&client, Some(&server), "login.php", None, &[("k", "v")])
-            .expect_err("body read should fail");
-        handle.join().expect("join server");
-
-        assert!(matches!(
-            err,
-            LpassError::Io {
-                context: "http read",
-                ..
-            }
-        ));
-    }
+fn mock_pwchange_ciphertext(key: &[u8; 32], bytes: &[u8]) -> String {
+    let encrypted = aes_encrypt_lastpass(bytes, key).unwrap_or_default();
+    base64_lastpass_encode(&encrypted)
 }
+
+fn escape_xml_attr(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\n' => escaped.push_str("&#10;"),
+            '\r' => escaped.push_str("&#13;"),
+            '\t' => escaped.push_str("&#9;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[cfg(test)]
+#[path = "http_tests.rs"]
+mod tests;

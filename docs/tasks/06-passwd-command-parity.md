@@ -1,6 +1,6 @@
 # Task 06: Implement `passwd` Command
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Implement `passwd` in Rust with behavior equivalent to C, including re-encryption progress, server interaction, and forced logout.
@@ -32,3 +32,16 @@ Acceptance criteria:
 - `lpass passwd` is no longer stubbed.
 - Behavior and output structure match C for major paths.
 - Unit/integration tests cover prompt and API error paths.
+
+Implementation notes:
+- Added full `passwd` command flow in `src/commands/passwd.rs`.
+- Added pwchange XML parsing in `src/xml.rs`.
+- Added private-key/RSA/hash helpers needed for master-password rotation in `src/crypto.rs`.
+- Extended the mock HTTP transport to cover `getacctschangepw` and `updatepassword`.
+- Added Rust integration coverage for `passwd`.
+
+Verification:
+- `cargo test --locked --all-targets`
+- `cargo llvm-cov --workspace --all-targets --json --output-path coverage/full.json --ignore-filename-regex 'src/bin/test-upstream.rs$'`
+- `./scripts/run-upstream-shell-tests.sh`
+- `act -j test --container-architecture linux/arm64`
