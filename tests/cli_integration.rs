@@ -1,6 +1,9 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
 use lpass_core::blob::{Account, Blob, Share};
 use lpass_core::config::{ConfigEnv, ConfigStore};
@@ -130,6 +133,42 @@ fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
         .expect("blob write");
 }
 
+fn write_session(home: &Path, key: &[u8; KDF_HASH_LEN], session: &Session) {
+    let store = store_for(home);
+    write_key_and_verify(home, key);
+    store.write_string("username", "tester").expect("username");
+    session_save_with_store(&store, session, key).expect("session save");
+}
+
+fn write_queue_request(home: &Path, key: &[u8; KDF_HASH_LEN], name: &str, page: &str) {
+    let store = store_for(home);
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "page": page,
+        "params": [["id", "100"], ["method", "cli"]],
+    }))
+    .expect("queue json");
+    store
+        .write_encrypted_buffer(&format!("upload-queue/{name}"), &payload, key)
+        .expect("queue write");
+}
+
+fn queued_entry_count(home: &Path) -> usize {
+    let dir = home.join("upload-queue");
+    match fs::read_dir(dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit())
+            })
+            .count(),
+        Err(_) => 0,
+    }
+}
+
 #[test]
 fn status_with_plaintext_key_reports_logged_in() {
     let (temp, home) = unique_test_home();
@@ -145,6 +184,98 @@ fn status_with_plaintext_key_reports_logged_in() {
     assert_eq!(output.status.code().unwrap_or(-1), 0);
 
     let _ = temp;
+}
+
+#[test]
+fn hidden_uploader_requires_key_stdin() {
+    let (_temp, home) = unique_test_home();
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .arg("__upload-queue")
+        .output()
+        .expect("run hidden uploader");
+    assert_eq!(output.status.code().unwrap_or(-1), 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("read uploader key"));
+}
+
+#[test]
+fn hidden_uploader_processes_queue_entries() {
+    let (_temp, home) = unique_test_home();
+    let key = [9u8; KDF_HASH_LEN];
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    write_session(&home, &key, &session);
+    write_queue_request(&home, &key, "1000", "loglogin.php");
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let mut child = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .arg("__upload-queue")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn hidden uploader");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(&key)
+        .expect("write key");
+    let output = child.wait_with_output().expect("wait uploader");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    assert_eq!(queued_entry_count(&home), 0);
+}
+
+#[test]
+fn sync_background_starts_uploader_and_drains_queue() {
+    let (_temp, home) = unique_test_home();
+    let key = [8u8; KDF_HASH_LEN];
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    write_session(&home, &key, &session);
+    write_queue_request(&home, &key, "1001", "loglogin.php");
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["sync", "--background"])
+        .output()
+        .expect("run sync background");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+
+    for _ in 0..40 {
+        if queued_entry_count(&home) == 0 && !home.join("uploader.pid").exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    panic!(
+        "background uploader did not drain queue: remaining={}, pid={}",
+        queued_entry_count(&home),
+        home.join("uploader.pid").display()
+    );
 }
 
 #[test]
@@ -374,6 +505,74 @@ fn generate_updates_secure_note_fields() {
 }
 
 #[test]
+fn export_skips_group_rows_in_mock_mode() {
+    let (_temp, home) = unique_test_home();
+    let mut group = account("0001", "Shared", "");
+    group.url = "http://group".to_string();
+    let normal = account("0002", "alpha", "team");
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![group, normal],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["export", "--sync=no", "--fields=name,url"])
+        .output()
+        .expect("run export");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("name,url"));
+    assert!(stdout.contains("alpha,"));
+    assert!(!stdout.contains("Shared,http://group"));
+}
+
+#[test]
+fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
+    let (_temp, home) = unique_test_home();
+    let mut existing = account("0001", "entry", "");
+    existing.url = "https://example.com".to_string();
+    existing.username = "alice".to_string();
+    existing.password = "secret".to_string();
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![existing],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let mut child = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["import", "--sync=no"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn import");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"url,username,password,name\nhttps://example.com,alice,secret,entry\n")
+        .expect("write csv");
+    let output = child.wait_with_output().expect("wait import");
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Parsed 1 accounts"));
+    assert!(stdout.contains("Removed 1 duplicate accounts"));
+}
+
+#[test]
 fn rm_removes_account_with_mock_env() {
     let (temp, home) = unique_test_home();
     let exe = env!("CARGO_BIN_EXE_lpass");
@@ -540,6 +739,90 @@ fn sync_reports_missing_session() {
     assert_eq!(output.status.code().unwrap_or(-1), 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Could not find session"));
+
+    let _ = temp;
+}
+
+#[test]
+fn export_sync_no_queues_access_logs_and_sync_drains_them() {
+    let (temp, home) = unique_test_home();
+    let key = [9u8; KDF_HASH_LEN];
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    write_session(&home, &key, &session);
+
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![Account {
+            id: "100".to_string(),
+            share_name: None,
+            share_id: None,
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "team".to_string(),
+            group_encrypted: None,
+            fullname: "team/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "user".to_string(),
+            username_encrypted: None,
+            password: "secret".to_string(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: "now".to_string(),
+            last_modified_gmt: "now".to_string(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        }],
+        attachments: Vec::new(),
+    };
+    write_mock_blob(&home, &blob);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let export = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["export", "--sync=no", "--fields=name"])
+        .output()
+        .expect("run export");
+    assert_eq!(export.status.code().unwrap_or(-1), 0);
+
+    let queue_dir = home.join("upload-queue");
+    let queued: Vec<_> = fs::read_dir(&queue_dir)
+        .expect("read queue dir")
+        .filter_map(|entry| entry.ok())
+        .collect();
+    assert_eq!(queued.len(), 1);
+
+    let sync = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .arg("sync")
+        .output()
+        .expect("run sync");
+    assert_eq!(sync.status.code().unwrap_or(-1), 0);
+
+    let queued_after: Vec<_> = fs::read_dir(&queue_dir)
+        .expect("read queue dir")
+        .filter_map(|entry| entry.ok())
+        .collect();
+    assert!(queued_after.is_empty());
 
     let _ = temp;
 }

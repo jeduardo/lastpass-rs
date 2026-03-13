@@ -15,6 +15,7 @@ pub mod notes;
 pub mod password;
 pub mod session;
 pub mod terminal;
+pub mod upload_queue;
 pub mod util;
 pub mod version;
 pub mod xml;

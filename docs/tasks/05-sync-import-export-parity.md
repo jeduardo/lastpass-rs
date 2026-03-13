@@ -1,6 +1,6 @@
 # Task 05: `sync`, `import`, `export` Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Align `sync`, `import`, and `export` behavior with C client semantics, including protected-entry flows and queue/server behavior.
@@ -32,3 +32,9 @@ Implementation steps:
 Acceptance criteria:
 - `sync`, `import`, and `export` user-visible behavior is C-compatible for supported paths.
 - Relevant parity tests and integration tests pass.
+
+Completed notes:
+- Reworked `sync` around an encrypted on-disk upload queue plus hidden uploader flow, including C-like `--background/-b` behavior, wait-for-uploader handling, and blob refresh after successful writes.
+- Reworked `import` to use the upstream-style `uploadaccounts` API path outside mock mode, while preserving mock-mode local mutation behavior and matching CSV parsing edge cases.
+- Reworked `export` to match C-style grouping/field output, protected-entry authentication, access logging, and shared-folder formatting.
+- Added unit, CLI, and parity coverage for queue lifecycle, uploader spawning, API upload failures, protected-entry prompts, export formatting, and import/export/sync integration paths.

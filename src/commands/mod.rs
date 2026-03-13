@@ -3,7 +3,7 @@
 mod add;
 mod argparse;
 mod clipboard;
-mod data;
+pub(crate) mod data;
 mod duplicate;
 mod edit;
 mod export;

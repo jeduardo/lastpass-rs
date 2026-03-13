@@ -11,6 +11,7 @@ use crate::error::{LpassError, Result};
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::Session;
+use crate::upload_queue;
 use serde_json;
 use std::time::{Duration, SystemTime};
 
@@ -196,87 +197,46 @@ pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
 }
 
 pub(crate) fn maybe_push_account_update(account: &Account, sync_mode: SyncMode) -> Result<()> {
-    if matches!(sync_mode, SyncMode::No) {
+    let Some((key, session)) = load_queue_credentials()? else {
         return Ok(());
-    }
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
-        return Ok(());
-    }
-
-    let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
-    let session = crate::session::session_load(&key)
-        .map_err(map_decryption_key_error)?
-        .ok_or(LpassError::User(
-            "Could not find session. Perhaps you need to login with `lpass login`.",
-        ))?;
-    let client = HttpClient::from_env()?;
-
-    push_account_update_with_client(&client, &session, &key, account, sync_mode)
-}
-
-fn push_account_update_with_client(
-    client: &HttpClient,
-    session: &Session,
-    key: &[u8; KDF_HASH_LEN],
-    account: &Account,
-    sync_mode: SyncMode,
-) -> Result<()> {
-    let params = build_show_website_params(account, session, key)?;
-    let params_ref: Vec<(&str, &str)> = params
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let response = client.post_lastpass(None, "show_website.php", Some(session), &params_ref)?;
-    ensure_success_status(response.status)?;
-
-    if matches!(sync_mode, SyncMode::Now) {
-        refresh_blob_from_server(client, session, key)?;
-    } else if should_refresh_after_update(sync_mode, &account.id) {
-        let _ = refresh_blob_from_server(client, session, key);
-    }
-
-    Ok(())
+    };
+    let params = build_show_website_params(account, &session, &key)?;
+    upload_queue::enqueue(
+        &key,
+        "show_website.php",
+        params,
+        !matches!(sync_mode, SyncMode::No),
+    )
 }
 
 pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) -> Result<()> {
-    if matches!(sync_mode, SyncMode::No) {
+    let Some((key, session)) = load_queue_credentials()? else {
         return Ok(());
-    }
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
-        return Ok(());
-    }
-
-    let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
-    let session = crate::session::session_load(&key)
-        .map_err(map_decryption_key_error)?
-        .ok_or(LpassError::User(
-            "Could not find session. Perhaps you need to login with `lpass login`.",
-        ))?;
-    let client = HttpClient::from_env()?;
-
-    push_account_remove_with_client(&client, &session, &key, account, sync_mode)
+    };
+    let params = build_show_website_delete_params(account, &session);
+    upload_queue::enqueue(
+        &key,
+        "show_website.php",
+        params,
+        !matches!(sync_mode, SyncMode::No),
+    )
 }
 
-fn push_account_remove_with_client(
-    client: &HttpClient,
-    session: &Session,
-    key: &[u8; KDF_HASH_LEN],
-    account: &Account,
-    sync_mode: SyncMode,
-) -> Result<()> {
-    let params = build_show_website_delete_params(account, session);
-    let params_ref: Vec<(&str, &str)> = params
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let response = client.post_lastpass(None, "show_website.php", Some(session), &params_ref)?;
-    ensure_success_status(response.status)?;
-
-    if matches!(sync_mode, SyncMode::Now) {
-        refresh_blob_from_server(client, session, key)?;
+pub(crate) fn maybe_log_access(account: &Account, sync_mode: SyncMode) -> Result<()> {
+    if account.id == "0" {
+        return Ok(());
     }
 
-    Ok(())
+    let Some((key, session)) = load_queue_credentials()? else {
+        return Ok(());
+    };
+    let params = build_log_access_params(account, &session);
+    upload_queue::enqueue(
+        &key,
+        "loglogin.php",
+        params,
+        !matches!(sync_mode, SyncMode::No),
+    )
 }
 
 fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec<(String, String)> {
@@ -295,6 +255,37 @@ fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec
     params
 }
 
+fn build_log_access_params(account: &Account, session: &Session) -> Vec<(String, String)> {
+    let mut params = vec![
+        ("id".to_string(), account.id.clone()),
+        ("method".to_string(), "cli".to_string()),
+    ];
+
+    if let Some(share_id) = &account.share_id {
+        params.push(("sharedfolderid".to_string(), share_id.clone()));
+    }
+    if session.url_logging_enabled {
+        params.push(("recordUrl".to_string(), hex::encode(account.url.as_bytes())));
+    }
+
+    params
+}
+
+fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
+    let key = match agent_get_decryption_key().map_err(map_decryption_key_error) {
+        Ok(key) => key,
+        Err(_) if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") => return Ok(None),
+        Err(err) => return Err(err),
+    };
+
+    let session = crate::session::session_load(&key)
+        .map_err(map_decryption_key_error)?
+        .ok_or(LpassError::User(
+            "Could not find session. Perhaps you need to login with `lpass login`.",
+        ))?;
+    Ok(Some((key, session)))
+}
+
 fn map_decryption_key_error(err: LpassError) -> LpassError {
     match err {
         LpassError::Crypto("missing iterations")
@@ -306,7 +297,7 @@ fn map_decryption_key_error(err: LpassError) -> LpassError {
     }
 }
 
-fn refresh_blob_from_server(
+pub(crate) fn refresh_blob_from_server(
     client: &HttpClient,
     session: &crate::session::Session,
     key: &[u8; KDF_HASH_LEN],
@@ -325,7 +316,7 @@ fn refresh_blob_from_server(
     Ok(())
 }
 
-fn build_show_website_params(
+pub(crate) fn build_show_website_params(
     account: &Account,
     session: &Session,
     key: &[u8; KDF_HASH_LEN],
@@ -389,19 +380,7 @@ fn is_secure_note(account: &Account) -> bool {
     account.url == "http://sn"
 }
 
-fn should_refresh_after_update(sync_mode: SyncMode, account_id: &str) -> bool {
-    matches!(sync_mode, SyncMode::Auto) && account_id == "0"
-}
-
-fn ensure_success_status(status: u16) -> Result<()> {
-    if status >= 400 {
-        Err(LpassError::User("Server rejected account update."))
-    } else {
-        Ok(())
-    }
-}
-
-fn encrypt_and_encode(value: &str, key: &[u8; KDF_HASH_LEN]) -> Result<String> {
+pub(crate) fn encrypt_and_encode(value: &str, key: &[u8; KDF_HASH_LEN]) -> Result<String> {
     let encrypted = aes_encrypt_lastpass(value.as_bytes(), key)?;
     Ok(base64_lastpass_encode(&encrypted))
 }
@@ -624,6 +603,15 @@ mod tests {
     use filetime::{FileTime, set_file_mtime};
     use tempfile::TempDir;
 
+    fn minimal_blob_bytes(version: u32) -> Vec<u8> {
+        let version = version.to_string();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"LPAV");
+        bytes.extend_from_slice(&(version.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(version.as_bytes());
+        bytes
+    }
+
     #[test]
     fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
         let mapped = map_decryption_key_error(LpassError::Crypto("missing iterations"));
@@ -657,6 +645,8 @@ mod tests {
                 .iter()
                 .any(|account| account.pwprotect && account.name == "test-reprompt-account")
         );
+        let root = mock_account("9999", "root-entry", "", "", "", "", "", false);
+        assert_eq!(root.fullname, "root-entry");
     }
 
     #[test]
@@ -857,6 +847,65 @@ mod tests {
     }
 
     #[test]
+    fn build_show_website_params_secure_note_uses_hex_url_and_field_payload() {
+        let account = Account {
+            id: String::new(),
+            share_name: None,
+            share_id: None,
+            share_readonly: false,
+            name: "note".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "note".to_string(),
+            url: "http://sn".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: "extra".to_string(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: true,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: vec![crate::blob::Field {
+                name: "otp".to_string(),
+                field_type: "text".to_string(),
+                value: "123456".to_string(),
+                value_encrypted: None,
+                checked: false,
+            }],
+        };
+        let key = [6u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: true,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+
+        let params = build_show_website_params(&account, &session, &key).expect("params");
+        assert!(params.iter().any(|(k, v)| k == "aid" && v == "0"));
+        assert!(params.iter().any(|(k, v)| k == "pwprotect" && v == "on"));
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| k == "url" && v == "687474703a2f2f736e")
+        );
+        assert!(params.iter().any(|(k, v)| k == "save_all" && v == "1"));
+        assert!(params.iter().any(|(k, _)| k == "data"));
+    }
+
+    #[test]
     fn upload_field_value_uses_checkbox_suffix_and_encrypted_preference() {
         let key = [1u8; KDF_HASH_LEN];
         let checkbox = crate::blob::Field {
@@ -885,11 +934,83 @@ mod tests {
     }
 
     #[test]
-    fn should_refresh_after_update_only_for_auto_new_accounts() {
-        assert!(should_refresh_after_update(SyncMode::Auto, "0"));
-        assert!(!should_refresh_after_update(SyncMode::Auto, "1234"));
-        assert!(!should_refresh_after_update(SyncMode::Now, "0"));
-        assert!(!should_refresh_after_update(SyncMode::No, "0"));
+    fn upload_field_value_returns_plain_value_for_unknown_types() {
+        let key = [2u8; KDF_HASH_LEN];
+        let field = crate::blob::Field {
+            name: "select".to_string(),
+            field_type: "select".to_string(),
+            value: "plain".to_string(),
+            value_encrypted: None,
+            checked: false,
+        };
+        assert_eq!(
+            upload_field_value(&field, &key).expect("plain field"),
+            "plain"
+        );
+    }
+
+    #[test]
+    fn build_log_access_params_includes_share_and_record_url() {
+        let mut account = Account {
+            id: "42".to_string(),
+            share_name: None,
+            share_id: Some("77".to_string()),
+            share_readonly: false,
+            name: String::new(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: String::new(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: true,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+
+        let params = build_log_access_params(&account, &session);
+        assert!(
+            params
+                .iter()
+                .any(|(key, value)| key == "id" && value == "42")
+        );
+        assert!(
+            params
+                .iter()
+                .any(|(key, value)| key == "method" && value == "cli")
+        );
+        assert!(
+            params
+                .iter()
+                .any(|(key, value)| key == "sharedfolderid" && value == "77")
+        );
+        assert!(params.iter().any(|(key, value)| {
+            key == "recordUrl" && value == "68747470733a2f2f6578616d706c652e636f6d"
+        }));
+
+        account.id = "0".to_string();
+        assert_eq!(build_log_access_params(&account, &session)[0].1, "0");
     }
 
     #[test]
@@ -927,11 +1048,14 @@ mod tests {
     }
 
     #[test]
-    fn ensure_success_status_checks_error_boundary() {
-        assert!(ensure_success_status(200).is_ok());
-        assert!(ensure_success_status(399).is_ok());
-        let err = ensure_success_status(400).expect_err("must fail");
-        assert!(format!("{err}").contains("Server rejected account update."));
+    fn load_queue_credentials_returns_none_in_mock_mode_without_session() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        assert!(
+            load_queue_credentials()
+                .expect("load queue credentials")
+                .is_none()
+        );
     }
 
     #[test]
@@ -994,8 +1118,32 @@ mod tests {
     }
 
     #[test]
-    fn push_account_update_with_client_handles_sync_modes() {
+    fn maybe_push_account_update_enqueues_request_when_session_exists() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
         let key = [5u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
+
         let account = Account {
             id: "0".to_string(),
             share_name: None,
@@ -1023,28 +1171,54 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
-        let session = Session {
-            uid: "u".to_string(),
-            session_id: "s".to_string(),
-            token: "tok".to_string(),
-            url_encryption_enabled: false,
-            url_logging_enabled: false,
-            server: None,
-            private_key: None,
-            private_key_enc: None,
-        };
-        let client = HttpClient::mock();
 
-        push_account_update_with_client(&client, &session, &key, &account, SyncMode::Auto)
-            .expect("auto should ignore refresh failure");
-        let err = push_account_update_with_client(&client, &session, &key, &account, SyncMode::Now)
-            .expect_err("now should fail because mock getaccts body is empty");
-        assert!(format!("{err}").contains("Unable to fetch blob"));
+        maybe_push_account_update(&account, SyncMode::No).expect("queue update");
+
+        let queue_dir = config_path("upload-queue/.marker")
+            .expect("queue marker")
+            .parent()
+            .expect("queue dir")
+            .to_path_buf();
+        let name = std::fs::read_dir(queue_dir)
+            .expect("read queue")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .find(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
+            .expect("queued file");
+        let queued = config_read_encrypted_buffer(&format!("upload-queue/{name}"), &key)
+            .expect("read queue entry")
+            .expect("queue data");
+        let text = String::from_utf8(queued).expect("queue utf8");
+        assert!(text.contains("show_website.php"));
     }
 
     #[test]
-    fn push_account_remove_with_client_handles_sync_modes() {
+    fn maybe_push_account_remove_enqueues_request_when_session_exists() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
         let key = [7u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: true,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
+
         let account = Account {
             id: "42".to_string(),
             share_name: None,
@@ -1072,23 +1246,100 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
-        let session = Session {
-            uid: "u".to_string(),
-            session_id: "s".to_string(),
-            token: "tok".to_string(),
-            url_encryption_enabled: false,
-            url_logging_enabled: true,
-            server: None,
-            private_key: None,
-            private_key_enc: None,
-        };
-        let client = HttpClient::mock();
 
-        push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Auto)
-            .expect("auto delete");
-        let err = push_account_remove_with_client(&client, &session, &key, &account, SyncMode::Now)
-            .expect_err("now should fail because mock getaccts body is empty");
-        assert!(format!("{err}").contains("Unable to fetch blob"));
+        maybe_push_account_remove(&account, SyncMode::No).expect("queue remove");
+
+        let queue_dir = config_path("upload-queue/.marker")
+            .expect("queue marker")
+            .parent()
+            .expect("queue dir")
+            .to_path_buf();
+        let name = std::fs::read_dir(queue_dir)
+            .expect("read queue")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .find(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
+            .expect("queued file");
+        let queued = config_read_encrypted_buffer(&format!("upload-queue/{name}"), &key)
+            .expect("read queue entry")
+            .expect("queue data");
+        let text = String::from_utf8(queued).expect("queue utf8");
+        assert!(text.contains("\"delete\":\"1\"") || text.contains("\"delete\",\"1\""));
+    }
+
+    #[test]
+    fn maybe_log_access_enqueues_request_when_session_exists() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let key = [3u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
+
+        let account = Account {
+            id: "42".to_string(),
+            share_name: None,
+            share_id: None,
+            share_readonly: false,
+            name: String::new(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: String::new(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+
+        maybe_log_access(&account, SyncMode::No).expect("log access");
+
+        let queue_dir = config_path("upload-queue/.marker")
+            .expect("queue marker")
+            .parent()
+            .expect("queue dir")
+            .to_path_buf();
+        let name = std::fs::read_dir(queue_dir)
+            .expect("read queue")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .find(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
+            .expect("queued file");
+        let queued = config_read_encrypted_buffer(&format!("upload-queue/{name}"), &key)
+            .expect("read queue entry")
+            .expect("queue data");
+        let text = String::from_utf8(queued).expect("queue utf8");
+        assert!(text.contains("loglogin.php"));
     }
 
     #[test]
@@ -1115,6 +1366,18 @@ mod tests {
     }
 
     #[test]
+    fn ensure_mock_blob_is_noop_without_mock_env() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        ensure_mock_blob().expect("noop");
+        assert!(!config_exists("blob"));
+    }
+
+    #[test]
     fn load_local_blob_reports_invalid_json_and_non_blob_errors() {
         let temp = TempDir::new().expect("tempdir");
         let _config_guard = set_test_env(ConfigEnv {
@@ -1135,6 +1398,19 @@ mod tests {
         let _ = config_unlink("blob");
         let err = load_local_blob(&key, None).expect_err("missing blob");
         assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_queue_credentials_reports_missing_key_without_mock_mode() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let err = load_queue_credentials().expect_err("missing key");
+        assert!(format!("{err}").contains("Could not find decryption key"));
     }
 
     #[test]
@@ -1181,6 +1457,24 @@ mod tests {
         assert!(local_blob_is_fresh(Duration::from_secs(1)).expect("future mtime"));
 
         touch_local_blob_cache().expect("touch");
+    }
+
+    #[test]
+    fn local_blob_freshness_prefers_newer_blob_over_older_blob_json() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        config_write_buffer("blob", b"blob-bytes").expect("write blob");
+        config_write_buffer(BLOB_JSON_NAME, b"json-bytes").expect("write blob json");
+        let blob_path = config_path("blob").expect("blob path");
+        let json_path = config_path(BLOB_JSON_NAME).expect("blob json path");
+        set_file_mtime(&blob_path, FileTime::from_unix_time(200, 0)).expect("blob mtime");
+        set_file_mtime(&json_path, FileTime::from_unix_time(100, 0)).expect("json mtime");
+
+        assert!(local_blob_is_fresh(Duration::from_secs(u64::MAX)).expect("fresh"));
     }
 
     fn test_session() -> Session {
@@ -1239,6 +1533,82 @@ mod tests {
     }
 
     #[test]
+    fn fetch_remote_blob_version_returns_zero_on_http_error() {
+        let key = [4u8; KDF_HASH_LEN];
+        let client = HttpClient::mock_with_overrides(&[("login_check.php", 500, "server error")]);
+        let mut session = test_session();
+
+        let version = fetch_remote_blob_version(&client, &mut session, &key).expect("version");
+        assert_eq!(version, 0);
+    }
+
+    #[test]
+    fn load_latest_blob_returns_error_when_remote_version_is_zero() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [3u8; KDF_HASH_LEN];
+        let local = Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        };
+        let buffer = serde_json::to_vec_pretty(&local).expect("json");
+        config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write local blob");
+        let client = HttpClient::mock_with_overrides(&[("login_check.php", 500, "server error")]);
+
+        let err = load_latest_blob(&client, &mut test_session(), &key, None).expect_err("error");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_latest_blob_fetches_and_stores_newer_remote_blob() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [2u8; KDF_HASH_LEN];
+        let local = Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        };
+        let buffer = serde_json::to_vec_pretty(&local).expect("json");
+        config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write local blob");
+        let remote_bytes = minimal_blob_bytes(2);
+        let remote_text = String::from_utf8(remote_bytes.clone()).expect("blob text");
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login_check.php",
+                200,
+                "<response><ok uid=\"1\" sessionid=\"2\" token=\"3\" accts_version=\"123\"/></response>",
+            ),
+            ("getaccts.php", 200, &remote_text),
+        ]);
+
+        let loaded = load_latest_blob(&client, &mut test_session(), &key, None).expect("loaded");
+        assert_eq!(loaded.version, 2);
+        assert_eq!(
+            config_read_encrypted_buffer("blob", &key)
+                .expect("read blob")
+                .expect("blob exists"),
+            remote_bytes
+        );
+        assert!(
+            config_read_encrypted_buffer(BLOB_JSON_NAME, &key)
+                .expect("read blob json")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn fetch_and_store_blob_reports_empty_body() {
         let temp = TempDir::new().expect("tempdir");
         let _config_guard = set_test_env(ConfigEnv {
@@ -1251,6 +1621,42 @@ mod tests {
 
         let err = fetch_and_store_blob(&client, &session, &key, None).expect_err("must fail");
         assert!(format!("{err}").contains("Unable to fetch blob"));
+    }
+
+    #[test]
+    fn load_blob_auto_uses_latest_when_cache_is_stale() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [6u8; KDF_HASH_LEN];
+
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: Some("127.0.0.1:1".to_string()),
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
+        config_write_encrypted_buffer("blob", &minimal_blob_bytes(1), &key).expect("write blob");
+        let blob_path = config_path("blob").expect("blob path");
+        set_file_mtime(&blob_path, FileTime::from_unix_time(1, 0)).expect("set old mtime");
+        crate::lpenv::set_override_for_tests("LPASS_AUTO_SYNC_TIME", "1");
+
+        let err = load_blob(SyncMode::Auto).expect_err("stale cache should sync");
+        assert!(format!("{err}").contains("IO error while http post"));
     }
 
     #[test]
@@ -1299,5 +1705,52 @@ mod tests {
             .expect("exists");
         let decoded: Blob = serde_json::from_slice(&stored).expect("decode");
         assert_eq!(decoded.version, 5);
+    }
+
+    #[test]
+    fn refresh_blob_from_server_writes_blob_and_clears_json_cache() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let key = [8u8; KDF_HASH_LEN];
+        let blob_bytes = {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(b"LPAV");
+            bytes.extend_from_slice(&1u32.to_be_bytes());
+            bytes.extend_from_slice(b"1");
+            bytes
+        };
+        let blob_text = String::from_utf8(blob_bytes.clone()).expect("blob text");
+        let client = HttpClient::mock_with_overrides(&[("getaccts.php", 200, &blob_text)]);
+        config_write_encrypted_buffer(BLOB_JSON_NAME, b"{}", &key).expect("write blob json");
+
+        refresh_blob_from_server(&client, &test_session(), &key).expect("refresh");
+
+        let blob = config_read_encrypted_buffer("blob", &key)
+            .expect("read blob")
+            .expect("blob exists");
+        assert_eq!(blob, blob_bytes);
+        assert!(
+            config_read_encrypted_buffer(BLOB_JSON_NAME, &key)
+                .expect("read blob json")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn refresh_blob_from_server_reports_empty_body() {
+        let temp = TempDir::new().expect("tempdir");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+
+        let key = [7u8; KDF_HASH_LEN];
+        let err =
+            refresh_blob_from_server(&HttpClient::mock(), &test_session(), &key).expect_err("err");
+        assert!(format!("{err}").contains("Unable to fetch blob"));
     }
 }

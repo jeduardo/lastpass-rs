@@ -2,12 +2,11 @@
 
 use crate::agent::agent_get_decryption_key;
 use crate::commands::data::ensure_mock_blob;
-use crate::config::ConfigStore;
 use crate::error::LpassError;
-use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_load};
 use crate::terminal;
+use crate::upload_queue;
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -22,16 +21,24 @@ pub fn run(args: &[String]) -> i32 {
 fn run_inner(args: &[String]) -> Result<i32, String> {
     let parsed = parse_args(args)?;
 
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
+    let credentials = load_key_and_session();
+    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") && credentials.is_err() {
         ensure_mock_blob().map_err(|err| format!("{err}"))?;
-        let _ = parsed.background;
         return Ok(0);
     }
 
-    let (key, session) = load_key_and_session()?;
-    let client = HttpClient::from_env().map_err(|err| format!("{err}"))?;
-    sync_session_blob(&client, &session, &key)?;
-    let _ = parsed.background;
+    let (key, session) = credentials?;
+    if parsed.background {
+        upload_queue::ensure_running(&key).map_err(|err| format!("{err}"))?;
+        return Ok(0);
+    }
+
+    if upload_queue::is_running() {
+        upload_queue::wait_for_completion();
+        return Ok(0);
+    }
+
+    upload_queue::process_pending(&key, &session).map_err(|err| format!("{err}"))?;
     Ok(0)
 }
 
@@ -82,41 +89,6 @@ fn load_key_and_session() -> Result<([u8; KDF_HASH_LEN], Session), String> {
     Ok((key, session))
 }
 
-fn sync_session_blob(
-    client: &HttpClient,
-    session: &Session,
-    key: &[u8; KDF_HASH_LEN],
-) -> Result<(), String> {
-    let params = [
-        ("mobile", "1"),
-        ("requestsrc", "cli"),
-        ("hasplugin", crate::version::generated_version()),
-    ];
-    let response = client
-        .post_lastpass_bytes(None, "getaccts.php", Some(session), &params)
-        .map_err(|err| format!("{err}"))?;
-    store_blob_bytes(&response.body, key)
-}
-
-fn store_blob_bytes(blob_bytes: &[u8], key: &[u8; KDF_HASH_LEN]) -> Result<(), String> {
-    store_blob_bytes_with_store(&ConfigStore::from_current(), blob_bytes, key)
-}
-
-fn store_blob_bytes_with_store(
-    store: &ConfigStore,
-    blob_bytes: &[u8],
-    key: &[u8; KDF_HASH_LEN],
-) -> Result<(), String> {
-    if blob_bytes.is_empty() {
-        return Err("Unable to fetch blob. Please re-run login.".to_string());
-    }
-    store
-        .write_encrypted_buffer("blob", blob_bytes, key)
-        .map_err(|err| format!("{err}"))?;
-    let _ = store.unlink("blob.json");
-    Ok(())
-}
-
 fn map_decryption_key_error(err: LpassError) -> String {
     match err {
         LpassError::Crypto("missing iterations")
@@ -132,8 +104,35 @@ fn map_decryption_key_error(err: LpassError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use crate::config::{
+        ConfigEnv, config_write_buffer, config_write_encrypted_string, set_test_env,
+    };
+    use crate::session::session_save;
     use tempfile::TempDir;
+
+    fn save_key_and_session(home: &TempDir, key: &[u8; KDF_HASH_LEN]) {
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        config_write_buffer("plaintext_key", key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
+            .expect("write verify");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            key,
+        )
+        .expect("save session");
+    }
 
     #[test]
     fn run_inner_rejects_invalid_usage() {
@@ -178,43 +177,44 @@ mod tests {
     }
 
     #[test]
-    fn store_blob_bytes_rejects_empty_blob() {
-        let key = [1u8; KDF_HASH_LEN];
-        let err = store_blob_bytes(&[], &key).expect_err("empty blob must fail");
-        assert!(err.contains("Unable to fetch blob"));
+    fn run_inner_mock_mode_without_session_is_a_noop() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("tempdir");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+
+        assert_eq!(run_inner(&[]).expect("mock sync"), 0);
     }
 
     #[test]
-    fn store_blob_bytes_writes_blob_file() {
-        let temp = TempDir::new().expect("tempdir");
-        let store = ConfigStore::with_env(crate::config::ConfigEnv {
-            lpass_home: Some(Path::new(temp.path()).to_path_buf()),
-            ..crate::config::ConfigEnv::default()
+    #[cfg(unix)]
+    fn run_inner_waits_for_existing_uploader_process() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("tempdir");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
         });
-        let key = [2u8; KDF_HASH_LEN];
-        store_blob_bytes_with_store(&store, b"LPAVx", &key).expect("store blob");
-        let encrypted_blob = store
-            .read_buffer("blob")
-            .expect("read blob")
-            .expect("blob exists");
-        assert!(!encrypted_blob.is_empty());
-    }
+        let key = [7u8; KDF_HASH_LEN];
+        save_key_and_session(&home, &key);
 
-    #[test]
-    fn sync_session_blob_uses_client_and_surfaces_empty_response_error() {
-        let key = [3u8; KDF_HASH_LEN];
-        let session = Session {
-            uid: "u".to_string(),
-            session_id: "s".to_string(),
-            token: "t".to_string(),
-            url_encryption_enabled: false,
-            url_logging_enabled: false,
-            server: None,
-            private_key: None,
-            private_key_enc: None,
-        };
-        let client = HttpClient::mock();
-        let err = sync_session_blob(&client, &session, &key).expect_err("empty mock body");
-        assert!(err.contains("Unable to fetch blob"));
+        let mut child = std::process::Command::new("sleep")
+            .arg("0.2")
+            .spawn()
+            .expect("spawn uploader");
+        let pid = child.id();
+        let waiter = std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        crate::config::config_write_string("uploader.pid", &pid.to_string()).expect("write pid");
+
+        assert_eq!(run_inner(&[]).expect("sync"), 0);
+        let _ = waiter.join();
+        assert!(
+            crate::config::config_read_string("uploader.pid")
+                .expect("read pid")
+                .is_none()
+        );
     }
 }
