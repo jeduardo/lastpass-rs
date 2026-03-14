@@ -80,6 +80,8 @@ pub struct Share {
     pub id: String,
     pub name: String,
     pub readonly: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<[u8; KDF_HASH_LEN]>,
 }
 
 pub fn blob_parse(
@@ -209,6 +211,7 @@ fn parse_share(
             id,
             name: share_name,
             readonly,
+            key: Some(share_key),
         },
         key: share_key,
     }))
@@ -839,6 +842,7 @@ mod tests {
                 id: "4321".to_string(),
                 name: "Team Shared".to_string(),
                 readonly: true,
+                key: Some(share_key),
             }]
         );
         assert_eq!(blob.accounts.len(), 1);

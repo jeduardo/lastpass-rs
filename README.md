@@ -43,10 +43,10 @@ Implemented (working, with ongoing parity improvements):
 - `rm`
 - `sync`
 - `import`
+- `share`
 
 Planned / not fully implemented yet:
-
-- `share`
+- environment/prompt/clipboard/logging parity follow-up items
 
 ## Implementation status
 
@@ -67,6 +67,7 @@ Audit source of truth:
 - `lastpass-cli/cmd-rm.c`
 - `lastpass-cli/cmd-sync.c`
 - `lastpass-cli/cmd-import.c`
+- `lastpass-cli/cmd-share.c`
 
 Per-command checklist:
 
@@ -167,6 +168,12 @@ Per-command checklist:
   - stdin/file CSV input and `--keep-dupes`: :white_check_mark: (basic parity)
   - core header mapping (`url,username,password,extra,name,grouping,fav`): :white_check_mark:
   - full API/upload parity and CSV edge cases: :white_check_mark:
+
+- `share`
+
+  - `userls`, `useradd`, `usermod`, `userdel`, `create`, `rm`, `limit`: :white_check_mark:
+  - shared option parsing (`--sync`, `--color`, permission flags, list mode flags): :white_check_mark:
+  - share lookup, user formatting, and limit-list behavior parity: :white_check_mark:
 
 - Cross-cutting
   - strict C-like option parsing errors for unknown/invalid flags: TODO

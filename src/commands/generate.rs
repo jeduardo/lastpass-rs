@@ -497,6 +497,7 @@ mod tests {
                 id: "77".to_string(),
                 name: "Team".to_string(),
                 readonly: false,
+                key: None,
             }],
             accounts: Vec::new(),
             attachments: Vec::new(),
@@ -542,6 +543,7 @@ mod tests {
                 id: "77".to_string(),
                 name: "Team".to_string(),
                 readonly: false,
+                key: None,
             }],
         );
 

@@ -317,6 +317,7 @@ mod tests {
             id: "abc".to_string(),
             name: "Shared".to_string(),
             readonly: true,
+            key: None,
         }];
         let out = collect_shares(&[], &shares);
         assert_eq!(out.len(), 1);
