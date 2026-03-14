@@ -52,7 +52,13 @@ fn write_key_and_session(home: &Path, key: &[u8; KDF_HASH_LEN]) {
     .expect("session save");
 }
 
-fn shared_account(id: &str, name: &str, fullname: &str, share_name: &str, share_id: &str) -> Account {
+fn shared_account(
+    id: &str,
+    name: &str,
+    fullname: &str,
+    share_name: &str,
+    share_id: &str,
+) -> Account {
     Account {
         id: id.to_string(),
         share_name: Some(share_name.to_string()),
@@ -175,7 +181,13 @@ fn share_create_and_useradd_succeed_in_mock_mode() {
 
     let useradd = run_lpass(
         &home,
-        &["share", "useradd", "--read-only=false", "Team", "group-team"],
+        &[
+            "share",
+            "useradd",
+            "--read-only=false",
+            "Team",
+            "group-team",
+        ],
         None,
     );
     assert_eq!(useradd.status.code().unwrap_or(-1), 0);
@@ -217,7 +229,11 @@ fn share_reports_missing_user_and_share_errors() {
     write_key_and_session(&home, &[7u8; KDF_HASH_LEN]);
     write_mock_blob(&home, &share_blob());
 
-    let missing_user = run_lpass(&home, &["share", "userdel", "Team", "missing@example.com"], None);
+    let missing_user = run_lpass(
+        &home,
+        &["share", "userdel", "Team", "missing@example.com"],
+        None,
+    );
     assert_eq!(missing_user.status.code().unwrap_or(-1), 1);
     let stderr = String::from_utf8_lossy(&missing_user.stderr);
     assert!(stderr.contains("Unable to find user"));

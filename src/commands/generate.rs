@@ -57,7 +57,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     };
 
     save_blob(&blob).map_err(|err| format!("{err}"))?;
-    maybe_push_account_update(&updated_account, parsed.sync_mode)
+    maybe_push_account_update(&updated_account, &blob, parsed.sync_mode)
         .map_err(|err| format!("{err}"))?;
 
     if parsed.clip {

@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lpass_core::blob::{Attachment, Blob};
+use lpass_core::blob::{Attachment, Blob, Share};
 use lpass_core::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
 use lpass_core::kdf::KDF_HASH_LEN;
 
@@ -122,6 +122,12 @@ fn inject_mock_attachments(home: &Path) {
     fs::write(&blob_path, updated).expect("write mock blob");
 }
 
+fn write_mock_blob(home: &Path, blob: &Blob) {
+    let blob_path = home.join("blob");
+    let updated = serde_json::to_vec_pretty(blob).expect("serialize mock blob");
+    fs::write(&blob_path, updated).expect("write mock blob");
+}
+
 #[test]
 fn show_accepts_password_short_option_after_name() {
     let test_home = unique_test_home();
@@ -148,6 +154,21 @@ fn show_password_short_option_works_with_shared_style_fullname() {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let test_home = unique_test_home();
     fs::create_dir_all(&test_home).expect("create test home");
+    write_mock_blob(
+        &test_home,
+        &Blob {
+            version: 1,
+            local_version: false,
+            shares: vec![Share {
+                id: "77".to_string(),
+                name: "Shared-Team".to_string(),
+                readonly: false,
+                key: Some([7u8; KDF_HASH_LEN]),
+            }],
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        },
+    );
 
     let fullname = "Shared-Team/Infrastructure/Service API Token";
     let password = "service-api-token";

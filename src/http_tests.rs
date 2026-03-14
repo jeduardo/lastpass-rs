@@ -164,7 +164,12 @@ fn mock_share_fallback_paths_cover_unimplemented_and_missing_uid() {
     assert!(unknown.body.contains("unimplemented"));
 
     let missing_uid = client
-        .post_lastpass(None, "share.php", None, &[("getpubkey", "1"), ("xmlr", "1")])
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getpubkey", "1"), ("xmlr", "1")],
+        )
         .expect("response");
     assert!(missing_uid.body.contains("<success>0</success>"));
 }

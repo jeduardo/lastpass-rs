@@ -10,6 +10,7 @@ use crate::notes::{
     NoteType, collapse_notes, expand_notes, note_field_is_multiline, note_has_field,
     note_type_by_name, note_type_fields,
 };
+use crate::share::assign_account_share;
 use crate::terminal;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -43,6 +44,12 @@ struct ParsedUpdate {
     fields: Vec<(String, String)>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ShareIdentity {
+    name: Option<String>,
+    id: Option<String>,
+}
+
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
@@ -58,6 +65,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let mut blob = load_blob(parsed.sync_mode).map_err(|err| format!("{err}"))?;
 
     let idx = find_unique_account_index(&blob.accounts, &parsed.name)?;
+    let original_share = idx.map(|value| share_identity(&blob.accounts[value]));
     let (mut working, secure_note_expanded, is_new) = if let Some(idx) = idx {
         let original = blob.accounts[idx].clone();
         if original.share_readonly {
@@ -112,11 +120,17 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         }
     }
 
-    let updated = if secure_note_expanded {
+    let mut updated = if secure_note_expanded {
         collapse_notes(&working)
     } else {
         working
     };
+    assign_account_share(&mut updated, &blob)?;
+    if let Some(original_share) = original_share
+        && original_share != share_identity(&updated)
+    {
+        return Err("Use lpass mv to move items to/from shared folders".to_string());
+    }
 
     let updated_account = if let Some(idx) = idx {
         blob.accounts[idx] = updated;
@@ -131,7 +145,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     };
 
     save_blob(&blob).map_err(|err| format!("{err}"))?;
-    maybe_push_account_update(&updated_account, parsed.sync_mode)
+    maybe_push_account_update(&updated_account, &blob, parsed.sync_mode)
         .map_err(|err| format!("{err}"))?;
     Ok(0)
 }
@@ -629,6 +643,13 @@ fn parse_yes_no(value: &str) -> Option<bool> {
     }
 }
 
+fn share_identity(account: &Account) -> ShareIdentity {
+    ShareIdentity {
+        name: account.share_name.clone(),
+        id: account.share_id.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +759,21 @@ mod tests {
         assert_eq!(acct.group, "");
         assert_eq!(acct.name, "single");
         assert_eq!(acct.fullname, "single");
+    }
+
+    #[test]
+    fn share_identity_tracks_name_and_id() {
+        let mut acct = account();
+        acct.share_name = Some("Shared-Team".to_string());
+        acct.share_id = Some("77".to_string());
+
+        assert_eq!(
+            share_identity(&acct),
+            ShareIdentity {
+                name: Some("Shared-Team".to_string()),
+                id: Some("77".to_string()),
+            }
+        );
     }
 
     #[test]

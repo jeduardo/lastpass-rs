@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lpass_core::blob::{Account, Blob, Share};
+use lpass_core::config::{ConfigEnv, ConfigStore};
+use lpass_core::kdf::KDF_HASH_LEN;
+
 fn unique_test_home() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -64,6 +68,77 @@ fn run(home: &Path, args: &[&str], stdin: Option<&str>, editor: Option<(&Path, &
         child.wait_with_output().expect("wait output")
     } else {
         command.output().expect("run lpass")
+    }
+}
+
+fn store_for(home: &Path) -> ConfigStore {
+    ConfigStore::with_env(ConfigEnv {
+        lpass_home: Some(home.to_path_buf()),
+        ..ConfigEnv::default()
+    })
+}
+
+fn write_mock_blob(home: &Path, blob: &Blob) {
+    let store = store_for(home);
+    let json = serde_json::to_vec(blob).expect("blob json");
+    store.write_buffer("blob", &json).expect("write blob");
+}
+
+fn read_mock_blob(home: &Path) -> Blob {
+    let store = store_for(home);
+    let buffer = store
+        .read_buffer("blob")
+        .expect("read blob")
+        .expect("blob contents");
+    serde_json::from_slice(&buffer).expect("parse blob")
+}
+
+fn shared_blob() -> Blob {
+    Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![Share {
+            id: "77".to_string(),
+            name: "Shared-team".to_string(),
+            readonly: false,
+            key: Some([7u8; KDF_HASH_LEN]),
+        }],
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    }
+}
+
+fn plain_account(fullname: &str) -> Account {
+    let (group, name) = fullname
+        .rsplit_once('/')
+        .map(|(group, name)| (group.to_string(), name.to_string()))
+        .unwrap_or_else(|| (String::new(), fullname.to_string()));
+    Account {
+        id: "100".to_string(),
+        share_name: None,
+        share_id: None,
+        share_readonly: false,
+        name,
+        name_encrypted: None,
+        group,
+        group_encrypted: None,
+        fullname: fullname.to_string(),
+        url: "https://example.com".to_string(),
+        url_encrypted: None,
+        username: "alice".to_string(),
+        username_encrypted: None,
+        password: "secret".to_string(),
+        password_encrypted: None,
+        note: String::new(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
     }
 }
 
@@ -408,4 +483,121 @@ fn add_edit_parity_paths() {
     edit_missing_entry_creates_new_entry();
     interactive_secure_note_field_edit_updates_and_removes();
     add_non_interactive_choice_paths_work();
+}
+
+#[test]
+fn add_under_shared_folder_persists_shared_folder_metadata() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_mock_blob(&home, &shared_blob());
+
+    let add = run(
+        &home,
+        &[
+            "add",
+            "--sync=no",
+            "--non-interactive",
+            "Shared-team/shared-credential",
+        ],
+        Some("URL: https://example.com\nUsername: alice\nPassword: secret\nNotes:\n"),
+        None,
+    );
+    assert_eq!(
+        add.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let blob = read_mock_blob(&home);
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.fullname == "Shared-team/shared-credential")
+        .expect("shared account");
+    assert_eq!(account.share_name.as_deref(), Some("Shared-team"));
+    assert_eq!(account.share_id.as_deref(), Some("77"));
+    assert_eq!(account.group, "");
+    assert_eq!(account.name, "shared-credential");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn edit_missing_entry_under_shared_folder_persists_shared_folder_metadata() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_mock_blob(&home, &shared_blob());
+
+    let edit = run(
+        &home,
+        &[
+            "edit",
+            "--sync=no",
+            "--non-interactive",
+            "--username",
+            "Shared-team/new-entry",
+        ],
+        Some("new-user\n"),
+        None,
+    );
+    assert_eq!(
+        edit.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+
+    let blob = read_mock_blob(&home);
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.fullname == "Shared-team/new-entry")
+        .expect("shared account");
+    assert_eq!(account.share_name.as_deref(), Some("Shared-team"));
+    assert_eq!(account.share_id.as_deref(), Some("77"));
+    assert_eq!(account.group, "");
+    assert_eq!(account.name, "new-entry");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn edit_rejects_moving_existing_entry_into_shared_folder() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let mut blob = shared_blob();
+    blob.accounts.push(plain_account("team/plain"));
+    write_mock_blob(&home, &blob);
+
+    let edit = run(
+        &home,
+        &[
+            "edit",
+            "--sync=no",
+            "--non-interactive",
+            "--name",
+            "team/plain",
+        ],
+        Some("Shared-team/plain\n"),
+        None,
+    );
+    assert_eq!(edit.status.code().unwrap_or(-1), 1);
+    assert!(
+        String::from_utf8_lossy(&edit.stderr)
+            .contains("Use lpass mv to move items to/from shared folders"),
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+
+    let blob = read_mock_blob(&home);
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "100")
+        .expect("plain account");
+    assert_eq!(account.fullname, "team/plain");
+    assert_eq!(account.share_id, None);
+
+    let _ = fs::remove_dir_all(&home);
 }

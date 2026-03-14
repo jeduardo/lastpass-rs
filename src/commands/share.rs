@@ -17,7 +17,9 @@ use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_load};
 use crate::share::{ShareLimit, ShareLimitAid, ShareUser};
 use crate::terminal::{self, BOLD, FG_GREEN, FG_RED, FG_YELLOW, NO_BOLD, RESET};
-use crate::xml::{parse_share_getinfo, parse_share_get_limits, parse_share_getpubkey, parse_share_getpubkeys};
+use crate::xml::{
+    parse_share_get_limits, parse_share_getinfo, parse_share_getpubkey, parse_share_getpubkeys,
+};
 
 const SHARE_USERLS_USAGE: &str = "usage: share userls SHARE";
 const SHARE_USERADD_USAGE: &str = "usage: share useradd [--read-only=[true|false] --hidden=[true|false] --admin=[true|false] SHARE USERNAME";
@@ -138,8 +140,9 @@ fn run_inner_with(
         None
     } else {
         Some(
-            find_unique_share(&state.blob.shares, &parsed.share_name)
-                .ok_or_else(|| CommandError::Message(format!("Share {} not found.", parsed.share_name)))?,
+            find_unique_share(&state.blob.shares, &parsed.share_name).ok_or_else(|| {
+                CommandError::Message(format!("Share {} not found.", parsed.share_name))
+            })?,
         )
     };
 
@@ -173,8 +176,8 @@ fn run_inner_with(
             if parsed.tail.len() != 1 {
                 return Err(CommandError::Message(parsed.subcommand.usage().to_string()));
             }
-            let mut user =
-                get_user_from_share(client, &state.session, share, &parsed.tail[0]).map_err(CommandError::Message)?;
+            let mut user = get_user_from_share(client, &state.session, share, &parsed.tail[0])
+                .map_err(CommandError::Message)?;
             if parsed.set_read_only {
                 user.read_only = parsed.read_only;
             }
@@ -192,8 +195,8 @@ fn run_inner_with(
             if parsed.tail.len() != 1 {
                 return Err(CommandError::Message(parsed.subcommand.usage().to_string()));
             }
-            let user =
-                get_user_from_share(client, &state.session, share, &parsed.tail[0]).map_err(CommandError::Message)?;
+            let user = get_user_from_share(client, &state.session, share, &parsed.tail[0])
+                .map_err(CommandError::Message)?;
             share_user_del_with_client(client, &state.session, share, &user)
                 .map_err(CommandError::Message)?;
         }
@@ -218,7 +221,8 @@ fn run_inner_with(
             if !parsed.tail.is_empty() {
                 return Err(CommandError::Message(parsed.subcommand.usage().to_string()));
             }
-            share_delete_with_client(client, &state.session, share).map_err(CommandError::Message)?;
+            share_delete_with_client(client, &state.session, share)
+                .map_err(CommandError::Message)?;
         }
         Subcommand::Limit => {
             let share = share.expect("share required");
@@ -475,7 +479,12 @@ fn share_getinfo_with_client(
             None,
             "share.php",
             Some(session),
-            &[("sharejs", "1"), ("getinfo", "1"), ("id", share_id), ("xmlr", "1")],
+            &[
+                ("sharejs", "1"),
+                ("getinfo", "1"),
+                ("id", share_id),
+                ("xmlr", "1"),
+            ],
         )
         .map_err(|err| err.to_string())?;
     if response.status >= 400 {
@@ -562,7 +571,10 @@ fn share_user_add_with_client(
                 "give".to_string(),
                 bool_str(!user.hide_passwords).to_string(),
             ),
-            ("canadminister".to_string(), bool_str(user.admin).to_string()),
+            (
+                "canadminister".to_string(),
+                bool_str(user.admin).to_string(),
+            ),
             ("xmlr".to_string(), "1".to_string()),
         ];
 
@@ -585,8 +597,9 @@ fn share_user_add_with_client(
                 bool_str(!user.hide_passwords).to_string(),
             ));
         } else {
-            let encrypted_share_key = rsa_encrypt_oaep(&found.sharing_key, hex_share_key.as_bytes())
-                .map_err(|err| err.to_string())?;
+            let encrypted_share_key =
+                rsa_encrypt_oaep(&found.sharing_key, hex_share_key.as_bytes())
+                    .map_err(|err| err.to_string())?;
             params.push(("username0".to_string(), found.username.clone()));
             params.push(("cgid0".to_string(), found.cgid.clone().unwrap_or_default()));
             params.push(("sharekey0".to_string(), hex::encode(encrypted_share_key)));
@@ -672,8 +685,8 @@ fn share_create_with_client(
     let mut hex_hash = multi_sha256_hex(&[&sf_username.to_ascii_lowercase(), &hex_share_key]);
     hex_hash = multi_sha256_hex(&[&hex_hash, &hex_share_key]);
 
-    let encrypted_share_key =
-        rsa_encrypt_oaep(&owner.sharing_key, hex_share_key.as_bytes()).map_err(|err| err.to_string())?;
+    let encrypted_share_key = rsa_encrypt_oaep(&owner.sharing_key, hex_share_key.as_bytes())
+        .map_err(|err| err.to_string())?;
     let enc_share_name = encrypt_and_base64(full_name.as_bytes(), &share_key);
 
     post_share_params(
@@ -795,7 +808,8 @@ fn get_user_from_share(
 ) -> Result<ShareUser, String> {
     let users = share_getinfo_with_client(client, session, &share.id)
         .map_err(|_| format!("Unable to access user list for share {}", share.name))?;
-    users.into_iter()
+    users
+        .into_iter()
         .find(|user| user.username == username)
         .ok_or_else(|| format!("Unable to find user {} in the user list", username))
 }
@@ -877,7 +891,10 @@ fn print_share_users(users: &[ShareUser]) {
     );
     for user in users {
         if user.is_group {
-            println!("{}", terminal::render_stdout(&format_share_group_line(user)));
+            println!(
+                "{}",
+                terminal::render_stdout(&format_share_group_line(user))
+            );
         }
     }
 }
@@ -965,7 +982,9 @@ fn ask_yes_no_with_io(
         writer.flush().map_err(|err| err.to_string())?;
 
         let mut response = String::new();
-        let read = reader.read_line(&mut response).map_err(|err| err.to_string())?;
+        let read = reader
+            .read_line(&mut response)
+            .map_err(|err| err.to_string())?;
         if read == 0 {
             return Err("aborted response.".to_string());
         }
@@ -1035,8 +1054,8 @@ fn program_name_from_arg(path: Option<String>) -> String {
 }
 
 fn encrypt_and_base64(bytes: &[u8], key: &[u8; KDF_HASH_LEN]) -> String {
-    let encrypted =
-        aes_encrypt_lastpass(bytes, key).expect("AES encryption with owned padding buffer cannot fail");
+    let encrypted = aes_encrypt_lastpass(bytes, key)
+        .expect("AES encryption with owned padding buffer cannot fail");
     base64_lastpass_encode(&encrypted)
 }
 

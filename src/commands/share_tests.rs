@@ -234,7 +234,11 @@ fn parse_args_covers_remaining_option_forms() {
             SHARE_USERLS_USAGE,
         ),
         (
-            vec!["userls".to_string(), "Team".to_string(), "--color".to_string()],
+            vec![
+                "userls".to_string(),
+                "Team".to_string(),
+                "--color".to_string(),
+            ],
             SHARE_USERLS_USAGE,
         ),
         (
@@ -316,7 +320,10 @@ fn find_matching_accounts_for_share_prefers_id_and_dedupes_matches() {
             "0".to_string(),
         ],
     );
-    let ids = matches.iter().map(|account| account.id.as_str()).collect::<Vec<_>>();
+    let ids = matches
+        .iter()
+        .map(|account| account.id.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(ids, vec!["200", "201", "0"]);
 }
 
@@ -386,16 +393,14 @@ fn ask_yes_no_with_reader_writer_handles_defaults_retry_and_eof() {
 
     let mut reader = std::io::Cursor::new(b"maybe\nn\n".to_vec());
     let mut output = Vec::new();
-    assert!(
-        !ask_yes_no_with_reader_writer(&mut reader, &mut output, false, "Prompt").expect("no")
-    );
+    assert!(!ask_yes_no_with_reader_writer(&mut reader, &mut output, false, "Prompt").expect("no"));
     let rendered = String::from_utf8_lossy(&output);
     assert!(rendered.contains("Response not understood"));
 
     let mut reader = std::io::Cursor::new(Vec::<u8>::new());
     let mut output = Vec::new();
-    let err = ask_yes_no_with_reader_writer(&mut reader, &mut output, false, "Prompt")
-        .expect_err("eof");
+    let err =
+        ask_yes_no_with_reader_writer(&mut reader, &mut output, false, "Prompt").expect_err("eof");
     assert!(err.contains("aborted response"));
 }
 
@@ -443,7 +448,8 @@ fn share_endpoint_helpers_follow_mock_transport_paths() {
     )
     .expect("group add");
 
-    let mut found = get_user_from_share(&client, &session, &share, "user@example.com").expect("found");
+    let mut found =
+        get_user_from_share(&client, &session, &share, "user@example.com").expect("found");
     found.admin = true;
     share_user_mod_with_client(&client, &session, &share, &found).expect("mod");
     share_user_del_with_client(&client, &session, &share, &found).expect("del");
@@ -477,7 +483,8 @@ fn share_endpoint_helpers_map_invalid_xml_payloads() {
         "invalid share xml"
     );
     assert_eq!(
-        share_getpubkey_with_client(&client, &session, &session.uid).expect_err("invalid getpubkey xml"),
+        share_getpubkey_with_client(&client, &session, &session.uid)
+            .expect_err("invalid getpubkey xml"),
         "invalid share xml"
     );
 
@@ -486,7 +493,8 @@ fn share_endpoint_helpers_map_invalid_xml_payloads() {
         ..ShareUser::default()
     };
     assert_eq!(
-        share_get_limits_with_client(&client, &session, &share, &user).expect_err("invalid limits xml"),
+        share_get_limits_with_client(&client, &session, &share, &user)
+            .expect_err("invalid limits xml"),
         "invalid share xml"
     );
 }
@@ -581,7 +589,11 @@ fn run_inner_with_covers_usermod_userdel_and_usage_errors() {
 
     for (args, usage) in [
         (
-            vec!["userls".to_string(), "Team".to_string(), "extra".to_string()],
+            vec![
+                "userls".to_string(),
+                "Team".to_string(),
+                "extra".to_string(),
+            ],
             SHARE_USERLS_USAGE,
         ),
         (
@@ -597,11 +609,21 @@ fn run_inner_with_covers_usermod_userdel_and_usage_errors() {
             SHARE_USERDEL_USAGE,
         ),
         (
-            vec!["create".to_string(), "Team".to_string(), "extra".to_string()],
+            vec![
+                "create".to_string(),
+                "Team".to_string(),
+                "extra".to_string(),
+            ],
             SHARE_CREATE_USAGE,
         ),
-        (vec!["rm".to_string(), "Team".to_string(), "extra".to_string()], SHARE_RM_USAGE),
-        (vec!["limit".to_string(), "Team".to_string()], SHARE_LIMIT_USAGE),
+        (
+            vec!["rm".to_string(), "Team".to_string(), "extra".to_string()],
+            SHARE_RM_USAGE,
+        ),
+        (
+            vec!["limit".to_string(), "Team".to_string()],
+            SHARE_LIMIT_USAGE,
+        ),
     ] {
         let err = match run_inner_with(&args, &client, |_| Ok(state.clone()), |_, _| Ok(true)) {
             Err(CommandError::Message(err)) => err,
@@ -645,7 +667,11 @@ fn run_inner_with_limit_covers_show_abort_and_update_paths() {
     ]);
     assert_eq!(
         run_inner_with(
-            &["limit".to_string(), "Team".to_string(), "user@example.com".to_string()],
+            &[
+                "limit".to_string(),
+                "Team".to_string(),
+                "user@example.com".to_string()
+            ],
             &show_client,
             |_| Ok(state.clone()),
             |_, _| Ok(true),
@@ -693,7 +719,11 @@ fn run_inner_with_limit_covers_show_abort_and_update_paths() {
             200,
             "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0></aids></xmlresponse>",
         ),
-        ("share.php", 200, "<xmlresponse><success>1</success></xmlresponse>"),
+        (
+            "share.php",
+            200,
+            "<xmlresponse><success>1</success></xmlresponse>",
+        ),
     ]);
     assert_eq!(
         run_inner_with(
@@ -729,7 +759,11 @@ fn run_inner_with_limit_covers_deny_clear_and_remove_paths() {
             200,
             "<xmlresponse><hidebydefault>1</hidebydefault><aids><aid0>100</aid0></aids></xmlresponse>",
         ),
-        ("share.php", 200, "<xmlresponse><success>1</success></xmlresponse>"),
+        (
+            "share.php",
+            200,
+            "<xmlresponse><success>1</success></xmlresponse>",
+        ),
     ]);
     assert_eq!(
         run_inner_with(
@@ -758,7 +792,11 @@ fn run_inner_with_limit_covers_deny_clear_and_remove_paths() {
             200,
             "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0><aid1>200</aid1></aids></xmlresponse>",
         ),
-        ("share.php", 200, "<xmlresponse><success>1</success></xmlresponse>"),
+        (
+            "share.php",
+            200,
+            "<xmlresponse><success>1</success></xmlresponse>",
+        ),
     ]);
     assert_eq!(
         run_inner_with(
@@ -788,7 +826,11 @@ fn run_inner_with_limit_covers_deny_clear_and_remove_paths() {
             200,
             "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0><aid1>200</aid1></aids></xmlresponse>",
         ),
-        ("share.php", 200, "<xmlresponse><success>1</success></xmlresponse>"),
+        (
+            "share.php",
+            200,
+            "<xmlresponse><success>1</success></xmlresponse>",
+        ),
     ]);
     assert_eq!(
         run_inner_with(
@@ -835,8 +877,7 @@ fn helper_and_endpoint_error_paths_are_covered() {
     let session = session();
     let share = share("Team", "77", false, Some([7u8; KDF_HASH_LEN]));
 
-    let getinfo_client =
-        HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
+    let getinfo_client = HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
     assert_eq!(
         share_getinfo_with_client(&getinfo_client, &session, &share.id).expect_err("getinfo"),
         "share getinfo failed"
@@ -850,16 +891,14 @@ fn helper_and_endpoint_error_paths_are_covered() {
         "share getpubkey failed"
     );
 
-    let getpubkey_client =
-        HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
+    let getpubkey_client = HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
     assert_eq!(
         share_getpubkey_with_client(&getpubkey_client, &session, "57747756")
             .expect_err("getpubkey"),
         "share getpubkey failed"
     );
 
-    let getlimits_client =
-        HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
+    let getlimits_client = HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
     assert_eq!(
         share_get_limits_with_client(
             &getlimits_client,
@@ -875,8 +914,7 @@ fn helper_and_endpoint_error_paths_are_covered() {
         "share get limits failed"
     );
 
-    let request_client =
-        HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
+    let request_client = HttpClient::mock_with_overrides(&[("share.php", 500, "<xmlresponse/>")]);
     assert_eq!(
         post_share_params(
             &request_client,
@@ -913,7 +951,10 @@ fn helper_and_endpoint_error_paths_are_covered() {
         "crypto error: other"
     );
     assert_eq!(format!("{}", ShareParseError::Invalid), "invalid share xml");
-    assert_eq!(format!("{}", ShareParseError::NotFound), "missing share record");
+    assert_eq!(
+        format!("{}", ShareParseError::NotFound),
+        "missing share record"
+    );
 }
 
 #[test]
@@ -969,7 +1010,11 @@ fn run_inner_and_helpers_cover_remaining_error_conversions() {
     assert!(err.contains("IO error while http post"));
 
     let err = match run_inner_with(
-        &["useradd".to_string(), "Team".to_string(), "user@example.com".to_string()],
+        &[
+            "useradd".to_string(),
+            "Team".to_string(),
+            "user@example.com".to_string(),
+        ],
         &client,
         |_| {
             let mut state = state.clone();
@@ -984,7 +1029,11 @@ fn run_inner_and_helpers_cover_remaining_error_conversions() {
     assert_eq!(err, "Missing share key for Team");
 
     let err = match run_inner_with(
-        &["usermod".to_string(), "Team".to_string(), "missing@example.com".to_string()],
+        &[
+            "usermod".to_string(),
+            "Team".to_string(),
+            "missing@example.com".to_string(),
+        ],
         &client,
         |_| Ok(state.clone()),
         |_, _| Ok(true),
@@ -992,7 +1041,10 @@ fn run_inner_and_helpers_cover_remaining_error_conversions() {
         Err(CommandError::Message(err)) => err,
         other => panic!("unexpected result: {other:?}"),
     };
-    assert_eq!(err, "Unable to find user missing@example.com in the user list");
+    assert_eq!(
+        err,
+        "Unable to find user missing@example.com in the user list"
+    );
 
     assert_eq!(
         run_inner_with(
@@ -1107,7 +1159,10 @@ fn run_limit_covers_remaining_error_and_noop_paths() {
         Err(CommandError::Message(err)) => err,
         other => panic!("unexpected result: {other:?}"),
     };
-    assert_eq!(err, "Unable to find user missing@example.com in the user list");
+    assert_eq!(
+        err,
+        "Unable to find user missing@example.com in the user list"
+    );
 
     let limits_error = HttpClient::mock_with_overrides(&[
         (
@@ -1172,7 +1227,11 @@ fn run_limit_covers_remaining_error_and_noop_paths() {
             200,
             "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0></aids></xmlresponse>",
         ),
-        ("share.php", 200, "<xmlresponse><success>1</success></xmlresponse>"),
+        (
+            "share.php",
+            200,
+            "<xmlresponse><success>1</success></xmlresponse>",
+        ),
     ]);
     assert_eq!(
         run_inner_with(
@@ -1233,28 +1292,40 @@ fn share_transport_and_prompt_helpers_cover_remaining_error_paths() {
         ..ShareUser::default()
     };
 
-    assert!(share_getinfo_with_client(&real_client, &bad_session, &share.id)
-        .expect_err("getinfo")
-        .contains("IO error while http post"));
-    assert!(share_getpubkeys_with_client(&real_client, &bad_session, &user.username)
-        .expect_err("getpubkeys")
-        .contains("IO error while http post"));
-    assert!(share_getpubkey_with_client(&real_client, &bad_session, &bad_session.uid)
-        .expect_err("getpubkey")
-        .contains("IO error while http post"));
-    assert!(share_get_limits_with_client(&real_client, &bad_session, &share, &user)
-        .expect_err("getlimits")
-        .contains("IO error while http post"));
-    assert!(post_share_params(
-        &real_client,
-        &bad_session,
-        vec![("token".to_string(), bad_session.token.clone())],
-    )
-    .expect_err("post")
-    .contains("IO error while http post"));
-    assert!(get_user_from_share(&real_client, &bad_session, &share, &user.username)
-        .expect_err("user")
-        .contains("Unable to access user list for share Team"));
+    assert!(
+        share_getinfo_with_client(&real_client, &bad_session, &share.id)
+            .expect_err("getinfo")
+            .contains("IO error while http post")
+    );
+    assert!(
+        share_getpubkeys_with_client(&real_client, &bad_session, &user.username)
+            .expect_err("getpubkeys")
+            .contains("IO error while http post")
+    );
+    assert!(
+        share_getpubkey_with_client(&real_client, &bad_session, &bad_session.uid)
+            .expect_err("getpubkey")
+            .contains("IO error while http post")
+    );
+    assert!(
+        share_get_limits_with_client(&real_client, &bad_session, &share, &user)
+            .expect_err("getlimits")
+            .contains("IO error while http post")
+    );
+    assert!(
+        post_share_params(
+            &real_client,
+            &bad_session,
+            vec![("token".to_string(), bad_session.token.clone())],
+        )
+        .expect_err("post")
+        .contains("IO error while http post")
+    );
+    assert!(
+        get_user_from_share(&real_client, &bad_session, &share, &user.username)
+            .expect_err("user")
+            .contains("Unable to access user list for share Team")
+    );
 
     assert_eq!(
         share_user_add_with_client(
@@ -1275,17 +1346,19 @@ fn share_transport_and_prompt_helpers_cover_remaining_error_paths() {
         200,
         "<xmlresponse><success>1</success><pubkey0>0102</pubkey0><uid0>10</uid0><username0>bad@example.com</username0></xmlresponse>",
     )]);
-    assert!(share_user_add_with_client(
-        &add_bad_pubkey,
-        &session(),
-        &share,
-        &ShareUser {
-            username: "bad@example.com".to_string(),
-            ..ShareUser::default()
-        },
-    )
-    .expect_err("bad pubkey")
-    .contains("crypto error"));
+    assert!(
+        share_user_add_with_client(
+            &add_bad_pubkey,
+            &session(),
+            &share,
+            &ShareUser {
+                username: "bad@example.com".to_string(),
+                ..ShareUser::default()
+            },
+        )
+        .expect_err("bad pubkey")
+        .contains("crypto error")
+    );
 
     let add_post_error = HttpClient::mock_with_overrides(&[
         (
@@ -1314,9 +1387,11 @@ fn share_transport_and_prompt_helpers_cover_remaining_error_paths() {
         200,
         "<xmlresponse><success>1</success><pubkey0>0102</pubkey0><uid0>57747756</uid0><username0>user@example.com</username0></xmlresponse>",
     )]);
-    assert!(share_create_with_client(&create_bad_pubkey, &session(), "Shared-Team")
-        .expect_err("create bad pubkey")
-        .contains("crypto error"));
+    assert!(
+        share_create_with_client(&create_bad_pubkey, &session(), "Shared-Team")
+            .expect_err("create bad pubkey")
+            .contains("crypto error")
+    );
 
     share_user_mod_with_client(
         &HttpClient::mock(),
@@ -1404,9 +1479,8 @@ fn share_transport_and_prompt_helpers_cover_remaining_error_paths() {
     assert!(err.contains("write failed"));
 
     let mut reader = std::io::Cursor::new(b"y\n".to_vec());
-    let err =
-        ask_yes_no_with_reader_writer(&mut reader, &mut FailingFlushWriter, true, "Prompt")
-            .expect_err("flush error");
+    let err = ask_yes_no_with_reader_writer(&mut reader, &mut FailingFlushWriter, true, "Prompt")
+        .expect_err("flush error");
     assert!(err.contains("flush failed"));
 
     let err = ask_yes_no_with_reader_writer(&mut FailingReader, &mut Vec::new(), true, "Prompt")

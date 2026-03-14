@@ -255,8 +255,9 @@ fn parse_share_get_limits_ignores_unknown_children() {
 
 #[test]
 fn parse_xml_tree_covers_cdata_and_invalid_root_shapes() {
-    let root = parse_xml_tree("<xmlresponse attr=\"1\"><value><![CDATA[text]]></value></xmlresponse>")
-        .expect("tree");
+    let root =
+        parse_xml_tree("<xmlresponse attr=\"1\"><value><![CDATA[text]]></value></xmlresponse>")
+            .expect("tree");
     assert_eq!(root.name, "xmlresponse");
     assert_eq!(child_text(&root, "value").as_deref(), Some("text"));
 

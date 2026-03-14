@@ -5,8 +5,8 @@ use std::fmt::{self, Display};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::share::{ShareLimit, ShareLimitAid, ShareUser};
 use crate::session::Session;
+use crate::share::{ShareLimit, ShareLimitAid, ShareUser};
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct PwChangeInfo {
@@ -174,9 +174,7 @@ pub fn parse_share_getinfo(xml: &str) -> std::result::Result<Vec<ShareUser>, Sha
         .collect())
 }
 
-pub fn parse_share_getpubkeys(
-    xml: &str,
-) -> std::result::Result<Vec<ShareUser>, ShareParseError> {
+pub fn parse_share_getpubkeys(xml: &str) -> std::result::Result<Vec<ShareUser>, ShareParseError> {
     let root = parse_xml_tree(xml).ok_or(ShareParseError::Invalid)?;
     if root.name != "xmlresponse" {
         return Err(ShareParseError::Invalid);
@@ -417,7 +415,11 @@ fn parse_attrs(
     let mut parsed = std::collections::HashMap::new();
     for attr in attrs.with_checks(false) {
         let attr = attr.ok()?;
-        let key = reader.decoder().decode(attr.key.as_ref()).ok()?.into_owned();
+        let key = reader
+            .decoder()
+            .decode(attr.key.as_ref())
+            .ok()?
+            .into_owned();
         let value = attr
             .decode_and_unescape_value(reader.decoder())
             .ok()?
