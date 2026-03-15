@@ -8,6 +8,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, USER_AGENT};
+use rsa::RsaPrivateKey;
+use rsa::pkcs1::DecodeRsaPrivateKey;
+use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
 
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, encrypt_private_key};
 use crate::error::{LpassError, Result};
@@ -200,6 +203,7 @@ struct MockTransport {
     iterations: u32,
     uid: String,
     private_key_enc: String,
+    sharing_public_key_hex: String,
     #[cfg(test)]
     overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
@@ -228,6 +232,7 @@ impl MockTransport {
         let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("valid mock private key");
         let private_key_enc = encrypt_private_key(&private_key, &decryption_key)
             .expect("fixed mock private key should encrypt");
+        let sharing_public_key_hex = mock_public_key_hex(&private_key);
         Self {
             username,
             login_hash,
@@ -235,6 +240,7 @@ impl MockTransport {
             iterations,
             uid,
             private_key_enc,
+            sharing_public_key_hex,
             #[cfg(test)]
             overrides: std::sync::Mutex::new(HashMap::new()),
         }
@@ -318,6 +324,7 @@ impl MockTransport {
                     String::new()
                 }
             }
+            "share.php" => self.respond_share(&map),
             _ => "<response><error message=\"unimplemented\"/></response>".to_string(),
         };
 
@@ -385,11 +392,105 @@ impl MockTransport {
             "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string()
         }
     }
+
+    fn respond_share(&self, map: &HashMap<String, String>) -> String {
+        if map.get("getinfo").map(String::as_str) == Some("1") {
+            return self.respond_share_getinfo();
+        }
+        if map.get("getpubkey").map(String::as_str) == Some("1") {
+            return self.respond_share_getpubkey(map.get("uid").map(String::as_str));
+        }
+        if map.get("limit").map(String::as_str) == Some("1")
+            && map.get("edit").map(String::as_str) == Some("1")
+        {
+            return "<xmlresponse><success>1</success></xmlresponse>".to_string();
+        }
+        if map.get("limit").map(String::as_str) == Some("1") {
+            return self.respond_share_get_limits();
+        }
+        if map.get("delete").map(String::as_str) == Some("1")
+            || map.get("update").map(String::as_str) == Some("1")
+            || map.get("up").map(String::as_str) == Some("1")
+        {
+            return "<xmlresponse><success>1</success></xmlresponse>".to_string();
+        }
+        "<xmlresponse><error message=\"unimplemented\"/></xmlresponse>".to_string()
+    }
+
+    fn respond_share_getinfo(&self) -> String {
+        format!(
+            "<xmlresponse><users>\
+                <item>\
+                    <realname>Test User</realname>\
+                    <uid>{}</uid>\
+                    <group>0</group>\
+                    <username>{}</username>\
+                    <permissions><readonly>1</readonly><canadminister>0</canadminister><give>0</give></permissions>\
+                    <outsideenterprise>0</outsideenterprise>\
+                    <accepted>1</accepted>\
+                </item>\
+                <item>\
+                    <uid>991</uid>\
+                    <group>1</group>\
+                    <username>group-team</username>\
+                    <permissions><readonly>0</readonly><canadminister>1</canadminister><give>1</give></permissions>\
+                    <outsideenterprise>0</outsideenterprise>\
+                    <accepted>1</accepted>\
+                </item>\
+            </users></xmlresponse>",
+            self.uid, self.username
+        )
+    }
+
+    fn respond_share_getpubkey(&self, raw_uid: Option<&str>) -> String {
+        let Some(requested) = raw_uid.and_then(parse_mock_uid_param) else {
+            return "<xmlresponse><success>0</success></xmlresponse>".to_string();
+        };
+
+        if requested == self.uid || requested.eq_ignore_ascii_case(&self.username) {
+            return format!(
+                "<xmlresponse><success>1</success><pubkey0>{}</pubkey0><uid0>{}</uid0><username0>{}</username0></xmlresponse>",
+                self.sharing_public_key_hex, self.uid, self.username
+            );
+        }
+
+        if requested.eq_ignore_ascii_case("group-team") {
+            return "<xmlresponse><success>1</success><uid0>991</uid0><username0>group-team</username0><cgid0>cg-991</cgid0></xmlresponse>".to_string();
+        }
+
+        format!(
+            "<xmlresponse><success>1</success><pubkey0>{}</pubkey0><uid0>880</uid0><username0>{}</username0></xmlresponse>",
+            self.sharing_public_key_hex, requested
+        )
+    }
+
+    fn respond_share_get_limits(&self) -> String {
+        "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0></aids></xmlresponse>"
+            .to_string()
+    }
 }
 
 fn mock_login_hash(username: &str, password: &str, iterations: u32) -> String {
     kdf_login_key(username, password, iterations)
         .expect("fixed mock credentials should derive a login hash")
+}
+
+fn mock_public_key_hex(private_key_der: &[u8]) -> String {
+    let private_key = RsaPrivateKey::from_pkcs1_der(private_key_der)
+        .or_else(|_| RsaPrivateKey::from_pkcs8_der(private_key_der))
+        .expect("fixed mock private key should decode");
+    let public_key = private_key.to_public_key();
+    let der = public_key
+        .to_public_key_der()
+        .expect("fixed mock public key should encode");
+    hex::encode(der.as_ref())
+}
+
+fn parse_mock_uid_param(value: &str) -> Option<String> {
+    let prefix = "{\"";
+    let rest = value.strip_prefix(prefix)?;
+    let end = rest.find("\":{")?;
+    Some(rest[..end].to_string())
 }
 
 fn params_to_map(params: &[(&str, &str)]) -> HashMap<String, String> {

@@ -15,6 +15,7 @@ mod ls;
 mod mv;
 mod passwd;
 mod rm;
+mod share;
 mod show;
 mod status;
 mod sync;
@@ -36,14 +37,9 @@ pub fn run(command: &str, args: &[String]) -> i32 {
         "rm" => rm::run(args),
         "status" => status::run(args),
         "sync" => sync::run(args),
-        "share" => not_implemented(command),
+        "share" => share::run(args),
         _ => 1,
     }
-}
-
-fn not_implemented(command: &str) -> i32 {
-    eprintln!("error: command '{}' not implemented", command);
-    1
 }
 
 #[cfg(test)]
@@ -52,7 +48,6 @@ mod tests {
 
     #[test]
     fn run_reports_unimplemented_and_unknown_commands() {
-        assert_eq!(run("share", &[]), 1);
         assert_eq!(run("unknown", &[]), 1);
     }
 }

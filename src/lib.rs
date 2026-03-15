@@ -14,6 +14,7 @@ pub mod lpenv;
 pub mod notes;
 pub mod password;
 pub mod session;
+pub mod share;
 pub mod terminal;
 pub mod upload_queue;
 pub mod util;

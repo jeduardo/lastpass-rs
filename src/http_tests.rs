@@ -155,6 +155,26 @@ fn mock_login_check_and_unknown_page_responses() {
 }
 
 #[test]
+fn mock_share_fallback_paths_cover_unimplemented_and_missing_uid() {
+    let client = HttpClient::mock();
+
+    let unknown = client
+        .post_lastpass(None, "share.php", None, &[("xmlr", "1")])
+        .expect("response");
+    assert!(unknown.body.contains("unimplemented"));
+
+    let missing_uid = client
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getpubkey", "1"), ("xmlr", "1")],
+        )
+        .expect("response");
+    assert!(missing_uid.body.contains("<success>0</success>"));
+}
+
+#[test]
 fn post_lastpass_bytes_returns_raw_body() {
     let client = HttpClient::mock();
     let response = client

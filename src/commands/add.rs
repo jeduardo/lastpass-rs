@@ -10,6 +10,7 @@ use crate::notes::{
     NoteType, collapse_notes, note_field_is_multiline, note_has_field, note_type_by_name,
     note_type_by_shortname, note_type_display_name, note_type_fields,
 };
+use crate::share::assign_account_share;
 use crate::terminal;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -102,10 +103,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         account
     };
 
+    assign_account_share(&mut account, &blob)?;
     account.id = "0".to_string();
     blob.accounts.push(account.clone());
     save_blob(&blob).map_err(|err| format!("{err}"))?;
-    maybe_push_account_update(&account, parsed.sync_mode).map_err(|err| format!("{err}"))?;
+    maybe_push_account_update(&account, &blob, parsed.sync_mode).map_err(|err| format!("{err}"))?;
     Ok(0)
 }
 

@@ -196,11 +196,15 @@ pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
     config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key)
 }
 
-pub(crate) fn maybe_push_account_update(account: &Account, sync_mode: SyncMode) -> Result<()> {
+pub(crate) fn maybe_push_account_update(
+    account: &Account,
+    blob: &Blob,
+    sync_mode: SyncMode,
+) -> Result<()> {
     let Some((key, session)) = load_queue_credentials()? else {
         return Ok(());
     };
-    let params = build_show_website_params(account, &session, &key)?;
+    let params = build_show_website_params(account, blob, &session, &key)?;
     upload_queue::enqueue(
         &key,
         "show_website.php",
@@ -318,9 +322,11 @@ pub(crate) fn refresh_blob_from_server(
 
 pub(crate) fn build_show_website_params(
     account: &Account,
+    blob: &Blob,
     session: &Session,
-    key: &[u8; KDF_HASH_LEN],
+    vault_key: &[u8; KDF_HASH_LEN],
 ) -> Result<Vec<(String, String)>> {
+    let key = upload_key_for_account(account, blob, vault_key)?;
     let mut params = vec![
         ("extjs".to_string(), "1".to_string()),
         ("token".to_string(), session.token.clone()),
@@ -374,6 +380,39 @@ pub(crate) fn build_show_website_params(
     }
 
     Ok(params)
+}
+
+fn upload_key_for_account<'a>(
+    account: &Account,
+    blob: &'a Blob,
+    vault_key: &'a [u8; KDF_HASH_LEN],
+) -> Result<&'a [u8; KDF_HASH_LEN]> {
+    let Some(share_id) = account
+        .share_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(vault_key);
+    };
+
+    let share = blob
+        .shares
+        .iter()
+        .find(|share| share.id == share_id)
+        .or_else(|| {
+            account.share_name.as_deref().and_then(|share_name| {
+                blob.shares
+                    .iter()
+                    .find(|share| share.name.eq_ignore_ascii_case(share_name))
+            })
+        })
+        .ok_or(LpassError::User(
+            "Unable to find shared folder key. Please sync and try again.",
+        ))?;
+
+    share.key.as_ref().ok_or(LpassError::User(
+        "Unable to find shared folder key. Please sync and try again.",
+    ))
 }
 
 fn is_secure_note(account: &Account) -> bool {
@@ -728,6 +767,7 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
+        let blob = Blob::default();
         let key = [3u8; KDF_HASH_LEN];
         let session = Session {
             uid: "u".to_string(),
@@ -739,7 +779,7 @@ mod tests {
             private_key: None,
             private_key_enc: None,
         };
-        let params = build_show_website_params(&account, &session, &key).expect("params");
+        let params = build_show_website_params(&account, &blob, &session, &key).expect("params");
         assert!(params.iter().any(|(k, _)| k == "extjs"));
         assert!(params.iter().any(|(k, _)| k == "token"));
         assert!(params.iter().any(|(k, _)| k == "aid"));
@@ -777,6 +817,18 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            shares: vec![crate::blob::Share {
+                id: "4321".to_string(),
+                name: "Team".to_string(),
+                readonly: false,
+                key: Some([7u8; KDF_HASH_LEN]),
+            }],
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        };
         let key = [3u8; KDF_HASH_LEN];
         let session = Session {
             uid: "u".to_string(),
@@ -788,12 +840,140 @@ mod tests {
             private_key: None,
             private_key_enc: None,
         };
-        let params = build_show_website_params(&account, &session, &key).expect("params");
+        let params = build_show_website_params(&account, &blob, &session, &key).expect("params");
         assert!(
             params
                 .iter()
                 .any(|(k, v)| k == "sharedfolderid" && v == "4321")
         );
+    }
+
+    #[test]
+    fn build_show_website_params_uses_share_key_for_shared_entries() {
+        let share_key = [7u8; KDF_HASH_LEN];
+        let vault_key = [3u8; KDF_HASH_LEN];
+        let account = Account {
+            id: "0".to_string(),
+            share_name: Some("Team".to_string()),
+            share_id: Some("4321".to_string()),
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: "group".to_string(),
+            group_encrypted: None,
+            fullname: "Team/group/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "user".to_string(),
+            username_encrypted: None,
+            password: "pass".to_string(),
+            password_encrypted: None,
+            note: "note".to_string(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: vec![crate::blob::Field {
+                name: "Environment".to_string(),
+                field_type: "text".to_string(),
+                value: "prod".to_string(),
+                value_encrypted: None,
+                checked: false,
+            }],
+        };
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            shares: vec![crate::blob::Share {
+                id: "4321".to_string(),
+                name: "Team".to_string(),
+                readonly: false,
+                key: Some(share_key),
+            }],
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        };
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: true,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+
+        let params =
+            build_show_website_params(&account, &blob, &session, &vault_key).expect("params");
+        let values: std::collections::HashMap<_, _> = params.into_iter().collect();
+
+        let name = crate::crypto::aes_decrypt_base64_lastpass(values["name"].as_str(), &share_key)
+            .expect("decrypt name");
+        let password =
+            crate::crypto::aes_decrypt_base64_lastpass(values["password"].as_str(), &share_key)
+                .expect("decrypt password");
+        let url = crate::crypto::aes_decrypt_base64_lastpass(values["url"].as_str(), &share_key)
+            .expect("decrypt url");
+
+        assert_eq!(String::from_utf8_lossy(&name), "entry");
+        assert_eq!(String::from_utf8_lossy(&password), "pass");
+        assert_eq!(String::from_utf8_lossy(&url), "https://example.com");
+        assert!(
+            crate::crypto::aes_decrypt_base64_lastpass(values["name"].as_str(), &vault_key)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn build_show_website_params_reports_missing_shared_folder_key() {
+        let account = Account {
+            id: "0".to_string(),
+            share_name: Some("Team".to_string()),
+            share_id: Some("4321".to_string()),
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "Team/entry".to_string(),
+            url: String::new(),
+            url_encrypted: None,
+            username: String::new(),
+            username_encrypted: None,
+            password: String::new(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        };
+        let blob = Blob::default();
+        let key = [3u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+
+        let err = build_show_website_params(&account, &blob, &session, &key)
+            .expect_err("missing share key");
+        assert!(format!("{err}").contains("Unable to find shared folder key"));
     }
 
     #[test]
@@ -825,6 +1005,7 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
+        let blob = Blob::default();
         let key = [6u8; KDF_HASH_LEN];
         let session = Session {
             uid: "u".to_string(),
@@ -836,7 +1017,7 @@ mod tests {
             private_key: None,
             private_key_enc: None,
         };
-        let params = build_show_website_params(&account, &session, &key).expect("params");
+        let params = build_show_website_params(&account, &blob, &session, &key).expect("params");
         let url = params
             .iter()
             .find(|(k, _)| k == "url")
@@ -881,6 +1062,7 @@ mod tests {
                 checked: false,
             }],
         };
+        let blob = Blob::default();
         let key = [6u8; KDF_HASH_LEN];
         let session = Session {
             uid: "u".to_string(),
@@ -893,7 +1075,7 @@ mod tests {
             private_key_enc: None,
         };
 
-        let params = build_show_website_params(&account, &session, &key).expect("params");
+        let params = build_show_website_params(&account, &blob, &session, &key).expect("params");
         assert!(params.iter().any(|(k, v)| k == "aid" && v == "0"));
         assert!(params.iter().any(|(k, v)| k == "pwprotect" && v == "on"));
         assert!(
@@ -1171,8 +1353,15 @@ mod tests {
             attachpresent: false,
             fields: Vec::new(),
         };
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: vec![account.clone()],
+            attachments: Vec::new(),
+        };
 
-        maybe_push_account_update(&account, SyncMode::No).expect("queue update");
+        maybe_push_account_update(&account, &blob, SyncMode::No).expect("queue update");
 
         let queue_dir = config_path("upload-queue/.marker")
             .expect("queue marker")
@@ -1361,7 +1550,7 @@ mod tests {
         assert_eq!(loaded.version, 99);
 
         let account = loaded.accounts[0].clone();
-        maybe_push_account_update(&account, SyncMode::Auto).expect("mock update");
+        maybe_push_account_update(&account, &loaded, SyncMode::Auto).expect("mock update");
         maybe_push_account_remove(&account, SyncMode::Now).expect("mock remove");
     }
 

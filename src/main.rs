@@ -11,3 +11,7 @@ fn main() {
     let exit_code = lpass_core::cli::run(args);
     std::process::exit(exit_code);
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

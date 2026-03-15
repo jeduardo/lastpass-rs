@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
+use std::fmt::{self, Display};
+
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use crate::session::Session;
+use crate::share::{ShareLimit, ShareLimitAid, ShareUser};
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct PwChangeInfo {
@@ -35,6 +38,21 @@ pub struct PwChangeSuKey {
 pub enum PwChangeParseError {
     IncorrectPassword,
     Invalid,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ShareParseError {
+    Invalid,
+    NotFound,
+}
+
+impl Display for ShareParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invalid => f.write_str("invalid share xml"),
+            Self::NotFound => f.write_str("missing share record"),
+        }
+    }
 }
 
 pub fn parse_ok_session(xml: &str) -> Option<Session> {
@@ -137,6 +155,97 @@ pub fn parse_pwchange(xml: &str) -> std::result::Result<PwChangeInfo, PwChangePa
     })
 }
 
+pub fn parse_share_getinfo(xml: &str) -> std::result::Result<Vec<ShareUser>, ShareParseError> {
+    let root = parse_xml_tree(xml).ok_or(ShareParseError::Invalid)?;
+    if root.name != "xmlresponse" {
+        return Err(ShareParseError::Invalid);
+    }
+    let users = root
+        .children
+        .iter()
+        .find(|child| child.name == "users")
+        .ok_or(ShareParseError::Invalid)?;
+
+    Ok(users
+        .children
+        .iter()
+        .filter(|child| child.name == "item")
+        .map(parse_share_user_item)
+        .collect())
+}
+
+pub fn parse_share_getpubkeys(xml: &str) -> std::result::Result<Vec<ShareUser>, ShareParseError> {
+    let root = parse_xml_tree(xml).ok_or(ShareParseError::Invalid)?;
+    if root.name != "xmlresponse" {
+        return Err(ShareParseError::Invalid);
+    }
+
+    let mut users = Vec::new();
+    for idx in 0.. {
+        let uid_key = format!("uid{idx}");
+        let Some(uid) = child_text(&root, &uid_key) else {
+            break;
+        };
+        let username = child_text(&root, &format!("username{idx}")).unwrap_or_default();
+        let cgid = child_text(&root, &format!("cgid{idx}")).filter(|value| !value.is_empty());
+        let sharing_key = child_text(&root, &format!("pubkey{idx}"))
+            .and_then(|value| hex::decode(value).ok())
+            .unwrap_or_default();
+        users.push(ShareUser {
+            uid,
+            username,
+            cgid,
+            sharing_key,
+            ..ShareUser::default()
+        });
+    }
+
+    if users.is_empty() {
+        Err(ShareParseError::NotFound)
+    } else {
+        Ok(users)
+    }
+}
+
+pub fn parse_share_getpubkey(xml: &str) -> std::result::Result<ShareUser, ShareParseError> {
+    parse_share_getpubkeys(xml)?
+        .into_iter()
+        .next()
+        .ok_or(ShareParseError::NotFound)
+}
+
+pub fn parse_share_get_limits(xml: &str) -> std::result::Result<ShareLimit, ShareParseError> {
+    let root = parse_xml_tree(xml).ok_or(ShareParseError::Invalid)?;
+    if root.name != "xmlresponse" {
+        return Err(ShareParseError::Invalid);
+    }
+
+    let mut limit = ShareLimit::default();
+    for child in &root.children {
+        match child.name.as_str() {
+            "hidebydefault" => {
+                limit.whitelist = parse_bool_text(&child.text);
+            }
+            "aids" => {
+                limit.aids = child
+                    .children
+                    .iter()
+                    .filter(|item| item.name.starts_with("aid"))
+                    .filter_map(|item| {
+                        let aid = item.text.trim();
+                        (!aid.is_empty()).then(|| ShareLimitAid {
+                            aid: aid.to_string(),
+                        })
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+
+    Ok(limit)
+}
+
 fn parse_ok_attributes(xml: &str) -> Option<std::collections::HashMap<String, String>> {
     parse_element_attributes(xml, b"ok")
 }
@@ -212,6 +321,161 @@ fn parse_pwchange_su_keys(attrs: &std::collections::HashMap<String, String>) -> 
         });
     }
     su_keys
+}
+
+#[derive(Debug, Clone, Default)]
+struct XmlNode {
+    name: String,
+    text: String,
+    children: Vec<XmlNode>,
+}
+
+fn parse_xml_tree(xml: &str) -> Option<XmlNode> {
+    let mut reader = Reader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut stack: Vec<XmlNode> = Vec::new();
+    let mut root: Option<XmlNode> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let node = XmlNode {
+                    name: reader
+                        .decoder()
+                        .decode(e.name().as_ref())
+                        .ok()?
+                        .into_owned(),
+                    text: String::new(),
+                    children: Vec::new(),
+                };
+                if parse_attrs(&reader, e.attributes()).is_none() {
+                    return None;
+                }
+                stack.push(node);
+            }
+            Ok(Event::Empty(e)) => {
+                let node = XmlNode {
+                    name: reader
+                        .decoder()
+                        .decode(e.name().as_ref())
+                        .ok()?
+                        .into_owned(),
+                    text: String::new(),
+                    children: Vec::new(),
+                };
+                if parse_attrs(&reader, e.attributes()).is_none() {
+                    return None;
+                }
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else if root.is_none() {
+                    root = Some(node);
+                } else {
+                    return None;
+                }
+            }
+            Ok(Event::Text(e)) => {
+                if let Some(node) = stack.last_mut() {
+                    node.text.push_str(e.xml_content().ok()?.as_ref());
+                }
+            }
+            Ok(Event::CData(e)) => {
+                if let Some(node) = stack.last_mut() {
+                    node.text.push_str(e.decode().ok()?.as_ref());
+                }
+            }
+            Ok(Event::End(_)) => {
+                let node = stack.pop()?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else if root.is_none() {
+                    root = Some(node);
+                } else {
+                    return None;
+                }
+            }
+            Ok(Event::Decl(_))
+            | Ok(Event::PI(_))
+            | Ok(Event::DocType(_))
+            | Ok(Event::Comment(_))
+            | Ok(Event::GeneralRef(_)) => {}
+            Ok(Event::Eof) => break,
+            Err(_) => return None,
+        }
+        buf.clear();
+    }
+
+    if stack.is_empty() { root } else { None }
+}
+
+fn parse_attrs(
+    reader: &Reader<&[u8]>,
+    mut attrs: quick_xml::events::attributes::Attributes<'_>,
+) -> Option<std::collections::HashMap<String, String>> {
+    let mut parsed = std::collections::HashMap::new();
+    for attr in attrs.with_checks(false) {
+        let attr = attr.ok()?;
+        let key = reader
+            .decoder()
+            .decode(attr.key.as_ref())
+            .ok()?
+            .into_owned();
+        let value = attr
+            .decode_and_unescape_value(reader.decoder())
+            .ok()?
+            .into_owned();
+        parsed.insert(key, value);
+    }
+    Some(parsed)
+}
+
+fn child_text(node: &XmlNode, name: &str) -> Option<String> {
+    node.children
+        .iter()
+        .find(|child| child.name == name)
+        .map(|child| child.text.trim().to_string())
+}
+
+fn parse_share_user_item(item: &XmlNode) -> ShareUser {
+    let mut user = ShareUser::default();
+
+    for child in &item.children {
+        match child.name.as_str() {
+            "realname" => {
+                let value = child.text.trim();
+                if !value.is_empty() {
+                    user.realname = Some(value.to_string());
+                }
+            }
+            "username" => user.username = child.text.trim().to_string(),
+            "uid" => user.uid = child.text.trim().to_string(),
+            "group" => user.is_group = parse_bool_text(&child.text),
+            "outsideenterprise" => user.outside_enterprise = parse_bool_text(&child.text),
+            "accepted" => user.accepted = parse_bool_text(&child.text),
+            "sharingkey" => {
+                user.sharing_key = hex::decode(child.text.trim()).unwrap_or_default();
+            }
+            "permissions" => parse_share_permissions(child, &mut user),
+            _ => {}
+        }
+    }
+
+    user
+}
+
+fn parse_share_permissions(node: &XmlNode, user: &mut ShareUser) {
+    for child in &node.children {
+        match child.name.as_str() {
+            "canadminister" => user.admin = parse_bool_text(&child.text),
+            "readonly" => user.read_only = parse_bool_text(&child.text),
+            "give" => user.hide_passwords = !parse_bool_text(&child.text),
+            _ => {}
+        }
+    }
+}
+
+fn parse_bool_text(text: &str) -> bool {
+    text.trim() == "1"
 }
 
 fn parse_element_attributes(

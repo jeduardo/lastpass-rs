@@ -1,6 +1,6 @@
 # Task 07: Implement `share` Command Family
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Implement `share` subcommands with strict parity to C behavior, options, and output formats.
@@ -31,3 +31,15 @@ Acceptance criteria:
 - `lpass share` is no longer stubbed.
 - Help/usage and subcommand behavior match C conventions.
 - Automated tests cover option matrix and common operations.
+
+Completed:
+- Added Rust `share` subcommand parity for `userls`, `useradd`, `usermod`, `userdel`, `create`, `rm`, and `limit`.
+- Matched C-style share lookup, usage text, permission flag handling, and limit-list behavior.
+- Added XML parsing and mock HTTP support for `share.php` flows.
+- Added unit and CLI integration coverage for parsing, success paths, error paths, confirmation prompts, and transport failures.
+
+Verification:
+- `cargo test --locked --all-targets`
+- `cargo llvm-cov --workspace --all-targets --json --output-path coverage/full.json --ignore-filename-regex 'src/bin/test-upstream.rs$'`
+- `./scripts/run-upstream-shell-tests.sh`
+- `act -j test --container-architecture linux/arm64`
