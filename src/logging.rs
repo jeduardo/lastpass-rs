@@ -11,6 +11,7 @@ pub const LOG_INFO: i32 = 6;
 pub const LOG_DEBUG: i32 = 7;
 pub const LOG_VERBOSE: i32 = 8;
 
+#[inline(never)]
 pub fn log_level() -> i32 {
     match crate::lpenv::var("LPASS_LOG_LEVEL") {
         Ok(value) => value.parse::<i32>().unwrap_or(0),
@@ -18,10 +19,12 @@ pub fn log_level() -> i32 {
     }
 }
 
+#[inline(never)]
 pub fn enabled(level: i32) -> bool {
     log_level() >= level
 }
 
+#[inline(never)]
 pub fn log(level: i32, message: &str) {
     if !enabled(level) {
         return;

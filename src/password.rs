@@ -16,6 +16,7 @@ pub fn prompt_password(username: &str) -> Result<String> {
     )
 }
 
+#[inline(never)]
 pub fn prompt_password_with_description(
     prompt: &str,
     error: Option<&str>,

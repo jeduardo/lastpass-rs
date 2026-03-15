@@ -87,6 +87,7 @@ fn run_clipboard_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn run_clipboard_command_writes_input_and_succeeds() {
@@ -135,17 +136,30 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn copy_to_clipboard_treats_empty_custom_command_as_active() {
+        use std::os::unix::fs::PermissionsExt;
+
         let _guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let shell = temp.path().join("shell.sh");
+        let log = temp.path().join("shell.log");
+        let body = format!(
+            "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$2\" > '{}'\ncat >> '{}'\n",
+            log.display(),
+            log.display()
+        );
+        std::fs::write(&shell, body).expect("write shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700))
+            .expect("chmod shell");
+
         crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "");
-        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
-        match copy_to_clipboard(b"v") {
-            Ok(()) => {}
-            Err(err) => {
-                assert!(err.contains("Unable to copy contents to clipboard"));
-                assert!(err.contains("wl-clip"));
-            }
-        }
+        crate::lpenv::set_override_for_tests("SHELL", &shell.display().to_string());
+
+        copy_to_clipboard(b"v").expect("empty custom command should still use the shell path");
+
+        let transcript = std::fs::read_to_string(&log).expect("read shell log");
+        assert_eq!(transcript, "-c|\nv");
     }
 
     #[test]

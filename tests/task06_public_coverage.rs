@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -9,9 +10,12 @@ use cbc::Encryptor as Aes256CbcEncryptor;
 use cipher::block_padding::Pkcs7;
 use cipher::{BlockEncryptMut, KeyInit, KeyIvInit};
 use ecb::Encryptor as Aes256EcbEncryptor;
+use lpass_core::config::config_path;
 use lpass_core::crypto::{
     aes_decrypt_lastpass, decrypt_private_key, rsa_decrypt_oaep, rsa_encrypt_oaep,
 };
+use lpass_core::logging::{LOG_DEBUG, LOG_INFO, enabled, log, log_level};
+use lpass_core::password::prompt_password_with_description;
 use lpass_core::xml::{parse_lastpass_api_ok, parse_ok_session};
 use rand::rngs::OsRng;
 use rsa::RsaPrivateKey;
@@ -34,8 +38,6 @@ fn run_lpass(home: &Path, askpass: &Path, args: &[&str]) -> Output {
 
 #[cfg(unix)]
 fn write_askpass_script(home: &Path, name: &str, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     let askpass = home.join(name);
     fs::write(&askpass, body).expect("write askpass");
     fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
@@ -160,4 +162,56 @@ fn passwd_cli_flow_runs_from_act_coverage_binary() {
         String::from_utf8_lossy(&status.stdout).trim(),
         "Not logged in."
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn password_public_api_uses_askpass_override() {
+    let temp = TempDir::new().expect("tempdir");
+    let script = temp.path().join("askpass.sh");
+    fs::write(&script, "#!/bin/sh\necho direct-askpass\n").expect("write askpass");
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
+
+    temp_env::with_vars(
+        [
+            ("LPASS_ASKPASS", Some(script.to_str().expect("utf8 path"))),
+            ("LPASS_DISABLE_PINENTRY", None::<&str>),
+            ("LPASS_PINENTRY", None::<&str>),
+        ],
+        || {
+            let prompt_fn: fn(&str, Option<&str>, &str) -> lpass_core::error::Result<String> =
+                prompt_password_with_description;
+            let value = prompt_fn(
+                "Master Password",
+                Some("invalid password"),
+                "Description",
+            )
+            .expect("prompt password");
+            assert_eq!(value, "direct-askpass");
+        },
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn logging_public_api_writes_log_file() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_text = temp_env::with_vars(
+        [
+            ("LPASS_HOME", Some(temp.path().to_str().expect("utf8 path"))),
+            ("LPASS_LOG_LEVEL", Some("7")),
+        ],
+        || {
+            assert_eq!(log_level(), LOG_DEBUG);
+            assert!(enabled(LOG_INFO));
+
+            log(LOG_DEBUG, "public api log line\n");
+
+            let path = config_path("lpass.log").expect("log path");
+            fs::read_to_string(path).expect("read log")
+        },
+    );
+
+    assert!(log_text.contains("<7> ["));
+    assert!(log_text.contains("public api log line"));
 }

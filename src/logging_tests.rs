@@ -58,3 +58,28 @@ fn log_ignores_messages_below_threshold() {
         "debug log should not be written at error level"
     );
 }
+
+#[test]
+fn log_returns_when_config_path_cannot_be_created() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    let _config_guard = set_test_env(ConfigEnv::default());
+    crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+
+    log(LOG_DEBUG, "this should be ignored\n");
+}
+
+#[test]
+fn log_returns_when_log_path_is_a_directory() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    let home = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(home.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+
+    let path = config_path("lpass.log").expect("log path");
+    std::fs::create_dir_all(&path).expect("mkdir log path");
+
+    log(LOG_DEBUG, "this should also be ignored\n");
+}

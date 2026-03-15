@@ -85,6 +85,9 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
 
+      - name: Clean coverage artifacts
+        run: cargo llvm-cov clean --workspace
+
       - name: Generate coverage report
         run: cargo coverage
 
