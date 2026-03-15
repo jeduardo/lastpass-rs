@@ -404,6 +404,39 @@ fn generate_clip_uses_clipboard_and_suppresses_stdout() {
 }
 
 #[test]
+fn show_clip_treats_empty_clipboard_command_env_as_active() {
+    let (temp, home) = unique_test_home();
+    let key = [4u8; KDF_HASH_LEN];
+    write_session_and_blob(&home, &key);
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_CLIPBOARD_COMMAND", "")
+        .env("SHELL", "/bin/sh")
+        .args(["show", "--sync=no", "--password", "--clip", "team/entry"])
+        .output()
+        .expect("run show");
+    match output.status.code().unwrap_or(-1) {
+        0 => {
+            assert!(
+                output.stdout.is_empty(),
+                "stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+        1 => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("Unable to copy contents to clipboard"), "{stderr}");
+            assert!(stderr.contains("wl-clip"), "{stderr}");
+        }
+        status => panic!("unexpected exit status {status}"),
+    }
+
+    let _ = temp;
+}
+
+#[test]
 fn generate_no_symbols_outputs_only_alnum_characters() {
     let (temp, home) = unique_test_home();
     let blob = Blob {

@@ -16,7 +16,7 @@ fn login_prompt_reads_password_from_tty_without_askpass() {
     let temp = TempDir::new().expect("tempdir");
     let exe = env!("CARGO_BIN_EXE_lpass");
     let shell_command = format!(
-        "LPASS_HOME='{}' LPASS_HTTP_MOCK=1 LPASS_ASKPASS='' '{}' login user@example.com",
+        "LPASS_HOME='{}' LPASS_HTTP_MOCK=1 LPASS_DISABLE_PINENTRY=1 '{}' login user@example.com",
         temp.path().display(),
         exe
     );
@@ -43,4 +43,21 @@ fn login_prompt_reads_password_from_tty_without_askpass() {
         transcript.contains("Please enter the LastPass master password for <user@example.com>.")
     );
     assert!(transcript.contains("Master Password:"));
+}
+
+#[test]
+fn login_reports_error_when_empty_askpass_is_set() {
+    let temp = TempDir::new().expect("tempdir");
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", temp.path())
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_ASKPASS", "")
+        .args(["login", "user@example.com"])
+        .output()
+        .expect("run login");
+
+    assert_eq!(output.status.code().unwrap_or(-1), 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unable to execute askpass"), "{stderr}");
 }

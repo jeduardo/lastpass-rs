@@ -46,7 +46,7 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
-- environment/prompt/clipboard/logging parity follow-up items
+- parity-test and coverage gate follow-up items
 
 ## Implementation status
 
@@ -247,15 +247,15 @@ Implementation status for environment variables (source audited from `lastpass-c
 | `LPASS_AGENT_DISABLE` | Disable use of the background agent when set to `1`. | ✅ Implemented |
 | `LPASS_ASKPASS` | External askpass helper command for password input. | ✅ Implemented |
 | `LPASS_AUTO_SYNC_TIME` | Auto-sync freshness window (seconds) for blob cache. | ✅ Implemented |
-| `LPASS_PINENTRY` | Pinentry executable override. | ❌ Not implemented yet |
-| `LPASS_DISABLE_PINENTRY` | Disable pinentry fallback and use tty prompt path. | ❌ Not implemented yet |
-| `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ✅ Implemented (`show --clip`) |
-| `LPASS_LOG_LEVEL` | Debug logging verbosity level. | ❌ Not implemented yet |
-| `SECURE_TMPDIR` | Secure temp dir override used by editor workflows. | ❌ Not implemented yet |
-| `TMPDIR` | Fallback temp dir for secure editing path. | ❌ Not implemented yet |
-| `SHELL` | Shell used to execute clipboard command wrappers. | ✅ Implemented (`show --clip`) |
-| `TERM` | TTY type passed to pinentry integration. | ❌ Not implemented yet |
-| `DISPLAY` | Display target passed to pinentry integration. | ❌ Not implemented yet |
+| `LPASS_PINENTRY` | Pinentry executable override. | ✅ Implemented |
+| `LPASS_DISABLE_PINENTRY` | Disable pinentry fallback and use tty prompt path. | ✅ Implemented |
+| `LPASS_CLIPBOARD_COMMAND` | Custom clipboard command for clip operations. | ✅ Implemented (`show --clip`, `generate --clip`) |
+| `LPASS_LOG_LEVEL` | Debug logging verbosity level. | ✅ Implemented |
+| `SECURE_TMPDIR` | Secure temp dir override used by editor workflows. | ✅ Implemented (`add` / `edit`; macOS RAM-disk auto-mount still differs) |
+| `TMPDIR` | Fallback temp dir for secure editing path. | ✅ Implemented (`add` / `edit`; macOS RAM-disk auto-mount still differs) |
+| `SHELL` | Shell used to execute clipboard command wrappers. | ✅ Implemented |
+| `TERM` | TTY type passed to pinentry integration. | ✅ Implemented |
+| `DISPLAY` | Display target passed to pinentry integration. | ✅ Implemented |
 | `LPASS_HTTP_MOCK` | Rust-only mock HTTP/test mode toggle (`1` enables mock). | ✅ Implemented (Rust extension) |
 
 ## Testing

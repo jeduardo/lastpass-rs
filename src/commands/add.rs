@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::fs;
-use std::io::{self, Read, Write};
-use std::process::Command;
+use std::io::{self, Read};
 
 use crate::blob::{Account, Field};
 use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
@@ -71,7 +69,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         read_stdin_to_string()?
     } else {
         let initial = make_editor_initial_text(&parsed);
-        edit_with_editor(&initial)?
+        crate::editor::edit_with_editor(&initial)?
     };
 
     let mut blob = load_blob(parsed.sync_mode).map_err(|err| format!("{err}"))?;
@@ -308,35 +306,6 @@ fn render_account_file(account: &Account, note_type: NoteType, is_app: bool) -> 
     out.push_str("Notes:    # Add notes below this line.\n");
     out.push_str(&account.note);
     out
-}
-
-fn edit_with_editor(initial: &str) -> Result<String, String> {
-    let mut file = tempfile::NamedTempFile::new().map_err(|err| format!("mkstemp: {err}"))?;
-    file.write_all(initial.as_bytes())
-        .map_err(|err| format!("write: {err}"))?;
-    file.flush().map_err(|err| format!("flush: {err}"))?;
-
-    let editor = crate::lpenv::var("VISUAL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            crate::lpenv::var("EDITOR")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .unwrap_or_else(|| "vi".to_string());
-    let path = file.path().to_string_lossy().to_string();
-    let _status = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} {}", shell_quote(&path)))
-        .status()
-        .map_err(|err| format!("system($VISUAL): {err}"))?;
-
-    fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn read_stdin_to_string() -> Result<String, String> {
@@ -776,6 +745,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_add_args_rejects_extra_names_and_missing_option_values() {
+        let err = parse_add_args(&["first".to_string(), "second".to_string()])
+            .expect_err("duplicate names must fail");
+        assert!(err.contains("usage: add"));
+
+        let err = parse_add_args(&["--field".to_string()]).expect_err("missing field value");
+        assert!(err.contains("usage: add"));
+
+        let err =
+            parse_add_args(&["--note-type".to_string()]).expect_err("missing note type value");
+        assert!(err.contains("--note-type=TYPE"));
+
+        let err = parse_add_args(&["--note-type".to_string(), "unknown".to_string()])
+            .expect_err("invalid note type");
+        assert!(err.contains("--note-type=TYPE"));
+    }
+
+    #[test]
+    fn parse_add_args_validates_color_forms() {
+        let parsed = parse_add_args(&[
+            "--color".to_string(),
+            "always".to_string(),
+            "entry".to_string(),
+        ])
+        .expect("split color args");
+        assert_eq!(parsed.name, "entry");
+
+        let err = parse_add_args(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: add"));
+
+        let err = parse_add_args(&[
+            "--color".to_string(),
+            "bogus".to_string(),
+            "entry".to_string(),
+        ])
+        .expect_err("invalid split color");
+        assert!(err.contains("usage: add"));
+
+        let err = parse_add_args(&["--color=bogus".to_string(), "entry".to_string()])
+            .expect_err("invalid inline color");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
     fn apply_choice_value_rejects_field_for_non_secure_note() {
         let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
         let err = apply_choice_value(
@@ -817,8 +830,19 @@ mod tests {
     }
 
     #[test]
+    fn render_account_file_skips_existing_note_fields_and_includes_reprompt() {
+        let mut account = new_account("group/item", EditChoice::Any, NoteType::Server, false);
+        account.fields.push(make_field("Hostname", "srv"));
+        account.pwprotect = true;
+
+        let rendered = render_account_file(&account, NoteType::Server, false);
+        assert_eq!(rendered.matches("Hostname:").count(), 1);
+        assert!(rendered.contains("Reprompt: Yes"));
+    }
+
+    #[test]
     fn shell_quote_escapes_single_quotes() {
-        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(crate::editor::shell_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]
@@ -921,6 +945,30 @@ mod tests {
             ..base
         });
         assert!(field.ends_with('\n'));
+    }
+
+    #[test]
+    fn parse_entry_input_handles_duplicate_name_and_multiline_field_boundary() {
+        let parsed = parse_entry_input(
+            "NoteType: SSH Key\nPrivate Key: line1\nline two\nHostname: host.example.com\nName: primary\nName: alias\nReprompt: Yes",
+            NoteType::SshKey,
+        );
+
+        assert_eq!(parsed.name.as_deref(), Some("primary"));
+        assert_eq!(parsed.reprompt, Some(true));
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|field| field.name == "Private Key" && field.value == "line1\nline two")
+        );
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|field| field.name == "Name" && field.value == "alias")
+        );
+        assert!(is_valid_field_name(NoteType::None, "Anything"));
     }
 
     #[test]

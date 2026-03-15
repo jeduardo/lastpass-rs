@@ -12,7 +12,8 @@ const DEFAULT_CLIPBOARD_COMMANDS: [(&str, &[&str]); 5] = [
 ];
 
 pub(crate) fn copy_to_clipboard(data: &[u8]) -> Result<(), String> {
-    let clipboard_command = crate::lpenv::var("LPASS_CLIPBOARD_COMMAND").ok();
+    let clipboard_command = crate::lpenv::var_os("LPASS_CLIPBOARD_COMMAND")
+        .map(|value| value.to_string_lossy().into_owned());
     copy_to_clipboard_with_command(
         data,
         clipboard_command.as_deref(),
@@ -25,12 +26,10 @@ fn copy_to_clipboard_with_command(
     clipboard_command: Option<&str>,
     commands: &[(&str, &[&str])],
 ) -> Result<(), String> {
-    let fallback_message = "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.";
-
-    if let Some(command) = clipboard_command
-        && !command.trim().is_empty()
-    {
-        run_shell_clipboard_command(&command, data).map_err(|_| fallback_message.to_string())?;
+    if let Some(command) = clipboard_command {
+        run_shell_clipboard_command(&command, data).map_err(|_| {
+            "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.".to_string()
+        })?;
         return Ok(());
     }
 
@@ -38,7 +37,10 @@ fn copy_to_clipboard_with_command(
         return Ok(());
     }
 
-    Err(fallback_message.to_string())
+    Err(
+        "Unable to copy contents to clipboard. Please make sure you have `xclip`, `xsel`, `pbcopy`, or `putclip` installed."
+            .to_string(),
+    )
 }
 
 fn run_default_clipboard_commands(data: &[u8], commands: &[(&str, &[&str])]) -> bool {
@@ -129,6 +131,21 @@ mod tests {
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
         let err = copy_to_clipboard(b"v").expect_err("must fail");
         assert!(err.contains("Unable to copy contents to clipboard"));
+        assert!(err.contains("wl-clip"));
+    }
+
+    #[test]
+    fn copy_to_clipboard_treats_empty_custom_command_as_active() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "");
+        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
+        match copy_to_clipboard(b"v") {
+            Ok(()) => {}
+            Err(err) => {
+                assert!(err.contains("Unable to copy contents to clipboard"));
+                assert!(err.contains("wl-clip"));
+            }
+        }
     }
 
     #[test]
@@ -142,5 +159,6 @@ mod tests {
         let err = copy_to_clipboard_with_command(b"v", None, &[("/bin/false", &[])])
             .expect_err("default clipboard command should fail");
         assert!(err.contains("Unable to copy contents to clipboard"));
+        assert!(!err.contains("wl-clip"));
     }
 }

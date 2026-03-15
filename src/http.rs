@@ -15,6 +15,7 @@ use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, encrypt_private_key};
 use crate::error::{LpassError, Result};
 use crate::kdf::{kdf_decryption_key, kdf_login_key};
+use crate::logging::{LOG_DEBUG, log};
 use crate::session::Session;
 
 pub const LASTPASS_SERVER: &str = "lastpass.com";
@@ -129,6 +130,7 @@ fn post_real(
         .or(server)
         .unwrap_or(LASTPASS_SERVER);
     let url = format!("https://{server}/{page}");
+    log(LOG_DEBUG, &format!("Making request to {url}\n"));
     let request = add_session_cookie(client.post(url).header(USER_AGENT, user_agent()), session);
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {
@@ -157,6 +159,7 @@ fn post_real_bytes(
         .or(server)
         .unwrap_or(LASTPASS_SERVER);
     let url = format!("https://{server}/{page}");
+    log(LOG_DEBUG, &format!("Making request to {url}\n"));
     let request = add_session_cookie(client.post(url).header(USER_AGENT, user_agent()), session);
 
     let response = request.form(&params).send().map_err(|_| LpassError::Io {

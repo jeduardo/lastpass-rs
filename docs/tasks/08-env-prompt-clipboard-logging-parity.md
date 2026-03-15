@@ -1,6 +1,6 @@
 # Task 08: Environment, Prompt, Clipboard, and Logging Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Match C handling for environment-driven prompt, clipboard, logging, and tempdir behavior.
@@ -36,3 +36,12 @@ Acceptance criteria:
 - Env vars documented in parity audit are implemented or intentionally documented as deviations.
 - `show --clip` and `generate --clip` use parity-compatible clipboard handling.
 - Prompt and fallback behavior follows C precedence rules.
+
+Implemented:
+- `LPASS_ASKPASS`, `LPASS_PINENTRY`, `LPASS_DISABLE_PINENTRY`, `TERM`, and `DISPLAY` now follow the C prompt precedence and pinentry protocol flow.
+- `LPASS_CLIPBOARD_COMMAND` now matches the C command-selection rules, including empty-value handling through `$SHELL -c`.
+- `LPASS_LOG_LEVEL` now writes `lpass.log` in the config data path, and the Rust HTTP/upload-queue paths emit the same class of debug lines as upstream.
+- `SECURE_TMPDIR` / `TMPDIR` are now used by the editor workflows through a shared secure-temp helper, and Linux uses `/dev/shm` like the C client.
+
+Documented deviation:
+- macOS currently honors `SECURE_TMPDIR` and `TMPDIR`, but it does not yet recreate the upstream RAM-disk auto-mount flow from `edit.c`. The runtime behavior is functional and env-compatible, but not byte-for-byte identical on that one platform-specific path.

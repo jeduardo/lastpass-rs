@@ -15,6 +15,7 @@ use crate::config::{ConfigStore, config_read_string, config_unlink};
 use crate::error::{LpassError, Result};
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
+use crate::logging::{LOG_DEBUG, log};
 use crate::session::{Session, session_load};
 
 const UPLOAD_QUEUE_ARG: &str = "__upload-queue";
@@ -183,6 +184,7 @@ pub(crate) fn process_pending_with_client(
             continue;
         };
 
+        log(LOG_DEBUG, &format!("UQ: processing job {queue_name}\n"));
         if process_request(client, session, &request) {
             let _ = store.unlink(&queue_name);
             should_refresh |= request.page != "loglogin.php";
@@ -241,6 +243,10 @@ fn load_queue_request(
         Some(buffer) => match serde_json::from_slice::<QueueRequest>(&buffer) {
             Ok(request) => Ok(Some(request)),
             Err(_) => {
+                log(
+                    LOG_DEBUG,
+                    &format!("UQ: unable to decrypt job {queue_name}\n"),
+                );
                 let _ = store.unlink(queue_name);
                 Ok(None)
             }
@@ -252,7 +258,10 @@ fn load_queue_request(
 fn run_pending_from_disk(key: &[u8; KDF_HASH_LEN]) -> Result<()> {
     let _pid_guard = PidCleanup;
     let session = require_session(session_load(key)?)?;
-    process_pending(key, &session)
+    log(LOG_DEBUG, "UQ: starting queue run\n");
+    let result = process_pending(key, &session);
+    log(LOG_DEBUG, "UQ: queue run complete\n");
+    result
 }
 
 fn process_request(client: &HttpClient, session: &Session, request: &QueueRequest) -> bool {
@@ -263,21 +272,60 @@ fn process_request(client: &HttpClient, session: &Session, request: &QueueReques
 
     let mut backoff = 1;
     let mut backoff_scale = 8;
+    let mut http_failed_all = true;
 
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
+            log(
+                LOG_DEBUG,
+                &format!(
+                    "UQ: attempt {}, sleeping {} seconds\n",
+                    attempt + 1,
+                    backoff
+                ),
+            );
             sleep_backoff(backoff);
             backoff = backoff.saturating_mul(backoff_scale);
         }
 
+        log(LOG_DEBUG, &format!("UQ: posting to {}\n", request.page));
         match client.post_lastpass(None, &request.page, Some(session), &params_ref) {
-            Ok(response) if response.status < 400 => return true,
-            Ok(response) if response.status == 500 => backoff_scale = 2,
-            Ok(_) => {}
-            Err(_) => {}
+            Ok(response) if response.status < 400 => {
+                log(
+                    LOG_DEBUG,
+                    &format!("UQ: result 0 (http_code={})\n", response.status),
+                );
+                log(LOG_DEBUG, "UQ: succeeded\n");
+                return true;
+            }
+            Ok(response) if response.status == 500 => {
+                http_failed_all = false;
+                log(
+                    LOG_DEBUG,
+                    &format!("UQ: result 1 (http_code={})\n", response.status),
+                );
+                backoff_scale = 2;
+            }
+            Ok(response) => {
+                http_failed_all = false;
+                log(
+                    LOG_DEBUG,
+                    &format!("UQ: result 1 (http_code={})\n", response.status),
+                );
+            }
+            Err(_) => {
+                log(LOG_DEBUG, "UQ: result 1 (http_code=0)\n");
+            }
         }
     }
 
+    log(
+        LOG_DEBUG,
+        &format!(
+            "UQ: failed, http_failed_all: {}\n",
+            i32::from(http_failed_all)
+        ),
+    );
     false
 }
 
@@ -325,14 +373,30 @@ fn oldest_queue_entry_name(store: &ConfigStore) -> Result<Option<String>> {
 }
 
 fn move_failed_entry(store: &ConfigStore, name: &str) -> Result<()> {
+    log(LOG_DEBUG, &format!("UQ: dropping {name}\n"));
     let src = store.path(&format!("{QUEUE_DIR}/{name}"))?;
     let _ = queue_dir(store, FAIL_DIR)?;
     let dst = store.path(&format!("{FAIL_DIR}/{name}"))?;
 
     match fs::rename(src, dst) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(LpassError::io("rename", err)),
+        Ok(()) => {
+            log(LOG_DEBUG, "UQ: rename returned 0 (errno=0)\n");
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            log(LOG_DEBUG, "UQ: rename returned -1 (errno=2)\n");
+            Ok(())
+        }
+        Err(err) => {
+            log(
+                LOG_DEBUG,
+                &format!(
+                    "UQ: rename returned -1 (errno={})\n",
+                    err.raw_os_error().unwrap_or(-1)
+                ),
+            );
+            Err(LpassError::io("rename", err))
+        }
     }
 }
 
@@ -428,7 +492,7 @@ fn process_exists(_pid: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ConfigEnv, set_test_env};
+    use crate::config::{ConfigEnv, config_path, set_test_env};
     use crate::session::session_save_with_store;
     use std::io::Cursor;
     #[cfg(unix)]
@@ -1005,6 +1069,41 @@ mod tests {
     }
 
     #[test]
+    fn run_pending_from_disk_writes_debug_log_when_enabled() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let (store, temp) = store_with_home();
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+
+        let key = [6u8; KDF_HASH_LEN];
+        let session = session();
+        session_save_with_store(&store, &session, &key).expect("save session");
+        enqueue_with_store(
+            &store,
+            &key,
+            QueueRequest {
+                page: "loglogin.php".to_string(),
+                params: vec![("id".to_string(), "1".to_string())],
+            },
+            false,
+        )
+        .expect("enqueue");
+
+        run_pending_from_disk(&key).expect("run pending");
+
+        let log =
+            std::fs::read_to_string(config_path("lpass.log").expect("log path")).expect("log");
+        assert!(log.contains("UQ: starting queue run"));
+        assert!(log.contains("UQ: processing job upload-queue/"));
+        assert!(log.contains("UQ: succeeded"));
+        assert!(log.contains("UQ: queue run complete"));
+    }
+
+    #[test]
     fn move_failed_entry_ignores_missing_source() {
         let (store, _temp) = store_with_home();
         move_failed_entry(&store, "does-not-exist").expect("missing source is ignored");
@@ -1020,6 +1119,26 @@ mod tests {
 
         let err = move_failed_entry(&store, "100").expect_err("rename should fail");
         assert!(format!("{err}").contains("IO error while rename"));
+    }
+
+    #[test]
+    fn move_failed_entry_logs_drop_and_rename_outcome() {
+        let _override_guard = crate::lpenv::begin_test_overrides();
+        let (store, temp) = store_with_home();
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+        let queue_path = queue_dir(&store, QUEUE_DIR).expect("queue dir");
+        fs::write(queue_path.join("100"), b"entry").expect("write entry");
+
+        move_failed_entry(&store, "100").expect("move failed entry");
+
+        let log =
+            std::fs::read_to_string(config_path("lpass.log").expect("log path")).expect("log");
+        assert!(log.contains("UQ: dropping 100"));
+        assert!(log.contains("UQ: rename returned 0 (errno=0)"));
     }
 
     #[test]

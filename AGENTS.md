@@ -1,6 +1,7 @@
 # AGENTS.md
 
 ## Project goals
+
 - Full rewrite in Rust with feature parity for the CLI.
 - Drop-in replacement: same interface, same config locations/behavior.
 - Use safe Rust only.
@@ -10,24 +11,30 @@
 - Keep the existing shell tests for now, but update them as needed.
 
 ## Testing requirements
+
 - Ensure code always compiles and tests always run.
 - If there are no tests for new functionality, add tests.
-- Aim for at least 80% test coverage.
+- Aim for 99% coverage on the code touched by each task, and keep expanding coverage until you reach it unless the user explicitly accepts a lower number.
 - Every new feature implementation must include unit tests in the same change.
 - Do not consider a feature complete unless tests are added/updated and passing.
 - Keep project test coverage at or above 80%; if a change risks dropping below this, add coverage before finishing.
+- Do not stop at “tests pass” for a task; keep working the task until the coverage target for that work is attained.
+- Use `act` as the final verification pass for both the `test` workflow and the `coverage` workflow before considering a task done.
 
 ## UI/UX behavior
+
 - If the C CLI has colored output, mirror that behavior.
 - Respect `--color=auto|never|always` flags for commands that support it.
 - Default to ANSI-stripped output when not in a TTY (auto mode).
 
 ## Development expectations
+
 - Implement features in incremental, testable steps.
 - Prefer compatibility with existing CLI behavior, flags, and outputs.
 - Treat `lastpass-cli/` as a read-only git submodule reference. Do not modify files inside the submodule, including its tests, unless the user explicitly asks for submodule changes.
 
 ## Fidelity directives (C client parity)
+
 - Before considering a command complete, verify parity against the C implementation for:
   - command behavior and output structure
   - flags/options (including short and long forms)

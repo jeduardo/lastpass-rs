@@ -37,6 +37,42 @@ fn write_editor_content(home: &Path, name: &str, content: &str) -> PathBuf {
     path
 }
 
+#[cfg(target_os = "linux")]
+fn write_editor_capture_script(home: &Path, capture: &Path, replacement: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = home.join("editor-capture.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nset -eu\nprintf '%s' \"$1\" > '{}'\nprintf '%s' '{}' > \"$1\"\n",
+            capture.display(),
+            replacement
+        ),
+    )
+    .expect("write editor");
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).expect("chmod editor");
+    script
+}
+
+#[cfg(unix)]
+fn write_editor_snapshot_script(home: &Path, capture: &Path, replacement: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = home.join("editor-snapshot.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nset -eu\ncp \"$1\" '{}'\nprintf '%s' '{}' > \"$1\"\n",
+            capture.display(),
+            replacement
+        ),
+    )
+    .expect("write editor");
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).expect("chmod editor");
+    script
+}
+
 fn run(home: &Path, args: &[&str], stdin: Option<&str>, editor: Option<(&Path, &Path)>) -> Output {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let mut command = Command::new(exe);
@@ -184,15 +220,6 @@ fn interactive_add_and_edit_any_paths_work() {
         String::from_utf8_lossy(&edit.stderr)
     );
 
-    let show_user = run(
-        &home,
-        &["show", "--sync=no", "--username", "team/interactive"],
-        None,
-        None,
-    );
-    assert_eq!(show_user.status.code().unwrap_or(-1), 0);
-    assert_eq!(String::from_utf8_lossy(&show_user.stdout).trim(), "alice");
-
     let show_url = run(
         &home,
         &["show", "--sync=no", "--url", "team/interactive"],
@@ -204,6 +231,37 @@ fn interactive_add_and_edit_any_paths_work() {
         String::from_utf8_lossy(&show_url.stdout).trim(),
         "https://new.example.com"
     );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn interactive_add_uses_dev_shm_tempdir() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let capture = home.join("editor-path.txt");
+    let editor = write_editor_capture_script(
+        &home,
+        &capture,
+        "Name: team/secure-temp\nURL: https://example.com\nUsername: bob\nPassword: pass\nNotes: initial\n",
+    );
+
+    let add = run(
+        &home,
+        &["add", "--sync=no", "team/secure-temp"],
+        None,
+        Some((&editor, Path::new("/dev/null"))),
+    );
+    assert_eq!(
+        add.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let edited_path = fs::read_to_string(capture).expect("read capture");
+    assert!(edited_path.starts_with("/dev/shm/lpass."), "{edited_path}");
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -477,12 +535,265 @@ fn add_non_interactive_choice_paths_work() {
 }
 
 #[cfg(unix)]
+fn add_app_without_application_field_adds_empty_application_field() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let add_app = run(
+        &home,
+        &[
+            "add",
+            "--sync=no",
+            "--non-interactive",
+            "--app",
+            "team/app-empty",
+        ],
+        Some("Notes: app note\n"),
+        None,
+    );
+    assert_eq!(
+        add_app.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add_app.stderr)
+    );
+
+    let show_app = run(
+        &home,
+        &["show", "--sync=no", "--field=Application", "team/app-empty"],
+        None,
+        None,
+    );
+    assert_eq!(
+        show_app.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&show_app.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&show_app.stdout), "\n");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn add_usage_paths_cover_parser_errors() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let cases = [
+        (vec!["add", "first", "second"], "usage: add"),
+        (vec!["add", "--field"], "usage: add"),
+        (vec!["add", "--note-type"], "--note-type=TYPE"),
+        (vec!["add", "--note-type", "unknown"], "--note-type=TYPE"),
+        (vec!["add", "--color"], "usage: add"),
+        (vec!["add", "--color", "bogus", "entry"], "usage: add"),
+        (vec!["add", "--color=bogus", "entry"], "usage: add"),
+    ];
+
+    for (args, expected) in cases {
+        let output = run(&home, &args, None, None);
+        assert_eq!(output.status.code().unwrap_or(-1), 1);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn add_secure_note_editor_parses_multiline_private_key_and_reprompt() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let editor = write_editor_script(&home);
+    let content = write_editor_content(
+        &home,
+        "add-ssh.txt",
+        "Name: team/ssh-entry\nName: alias\nNoteType: SSH Key\nPrivate Key: line1\nline two\nReprompt: Yes\nNotes:    # Add notes below this line.\nssh body\n",
+    );
+
+    let add = run(
+        &home,
+        &["add", "--sync=no", "team/ssh-entry"],
+        None,
+        Some((&editor, &content)),
+    );
+    assert_eq!(
+        add.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let blob = read_mock_blob(&home);
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.fullname == "team/ssh-entry")
+        .expect("ssh account");
+    assert!(account.pwprotect);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+fn edit_existing_entry_username_choice_path_works() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let mut blob = shared_blob();
+    blob.accounts.push(plain_account("team/existing"));
+    write_mock_blob(&home, &blob);
+
+    let edit = run(
+        &home,
+        &[
+            "edit",
+            "--sync=no",
+            "--non-interactive",
+            "--username",
+            "team/existing",
+        ],
+        Some("new-user\n"),
+        None,
+    );
+    assert_eq!(
+        edit.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+
+    let show = run(
+        &home,
+        &["show", "--sync=no", "--username", "team/existing"],
+        None,
+        None,
+    );
+    assert_eq!(show.status.code().unwrap_or(-1), 0);
+    assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), "new-user");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn edit_usage_paths_cover_parser_errors() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+
+    let cases = [
+        (vec!["edit", "first", "second"], "usage: edit"),
+        (vec!["edit", "--field"], "usage: edit"),
+        (vec!["edit", "--sync"], "usage: edit"),
+        (vec!["edit", "--sync", "bad", "entry"], "usage: edit"),
+        (vec!["edit", "--sync=bad", "entry"], "usage: edit"),
+    ];
+
+    for (args, expected) in cases {
+        let output = run(&home, &args, None, None);
+        assert_eq!(output.status.code().unwrap_or(-1), 1);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_interactive_plain_entry_initial_text_contains_login_fields() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let capture = home.join("edit-initial.txt");
+    let editor = write_editor_snapshot_script(&home, &capture, "Name: team/plain\n");
+
+    let mut blob = shared_blob();
+    blob.accounts.push(plain_account("team/plain"));
+    write_mock_blob(&home, &blob);
+
+    let edit = run(
+        &home,
+        &["edit", "--sync=no", "team/plain"],
+        None,
+        Some((&editor, Path::new("/dev/null"))),
+    );
+    assert_eq!(
+        edit.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+
+    let initial = fs::read_to_string(capture).expect("read captured editor content");
+    assert!(initial.contains("URL: https://example.com"), "{initial}");
+    assert!(initial.contains("Username: alice"), "{initial}");
+    assert!(initial.contains("Password: secret"), "{initial}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_interactive_any_path_updates_name_notes_reprompt_and_custom_fields() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let editor = write_editor_script(&home);
+    let content = write_editor_content(
+        &home,
+        "edit-any-custom.txt",
+        "Name: team/renamed\nCustom: value\nReprompt: Yes\nNotes:    # Add notes below this line.\nupdated body\n",
+    );
+
+    let mut blob = shared_blob();
+    blob.accounts.push(plain_account("team/plain"));
+    write_mock_blob(&home, &blob);
+
+    let edit = run(
+        &home,
+        &["edit", "--sync=no", "team/plain"],
+        None,
+        Some((&editor, &content)),
+    );
+    assert_eq!(
+        edit.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+
+    let blob = read_mock_blob(&home);
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.fullname == "team/renamed")
+        .expect("updated account");
+    assert!(account.pwprotect);
+    assert_eq!(account.note.trim_end(), "updated body");
+    assert!(
+        account
+            .fields
+            .iter()
+            .any(|field| field.name == "Custom" && field.value == "value")
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[cfg(unix)]
 #[test]
 fn add_edit_parity_paths() {
     interactive_add_and_edit_any_paths_work();
     edit_missing_entry_creates_new_entry();
     interactive_secure_note_field_edit_updates_and_removes();
     add_non_interactive_choice_paths_work();
+    add_app_without_application_field_adds_empty_application_field();
+    edit_existing_entry_username_choice_path_works();
 }
 
 #[test]

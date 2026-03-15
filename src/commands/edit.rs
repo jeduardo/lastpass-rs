@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::fs;
-use std::io::{self, Read, Write};
-use std::process::Command;
+use std::io::{self, Read};
 
 use crate::blob::{Account, Field};
 use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
@@ -99,7 +97,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         read_stdin_to_string()?
     } else {
         let initial = make_editor_initial_text(&working, &parsed, secure_note_expanded);
-        edit_with_editor(&initial)?
+        crate::editor::edit_with_editor(&initial)?
     };
 
     match parsed.choice {
@@ -353,35 +351,6 @@ fn render_account_file(account: &Account) -> String {
     out.push_str("Notes:    # Add notes below this line.\n");
     out.push_str(&account.note);
     out
-}
-
-fn edit_with_editor(initial: &str) -> Result<String, String> {
-    let mut file = tempfile::NamedTempFile::new().map_err(|err| format!("mkstemp: {err}"))?;
-    file.write_all(initial.as_bytes())
-        .map_err(|err| format!("write: {err}"))?;
-    file.flush().map_err(|err| format!("flush: {err}"))?;
-
-    let editor = crate::lpenv::var("VISUAL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            crate::lpenv::var("EDITOR")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .unwrap_or_else(|| "vi".to_string());
-    let path = file.path().to_string_lossy().to_string();
-    let _status = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} {}", shell_quote(&path)))
-        .status()
-        .map_err(|err| format!("system($VISUAL): {err}"))?;
-
-    fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn read_stdin_to_string() -> Result<String, String> {
@@ -716,6 +685,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_edit_args_supports_field_and_non_interactive_forms() {
+        let parsed = parse_edit_args(&[
+            "--field".to_string(),
+            "Hostname".to_string(),
+            "--non-interactive".to_string(),
+            "team/entry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+        assert!(parsed.non_interactive);
+
+        let parsed = parse_edit_args(&["--field=Hostname".to_string(), "team/entry".to_string()])
+            .expect("inline field args");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+    }
+
+    #[test]
+    fn parse_edit_args_rejects_extra_names_and_invalid_option_values() {
+        let err = parse_edit_args(&["first".to_string(), "second".to_string()])
+            .expect_err("duplicate names must fail");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--field".to_string()]).expect_err("missing field value");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: edit"));
+
+        let err = parse_edit_args(&["--sync".to_string(), "bad".to_string(), "x".to_string()])
+            .expect_err("invalid split sync");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
     fn find_unique_account_index_matches_id_name_and_detects_ambiguity() {
         let mut first = account();
         first.id = "0001".to_string();
@@ -931,6 +936,14 @@ mod tests {
     }
 
     #[test]
+    fn render_account_file_includes_plain_login_fields() {
+        let rendered = render_account_file(&account());
+        assert!(rendered.contains("URL: https://example.com"));
+        assert!(rendered.contains("Username: alice"));
+        assert!(rendered.contains("Password: secret"));
+    }
+
+    #[test]
     fn parse_update_input_tracks_unknown_fields_and_reprompt() {
         let parsed = parse_update_input("Custom: value\nReprompt: no", NoteType::None);
         assert_eq!(parsed.reprompt, Some(false));
@@ -939,6 +952,20 @@ mod tests {
                 .fields
                 .iter()
                 .any(|(name, value)| name == "Custom" && value == "value")
+        );
+    }
+
+    #[test]
+    fn parse_update_input_trims_values_and_tracks_notes_and_custom_fields() {
+        let parsed = parse_update_input(
+            "Name: team/new-entry\nCustom: value\nNotes:    # Add notes below this line.\nbody",
+            NoteType::None,
+        );
+        assert_eq!(parsed.fullname.as_deref(), Some("team/new-entry"));
+        assert_eq!(parsed.note.as_deref(), Some("body"));
+        assert_eq!(
+            parsed.fields,
+            vec![("Custom".to_string(), "value".to_string())]
         );
     }
 
@@ -970,7 +997,7 @@ mod tests {
         assert!(rendered.contains("Notes:    # Add notes below this line."));
         assert!(rendered.contains("Hostname: old-host"));
 
-        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(crate::editor::shell_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]

@@ -6,10 +6,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Once};
 use std::thread;
 
+use crate::config::{ConfigEnv, config_path, set_test_env};
 use crate::session::Session;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use tempfile::TempDir;
 
 fn install_crypto_provider() {
     static INIT: Once = Once::new();
@@ -172,6 +174,20 @@ fn mock_share_fallback_paths_cover_unimplemented_and_missing_uid() {
         )
         .expect("response");
     assert!(missing_uid.body.contains("<success>0</success>"));
+}
+
+#[test]
+fn mock_share_getinfo_includes_accepted_users() {
+    let client = HttpClient::mock();
+    let response = client
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getinfo", "1"), ("xmlr", "1"), ("id", "77")],
+        )
+        .expect("response");
+    assert!(response.body.contains("<accepted>1</accepted>"));
 }
 
 #[test]
@@ -412,6 +428,46 @@ fn post_real_returns_response_body_on_success() {
 }
 
 #[test]
+fn post_real_prefers_session_server_when_present() {
+    let (server, handle) =
+        spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+    let client = insecure_client();
+    let session = Session {
+        server: Some(server),
+        ..Session::default()
+    };
+
+    let response = post_real(&client, None, "login.php", Some(&session), &[("k", "v")])
+        .expect("request should succeed");
+    handle.join().expect("join server");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, "ok");
+}
+
+#[test]
+fn post_real_writes_debug_log_when_enabled() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    let home = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(home.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+
+    let (server, handle) =
+        spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+    let client = insecure_client();
+
+    post_real(&client, Some(&server), "login.php", None, &[("k", "v")]).expect("request");
+    handle.join().expect("join server");
+
+    let log = std::fs::read_to_string(config_path("lpass.log").expect("log path")).expect("log");
+    assert!(log.contains("Making request to https://"));
+    assert!(log.contains("/login.php"));
+}
+
+#[test]
 fn post_real_includes_cookie_header_when_session_has_session_id() {
     let (server, request_rx, handle) = spawn_https_server_with_request_capture(
         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec(),
@@ -495,6 +551,46 @@ fn post_real_bytes_returns_response_body_on_success() {
 
     assert_eq!(response.status, 200);
     assert_eq!(response.body, b"\x00\x01ok".to_vec());
+}
+
+#[test]
+fn post_real_bytes_prefers_session_server_when_present() {
+    let (server, handle) =
+        spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n\x00\x01ok".to_vec());
+    let client = insecure_client();
+    let session = Session {
+        server: Some(server),
+        ..Session::default()
+    };
+
+    let response = post_real_bytes(&client, None, "login.php", Some(&session), &[("k", "v")])
+        .expect("request should succeed");
+    handle.join().expect("join server");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"\x00\x01ok".to_vec());
+}
+
+#[test]
+fn post_real_bytes_writes_debug_log_when_enabled() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    let home = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(home.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+
+    let (server, handle) =
+        spawn_https_server(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n\x00\x01ok".to_vec());
+    let client = insecure_client();
+
+    post_real_bytes(&client, Some(&server), "login.php", None, &[("k", "v")]).expect("request");
+    handle.join().expect("join server");
+
+    let log = std::fs::read_to_string(config_path("lpass.log").expect("log path")).expect("log");
+    assert!(log.contains("Making request to https://"));
+    assert!(log.contains("/login.php"));
 }
 
 #[test]
