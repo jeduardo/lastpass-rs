@@ -19,6 +19,8 @@ Out of scope:
 
 Dependencies:
 - Tasks 01-08
+- Task 10
+- Task 11
 
 Implementation steps:
 1. Add test cases for new options/behaviors introduced in each task.

@@ -46,6 +46,8 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
+- shared-folder `mv` parity follow-up items
+- strict getopt/help/error/color parity follow-up items
 - parity test/gate consolidation follow-up items
 
 ## Implementation status
@@ -87,10 +89,10 @@ Per-command checklist:
 
   - default list output: :white_check_mark:
   - `--color`: :white_check_mark:
-  - `--long/-l`, `-m`, `-u` exact behavior parity: TODO
+  - `--long/-l`, `-m`, `-u` exact behavior parity: :white_check_mark:
   - `--format/-f`: :white_check_mark: (basic parity)
-  - positional `GROUP` filtering (including `(none)`): TODO
-  - tree/shared-folder rendering parity with C client: TODO
+  - positional `GROUP` filtering (including `(none)`): :white_check_mark:
+  - tree/shared-folder rendering parity with C client: :white_check_mark:
 
 - `show`
 
@@ -155,7 +157,7 @@ Per-command checklist:
 
   - default remove behavior by ID/name: :white_check_mark: (basic parity)
   - `--sync`, `--color`: :white_check_mark:
-  - readonly shared-entry delete parity: TODO
+  - readonly shared-entry delete parity: :white_check_mark:
 
 - `sync`
 
