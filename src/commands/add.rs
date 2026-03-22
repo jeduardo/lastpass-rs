@@ -311,32 +311,20 @@ fn render_account_file(account: &Account, note_type: NoteType, is_app: bool) -> 
 }
 
 fn edit_with_editor(initial: &str) -> Result<String, String> {
-    let mut file = tempfile::NamedTempFile::new().map_err(|err| format!("mkstemp: {err}"))?;
+    let mut file = crate::editor::create_secure_temp_file()?;
     file.write_all(initial.as_bytes())
         .map_err(|err| format!("write: {err}"))?;
     file.flush().map_err(|err| format!("flush: {err}"))?;
 
-    let editor = crate::lpenv::var("VISUAL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            crate::lpenv::var("EDITOR")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .unwrap_or_else(|| "vi".to_string());
+    let editor = crate::editor::editor_program();
     let path = file.path().to_string_lossy().to_string();
     let _status = Command::new("sh")
         .arg("-c")
-        .arg(format!("{editor} {}", shell_quote(&path)))
+        .arg(format!("{editor} {}", crate::editor::shell_quote(&path)))
         .status()
         .map_err(|err| format!("system($VISUAL): {err}"))?;
 
     fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn read_stdin_to_string() -> Result<String, String> {
@@ -818,7 +806,7 @@ mod tests {
 
     #[test]
     fn shell_quote_escapes_single_quotes() {
-        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(crate::editor::shell_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]

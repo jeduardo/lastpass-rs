@@ -79,14 +79,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
 
       - name: Generate coverage report
-        run: cargo coverage
+        env:
+          CARGO_TARGET_DIR: target/coverage
+        run: |
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --workspace --all-targets --no-report
+          cargo llvm-cov report --lcov --output-path coverage/lcov.info --ignore-filename-regex 'src/bin/test-upstream.rs$'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

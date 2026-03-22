@@ -27,9 +27,7 @@ fn copy_to_clipboard_with_command(
 ) -> Result<(), String> {
     let fallback_message = "Unable to copy contents to clipboard. Please make sure you have `wl-clip`, `xclip`, `xsel`, `pbcopy`, or `putclip` installed.";
 
-    if let Some(command) = clipboard_command
-        && !command.trim().is_empty()
-    {
+    if let Some(command) = clipboard_command {
         run_shell_clipboard_command(&command, data).map_err(|_| fallback_message.to_string())?;
         return Ok(());
     }
@@ -123,11 +121,35 @@ mod tests {
     }
 
     #[test]
+    fn run_shell_clipboard_command_defaults_to_bin_sh() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        run_shell_clipboard_command("cat >/dev/null", b"v").expect("shell fallback");
+    }
+
+    #[test]
     fn copy_to_clipboard_maps_failed_custom_command_to_user_error() {
         let _guard = crate::lpenv::begin_test_overrides();
         crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "exit 1");
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
         let err = copy_to_clipboard(b"v").expect_err("must fail");
+        assert!(err.contains("Unable to copy contents to clipboard"));
+    }
+
+    #[test]
+    fn copy_to_clipboard_treats_empty_custom_command_as_active_override() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("SHELL", "/bin/cat");
+        let err = copy_to_clipboard_with_command(b"v", Some(""), &[("/bin/cat", &[])])
+            .expect_err("empty custom command should stay on the shell override path");
+        assert!(err.contains("Unable to copy contents to clipboard"));
+    }
+
+    #[test]
+    fn copy_to_clipboard_reports_error_for_failing_empty_custom_command_shell() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "");
+        crate::lpenv::set_override_for_tests("SHELL", "/path/that/does/not/exist");
+        let err = copy_to_clipboard(b"v").expect_err("missing shell must fail");
         assert!(err.contains("Unable to copy contents to clipboard"));
     }
 

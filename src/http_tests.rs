@@ -7,6 +7,7 @@ use std::sync::{Arc, Once};
 use std::thread;
 
 use crate::session::Session;
+use crate::config::{ConfigEnv, ConfigStore, set_test_env};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -202,6 +203,31 @@ fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
         .expect("response");
     assert_eq!(response.status, 200);
     assert_eq!(response.body, "1000");
+}
+
+#[test]
+fn requests_write_log_entries_when_logging_is_enabled() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+    crate::lpenv::set_override_for_tests("LPASS_LOG_LEVEL", "7");
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+
+    let response = super::post_lastpass("iterations.php", None, &[("email", "u@example.com")])
+        .expect("response");
+    assert_eq!(response.status, 200);
+
+    let content = ConfigStore::with_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    })
+    .read_string("lpass.log")
+    .expect("read log")
+    .expect("log exists");
+    assert!(content.contains("Making request to iterations.php."));
 }
 
 #[test]
