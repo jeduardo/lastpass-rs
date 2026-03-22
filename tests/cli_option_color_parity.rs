@@ -130,3 +130,36 @@ fn saved_environment_read_errors_render_warning_prefix() {
     );
     assert!(!stderr.contains("\x1b["), "stderr: {stderr}");
 }
+
+#[test]
+fn saved_environment_warning_honors_color_flag() {
+    let home = TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(home.path().join("env")).expect("make env dir");
+    let exe = env!("CARGO_BIN_EXE_lpass");
+
+    let never = Command::new(exe)
+        .env("LPASS_HOME", home.path())
+        .args(["status", "--color=never"])
+        .output()
+        .expect("run status --color=never");
+    assert_eq!(never.status.code().unwrap_or(-1), 1);
+    let never_stderr = String::from_utf8_lossy(&never.stderr);
+    assert!(
+        never_stderr.contains("Warning: failed to load saved environment:"),
+        "stderr: {never_stderr}"
+    );
+    assert!(!never_stderr.contains("\x1b["), "stderr: {never_stderr}");
+
+    let always = Command::new(exe)
+        .env("LPASS_HOME", home.path())
+        .args(["status", "--color=always"])
+        .output()
+        .expect("run status --color=always");
+    assert_eq!(always.status.code().unwrap_or(-1), 1);
+    let always_stderr = String::from_utf8_lossy(&always.stderr);
+    assert!(
+        always_stderr.contains("failed to load saved environment:"),
+        "stderr: {always_stderr}"
+    );
+    assert!(always_stderr.contains("\x1b["), "stderr: {always_stderr}");
+}

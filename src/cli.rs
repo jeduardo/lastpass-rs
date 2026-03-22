@@ -89,6 +89,8 @@ enum Dispatch {
 }
 
 pub fn run(args: Vec<String>) -> i32 {
+    let args = expand_aliases(args);
+    apply_requested_color_mode(&args);
     if let Err(err) = lpenv::reload_saved_environment() {
         eprintln!(
             "{}",
@@ -96,7 +98,6 @@ pub fn run(args: Vec<String>) -> i32 {
         );
     }
 
-    let args = expand_aliases(args);
     let (program_path, program_name) = program_names(&args);
     match dispatch(&args) {
         Dispatch::HelpOnly => {
@@ -166,6 +167,26 @@ fn dispatch(args: &[String]) -> Dispatch {
     Dispatch::Command {
         name: arg.to_string(),
         args: args[2..].to_vec(),
+    }
+}
+
+fn apply_requested_color_mode(args: &[String]) {
+    let mut iter = args.iter().skip(1).peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--color" {
+            let Some(value) = iter.next() else {
+                continue;
+            };
+            if let Some(mode) = terminal::parse_color_mode(value) {
+                terminal::set_color_mode(mode);
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--color=") {
+            if let Some(mode) = terminal::parse_color_mode(value) {
+                terminal::set_color_mode(mode);
+            }
+        }
     }
 }
 
@@ -262,5 +283,67 @@ mod tests {
     fn dispatch_treats_unknown_global_flags_as_help_only() {
         let args = vec!["lpass".to_string(), "--bogus".to_string()];
         assert!(matches!(dispatch(&args), Dispatch::HelpOnly));
+    }
+
+    #[test]
+    fn apply_requested_color_mode_uses_command_flag_values() {
+        terminal::set_color_mode(terminal::ColorMode::Auto);
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=never".to_string(),
+        ]);
+        assert_eq!(
+            terminal::render_stderr(&format!(
+                "{}{}Warning{}: café",
+                terminal::FG_YELLOW,
+                terminal::BOLD,
+                terminal::RESET
+            )),
+            "Warning: café"
+        );
+
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=always".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert!(rendered.contains("\x1b["), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn apply_requested_color_mode_ignores_invalid_or_missing_values() {
+        terminal::set_color_mode(terminal::ColorMode::Auto);
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert_eq!(rendered, "Warning: café");
+
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=rainbow".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert_eq!(rendered, "Warning: café");
     }
 }

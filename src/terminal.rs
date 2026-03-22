@@ -86,23 +86,19 @@ fn render(text: &str, is_tty: bool) -> String {
 
 fn strip_ansi(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut i = 0usize;
+    let mut chars = value.chars().peekable();
 
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            i += 2;
-            while i < bytes.len() {
-                let ch = bytes[i];
-                i += 1;
-                if (ch as char).is_ascii_alphabetic() {
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && matches!(chars.peek(), Some('[')) {
+            let _ = chars.next();
+            for ch in chars.by_ref() {
+                if ch.is_ascii_alphabetic() {
                     break;
                 }
             }
             continue;
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        out.push(ch);
     }
 
     out
@@ -185,5 +181,18 @@ mod tests {
         let text = format!("{FG_RED}{BOLD}Error{RESET}: boom");
         assert_eq!(render_with_mode(&text, false, ColorMode::Auto), "Error: boom");
         assert_eq!(render_with_mode(&text, false, ColorMode::Always), text);
+    }
+
+    #[test]
+    fn render_with_mode_preserves_utf8_when_stripping_ansi() {
+        let text = format!("{FG_RED}{BOLD}Error{RESET}: café/秘密");
+        assert_eq!(
+            render_with_mode(&text, false, ColorMode::Auto),
+            "Error: café/秘密"
+        );
+        assert_eq!(
+            render_with_mode(&text, false, ColorMode::Never),
+            "Error: café/秘密"
+        );
     }
 }
