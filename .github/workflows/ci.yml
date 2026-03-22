@@ -89,7 +89,9 @@ jobs:
     name: Build binaries (${{ matrix.asset_name }})
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
-    needs: test
+    needs:
+      - test
+      - coverage
     strategy:
       fail-fast: false
       matrix:
