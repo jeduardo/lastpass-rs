@@ -45,7 +45,6 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    needs: test
     permissions:
       contents: read
       id-token: write
