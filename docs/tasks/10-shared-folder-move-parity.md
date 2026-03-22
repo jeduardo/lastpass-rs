@@ -1,6 +1,6 @@
 # Task 10: Shared-Folder Move Semantics Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Align `lpass mv` shared-folder behavior with the C client when moving entries into, out of, or between shared folders.
@@ -40,3 +40,10 @@ Acceptance criteria:
 - Moving an entry into, out of, or between shared folders follows the C special-case behavior.
 - Readonly share targets fail with parity-compatible errors.
 - No new user-facing flags or behaviors are introduced beyond C parity.
+
+Implemented:
+- `mv` now distinguishes same-share/plain moves from share-boundary transitions.
+- Cross-share moves use the direct `uploadaccounts` shared-folder move request modeled on the C `lastpass_share_move` path.
+- The move payload carries `sharedfolderid`, `origsharedfolderid`, `todelete`, and `recordUrl` parity fields.
+- Successful cross-share moves remove the local entry after upload, matching the C client’s blob behavior.
+- Regression coverage covers plain moves, same-share moves, share-to-share moves, readonly target rejection, and the shared move request builder/error handling.
