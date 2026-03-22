@@ -77,6 +77,39 @@ fn login_prompt_reads_password_from_pinentry_when_available() {
 }
 
 #[test]
+fn login_prompt_omits_ttyname_when_stdin_is_redirected() {
+    let temp = TempDir::new().expect("tempdir");
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let pinentry_log = temp.path().join("pinentry.log");
+    let pinentry = write_script(
+        &temp,
+        "pinentry-log.sh",
+        &format!(
+            "#!/bin/sh\nprintf 'OK ready\\n'\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> '{}'\n  case \"$line\" in\n    GETPIN) printf 'D 123456\\nOK\\n' ;;\n    BYE) printf 'OK\\n'; exit 0 ;;\n    *) printf 'OK\\n' ;;\n  esac\ndone\n",
+            pinentry_log.display()
+        ),
+    );
+
+    let output = Command::new(exe)
+        .env("LPASS_HOME", temp.path())
+        .env("LPASS_HTTP_MOCK", "1")
+        .env("LPASS_PINENTRY", &pinentry)
+        .env("TERM", "xterm-256color")
+        .env("DISPLAY", ":99")
+        .arg("login")
+        .arg("user@example.com")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run login");
+
+    assert_eq!(output.status.code().unwrap_or(-1), 0);
+    let transcript = fs::read_to_string(pinentry_log).expect("pinentry log");
+    assert!(transcript.contains("OPTION ttytype=xterm-256color"));
+    assert!(transcript.contains("OPTION display=:99"));
+    assert!(!transcript.contains("OPTION ttyname="));
+}
+
+#[test]
 fn login_prompt_reports_failed_pinentry_without_fallback() {
     let temp = TempDir::new().expect("tempdir");
     let exe = env!("CARGO_BIN_EXE_lpass");

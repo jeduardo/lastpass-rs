@@ -1,6 +1,8 @@
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::io::Write;
+#[cfg(target_os = "linux")]
+use std::io::IsTerminal;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -77,6 +79,11 @@ fn pinentry_escape_matches_c_behavior() {
 #[test]
 fn pinentry_unescape_matches_c_behavior() {
     assert_eq!(pinentry_unescape("a%25b%0d%0ac"), "a%b\r\nc");
+}
+
+#[test]
+fn pinentry_unescape_decodes_utf8_escape_bytes() {
+    assert_eq!(pinentry_unescape("%C3%A9"), "é");
 }
 
 #[test]
@@ -263,6 +270,16 @@ fn prompt_password_with_pinentry_sends_expected_option_commands() {
     assert!(transcript.contains("SETDESC Prompt description"));
     assert!(transcript.contains("OPTION ttytype=xterm-256color"));
     assert!(transcript.contains("OPTION display=:99"));
+    #[cfg(target_os = "linux")]
+    {
+        if std::io::stdin().is_terminal() {
+            assert!(transcript.contains("OPTION ttyname="));
+        } else {
+            assert!(!transcript.contains("OPTION ttyname="));
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    assert!(!transcript.contains("OPTION ttyname="));
     assert!(transcript.contains("GETPIN"));
     assert!(transcript.contains("BYE"));
 }
@@ -349,6 +366,45 @@ fn prompt_password_with_pinentry_reports_unexpected_eof() {
     .expect_err("pinentry eof must fail");
 
     assert!(matches!(err, PinentryError::Failed));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn prompt_password_with_pinentry_reaps_child_after_error() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    let temp = TempDir::new().expect("tempdir");
+    let script = temp.path().join("pinentry-reap.sh");
+    let pidfile = temp.path().join("pinentry.pid");
+    write_script(
+        &script,
+        &format!(
+            "#!/bin/sh\necho $$ > '{}'\nprintf 'OK ready\\n'\nIFS= read -r _ || exit 0\nexit 0\n",
+            pidfile.display()
+        ),
+    );
+
+    let err = prompt_password_with_pinentry(
+        &script.display().to_string(),
+        "Master Password",
+        None,
+        "Prompt description",
+    )
+    .expect_err("pinentry must fail");
+    assert!(matches!(err, PinentryError::Failed));
+
+    let pid = std::fs::read_to_string(&pidfile)
+        .expect("pidfile")
+        .trim()
+        .parse::<u32>()
+        .expect("numeric pid");
+
+    for _ in 0..50 {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("pinentry child was not reaped");
 }
 
 #[test]

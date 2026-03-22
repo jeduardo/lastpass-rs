@@ -2,6 +2,8 @@
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "linux")]
+use std::io::IsTerminal;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use crate::error::{LpassError, Result};
@@ -82,29 +84,38 @@ fn prompt_password_with_pinentry(
     description: &str,
 ) -> std::result::Result<String, PinentryError> {
     let mut child = spawn_pinentry(pinentry)?;
-    let (stdin, stdout) = take_pinentry_stdio(&mut child)?;
+    let (stdin, stdout) = match take_pinentry_stdio(&mut child) {
+        Ok(stdio) => stdio,
+        Err(err) => {
+            let _ = child.wait();
+            return Err(err);
+        }
+    };
     let mut input = stdin;
     let mut output = BufReader::new(stdout);
 
-    expect_pinentry_ok(&mut output)?;
-    send_pinentry_command(&mut input, "SETTITLE", Some("LastPass CLI"))?;
-    expect_pinentry_ok(&mut output)?;
-    send_pinentry_command(&mut input, "SETPROMPT", Some(&format!("{prompt}:")))?;
-    expect_pinentry_ok(&mut output)?;
-    if let Some(error) = error {
-        send_pinentry_command(&mut input, "SETERROR", Some(error))?;
+    let result = (|| {
         expect_pinentry_ok(&mut output)?;
-    }
-    send_pinentry_command(&mut input, "SETDESC", Some(description))?;
-    expect_pinentry_ok(&mut output)?;
-    send_pinentry_option(&mut input, &mut output, "ttytype", crate::lpenv::var("TERM").ok())?;
-    send_pinentry_option(&mut input, &mut output, "ttyname", tty_name_for_stdin())?;
-    send_pinentry_option(&mut input, &mut output, "display", crate::lpenv::var("DISPLAY").ok())?;
-    send_pinentry_command(&mut input, "GETPIN", None)?;
-    let password = read_pinentry_data(&mut output)?;
+        send_pinentry_command(&mut input, "SETTITLE", Some("LastPass CLI"))?;
+        expect_pinentry_ok(&mut output)?;
+        send_pinentry_command(&mut input, "SETPROMPT", Some(&format!("{prompt}:")))?;
+        expect_pinentry_ok(&mut output)?;
+        if let Some(error) = error {
+            send_pinentry_command(&mut input, "SETERROR", Some(error))?;
+            expect_pinentry_ok(&mut output)?;
+        }
+        send_pinentry_command(&mut input, "SETDESC", Some(description))?;
+        expect_pinentry_ok(&mut output)?;
+        send_pinentry_option(&mut input, &mut output, "ttytype", crate::lpenv::var("TERM").ok())?;
+        send_pinentry_option(&mut input, &mut output, "ttyname", tty_name_for_stdin())?;
+        send_pinentry_option(&mut input, &mut output, "display", crate::lpenv::var("DISPLAY").ok())?;
+        send_pinentry_command(&mut input, "GETPIN", None)?;
+        let password = read_pinentry_data(&mut output)?;
+        Ok(pinentry_unescape(&password))
+    })();
     let _ = send_pinentry_command(&mut input, "BYE", None);
     let _ = child.wait();
-    Ok(pinentry_unescape(&password))
+    result
 }
 
 fn spawn_pinentry(pinentry: &str) -> std::result::Result<Child, PinentryError> {
@@ -234,7 +245,7 @@ fn pinentry_escape(value: &str) -> String {
 }
 
 fn pinentry_unescape(value: &str) -> String {
-    let mut unescaped = String::with_capacity(value.len());
+    let mut unescaped = Vec::with_capacity(value.len());
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '%' {
@@ -243,19 +254,23 @@ fn pinentry_unescape(value: &str) -> String {
             if let (Some(hi), Some(lo)) = (hi, lo)
                 && let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16)
             {
-                unescaped.push(byte as char);
+                unescaped.push(byte);
                 continue;
             }
             break;
         }
-        unescaped.push(ch);
+        let mut encoded = [0_u8; 4];
+        unescaped.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
     }
-    unescaped
+    String::from_utf8_lossy(&unescaped).to_string()
 }
 
 fn tty_name_for_stdin() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
+        if !std::io::stdin().is_terminal() {
+            return None;
+        }
         std::fs::read_link("/proc/self/fd/0")
             .ok()
             .map(|path| path.to_string_lossy().into_owned())

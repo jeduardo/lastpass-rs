@@ -138,9 +138,10 @@ mod tests {
     #[test]
     fn copy_to_clipboard_treats_empty_custom_command_as_active_override() {
         let _guard = crate::lpenv::begin_test_overrides();
-        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "");
-        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
-        copy_to_clipboard(b"v").expect("empty custom command should execute through the shell");
+        crate::lpenv::set_override_for_tests("SHELL", "/bin/cat");
+        let err = copy_to_clipboard_with_command(b"v", Some(""), &[("/bin/cat", &[])])
+            .expect_err("empty custom command should stay on the shell override path");
+        assert!(err.contains("Unable to copy contents to clipboard"));
     }
 
     #[test]
