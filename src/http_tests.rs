@@ -265,6 +265,143 @@ fn mock_show_website_persists_updates_for_following_getaccts_requests() {
 }
 
 #[test]
+fn mock_transport_loads_default_blob_when_persisted_remote_blob_is_invalid() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let transport = MockTransport::new();
+    ConfigStore::from_current()
+        .write_buffer(MOCK_REMOTE_BLOB_NAME, b"not-json")
+        .expect("write invalid blob");
+
+    let blob = transport.load_mock_remote_blob();
+    assert_eq!(blob.accounts.len(), 4);
+
+    transport.save_mock_remote_blob(&blob);
+    let saved = ConfigStore::from_current()
+        .read_buffer(MOCK_REMOTE_BLOB_NAME)
+        .expect("read saved blob")
+        .expect("saved blob exists");
+    assert!(!saved.is_empty());
+}
+
+#[test]
+fn mock_show_website_ignores_missing_and_unknown_account_ids() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    client
+        .post_lastpass(None, "show_website.php", None, &[("username", "ignored")])
+        .expect("missing aid update");
+    client
+        .post_lastpass(
+            None,
+            "show_website.php",
+            None,
+            &[("aid", "9999"), ("username", "ignored")],
+        )
+        .expect("unknown aid update");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "0001")
+        .expect("default account");
+    assert_eq!(account.fullname, "test-group/test-account");
+}
+
+#[test]
+fn mock_show_website_updates_fullname_when_group_becomes_empty() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    client
+        .post_lastpass(
+            None,
+            "show_website.php",
+            None,
+            &[
+                ("aid", "0001"),
+                (
+                    "name",
+                    &crate::commands::data::encrypt_and_encode("renamed", &key).expect("name"),
+                ),
+                (
+                    "grouping",
+                    &crate::commands::data::encrypt_and_encode("", &key).expect("group"),
+                ),
+            ],
+        )
+        .expect("update response");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "0001")
+        .expect("updated account");
+    assert_eq!(account.group, "");
+    assert_eq!(account.fullname, "renamed");
+}
+
+#[test]
+fn mock_show_website_decodes_encrypted_url_payloads() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    client
+        .post_lastpass(
+            None,
+            "show_website.php",
+            None,
+            &[
+                ("aid", "0001"),
+                (
+                    "url",
+                    &crate::commands::data::encrypt_and_encode("https://encrypted.example/", &key)
+                        .expect("url"),
+                ),
+            ],
+        )
+        .expect("update response");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "0001")
+        .expect("updated account");
+    assert_eq!(account.url, "https://encrypted.example/");
+}
+
+#[test]
 fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
     let _guard = crate::lpenv::begin_test_overrides();
     crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
