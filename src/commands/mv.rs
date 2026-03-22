@@ -11,6 +11,13 @@ fn lpass_error_to_string(err: crate::error::LpassError) -> String {
     err.to_string()
 }
 
+fn non_empty_share_id(value: Option<&str>) -> Option<&str> {
+    match value {
+        Some(value) if !value.is_empty() => Some(value),
+        _ => None,
+    }
+}
+
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
@@ -206,8 +213,8 @@ pub(super) fn readonly_move_error(account: &Account) -> Option<String> {
 
 pub(super) fn share_changed(original: &Account, updated: &Account) -> bool {
     match (
-        original.share_id.as_deref().filter(|value| !value.is_empty()),
-        updated.share_id.as_deref().filter(|value| !value.is_empty()),
+        non_empty_share_id(original.share_id.as_deref()),
+        non_empty_share_id(updated.share_id.as_deref()),
     ) {
         (Some(left), Some(right)) => left != right,
         (Some(_), None) | (None, Some(_)) => true,
@@ -219,16 +226,8 @@ pub(super) fn share_changed(original: &Account, updated: &Account) -> bool {
 }
 
 pub(super) fn share_transition_has_api_ids(original: &Account, updated: &Account) -> bool {
-    original
-        .share_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .is_some()
-        || updated
-            .share_id
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .is_some()
+    non_empty_share_id(original.share_id.as_deref()).is_some()
+        || non_empty_share_id(updated.share_id.as_deref()).is_some()
 }
 
 pub(super) fn share_name_eq_ignore_ascii_case(left: Option<&str>, right: Option<&str>) -> bool {

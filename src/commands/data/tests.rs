@@ -661,8 +661,8 @@ fn mock_blob_contains_expected_sample_entries() {
         assert!(format!("{err}").contains("Move to/from shared folder failed (-22)"));
     }
 
-    #[test]
-    fn build_share_move_params_returns_empty_without_share_ids() {
+#[test]
+fn build_share_move_params_returns_empty_without_share_ids() {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
@@ -701,14 +701,143 @@ fn mock_blob_contains_expected_sample_entries() {
             private_key_enc: None,
         };
 
-        let params =
-            build_share_move_params(&account, &Blob::default(), &session, &[3u8; KDF_HASH_LEN], None)
-                .expect("params");
-        assert!(params.is_empty());
-    }
+    let params =
+        build_share_move_params(&account, &Blob::default(), &session, &[3u8; KDF_HASH_LEN], None)
+            .expect("params");
+    assert!(params.is_empty());
+}
+
+#[test]
+fn build_share_move_params_treats_empty_share_ids_as_absent() {
+    let account = Account {
+        id: "42".to_string(),
+        share_name: Some("Shared-other".to_string()),
+        share_id: Some(String::new()),
+        share_readonly: false,
+        name: "entry".to_string(),
+        name_encrypted: None,
+        group: "plain".to_string(),
+        group_encrypted: None,
+        fullname: "plain/entry".to_string(),
+        url: "https://example.com".to_string(),
+        url_encrypted: None,
+        username: "user".to_string(),
+        username_encrypted: None,
+        password: "pass".to_string(),
+        password_encrypted: None,
+        note: "note".to_string(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    };
+    let session = Session {
+        uid: "u".to_string(),
+        session_id: "s".to_string(),
+        token: "tok".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+
+    let params = build_share_move_params(
+        &account,
+        &Blob::default(),
+        &session,
+        &[3u8; KDF_HASH_LEN],
+        Some(""),
+    )
+    .expect("params");
+    assert!(params.is_empty());
+}
+
+#[test]
+fn on_off_returns_expected_strings() {
+    assert_eq!(on_off(true), "on");
+    assert_eq!(on_off(false), "off");
+}
+
+#[test]
+fn normalize_share_id_filters_missing_and_empty_values() {
+    assert_eq!(normalize_share_id(None), None);
+    assert_eq!(normalize_share_id(Some("")), None);
+    assert_eq!(normalize_share_id(Some("77")), Some("77"));
+}
+
+#[test]
+fn account_id_for_upload_defaults_empty_id_to_zero() {
+    let mut account = Account::default();
+    assert_eq!(account_id_for_upload(&account), "0");
+
+    account.id = "42".to_string();
+    assert_eq!(account_id_for_upload(&account), "42");
+}
+
+#[test]
+fn encode_upload_url_covers_encrypted_and_hex_paths() {
+    let key = [4u8; KDF_HASH_LEN];
+    let mut account = Account {
+        id: "42".to_string(),
+        share_name: None,
+        share_id: None,
+        share_readonly: false,
+        name: "entry".to_string(),
+        name_encrypted: None,
+        group: String::new(),
+        group_encrypted: None,
+        fullname: "entry".to_string(),
+        url: "https://example.com".to_string(),
+        url_encrypted: None,
+        username: String::new(),
+        username_encrypted: None,
+        password: String::new(),
+        password_encrypted: None,
+        note: String::new(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    };
+    let encrypted_session = Session {
+        uid: "u".to_string(),
+        session_id: "s".to_string(),
+        token: "tok".to_string(),
+        url_encryption_enabled: true,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    let plain_session = Session {
+        url_encryption_enabled: false,
+        ..encrypted_session.clone()
+    };
+
+    let encrypted = encode_upload_url(&account, &encrypted_session, &key).expect("encrypted url");
+    assert!(encrypted.starts_with('!'));
+
+    let plain = encode_upload_url(&account, &plain_session, &key).expect("plain url");
+    assert_eq!(plain, hex::encode(account.url.as_bytes()));
+
+    account.url = "http://sn".to_string();
+    let secure_note = encode_upload_url(&account, &encrypted_session, &key).expect("secure note");
+    assert_eq!(secure_note, hex::encode(account.url.as_bytes()));
+}
 
     #[test]
-    fn push_account_share_move_with_client_returns_ok_without_share_transition() {
+fn push_account_share_move_with_client_returns_ok_without_share_transition() {
         let account = Account {
             id: "42".to_string(),
             share_name: None,
@@ -754,9 +883,126 @@ fn mock_blob_contains_expected_sample_entries() {
             &account,
             &Blob::default(),
             None,
-        )
-        .expect("noop");
-    }
+    )
+    .expect("noop");
+}
+
+#[test]
+fn push_account_share_move_with_client_succeeds_and_reports_transport_errors() {
+    let account = Account {
+        id: "42".to_string(),
+        share_name: Some("Shared-other".to_string()),
+        share_id: Some("88".to_string()),
+        share_readonly: false,
+        name: "entry".to_string(),
+        name_encrypted: None,
+        group: "ops".to_string(),
+        group_encrypted: None,
+        fullname: "Shared-other/ops/entry".to_string(),
+        url: "https://example.com".to_string(),
+        url_encrypted: None,
+        username: "user".to_string(),
+        username_encrypted: None,
+        password: "pass".to_string(),
+        password_encrypted: None,
+        note: "note".to_string(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    };
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![crate::blob::Share {
+            id: "88".to_string(),
+            name: "Shared-other".to_string(),
+            readonly: false,
+            key: Some([8u8; KDF_HASH_LEN]),
+        }],
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    };
+    let session = Session {
+        uid: "u".to_string(),
+        session_id: "s".to_string(),
+        token: "tok".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+
+    let ok = HttpClient::mock_with_overrides(&[("lastpass/api.php", 200, "<lastpass rc=\"OK\"/>")]);
+    push_account_share_move_with_client(&ok, &session, &[3u8; KDF_HASH_LEN], &account, &blob, Some("77"))
+        .expect("success");
+
+    let mut unreachable = session.clone();
+    unreachable.server = Some("127.0.0.1:1".to_string());
+    let real = HttpClient::real().expect("real client");
+    let err = push_account_share_move_with_client(
+        &real,
+        &unreachable,
+        &[3u8; KDF_HASH_LEN],
+        &account,
+        &blob,
+        Some("77"),
+    )
+    .expect_err("transport failure");
+    assert!(format!("{err}").contains("IO error while http post"));
+}
+
+#[test]
+fn build_share_move_params_reports_missing_shared_folder_key() {
+    let account = Account {
+        id: "42".to_string(),
+        share_name: Some("Shared-other".to_string()),
+        share_id: Some("88".to_string()),
+        share_readonly: false,
+        name: "entry".to_string(),
+        name_encrypted: None,
+        group: "ops".to_string(),
+        group_encrypted: None,
+        fullname: "Shared-other/ops/entry".to_string(),
+        url: "https://example.com".to_string(),
+        url_encrypted: None,
+        username: "user".to_string(),
+        username_encrypted: None,
+        password: "pass".to_string(),
+        password_encrypted: None,
+        note: "note".to_string(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    };
+    let blob = Blob::default();
+    let session = Session {
+        uid: "u".to_string(),
+        session_id: "s".to_string(),
+        token: "tok".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+
+    let err = build_share_move_params(&account, &blob, &session, &[3u8; KDF_HASH_LEN], Some("77"))
+        .expect_err("missing share key");
+    assert!(format!("{err}").contains("Unable to find shared folder key"));
+}
 
     #[test]
     fn build_show_website_params_uses_encrypted_url_when_feature_enabled() {

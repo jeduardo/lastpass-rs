@@ -334,6 +334,37 @@ fn share_name_eq_ignore_ascii_case_covers_matching_and_missing_values() {
     assert!(!share_name_eq_ignore_ascii_case(Some("Team"), None));
 }
 
+#[test]
+fn share_transition_has_api_ids_requires_non_empty_ids() {
+    let mut original = account("1", "entry", "Team/entry", Some("Team"));
+    let mut updated = account("1", "entry", "Other/entry", Some("Other"));
+
+    original.share_id = Some("77".to_string());
+    updated.share_id = None;
+    assert!(share_transition_has_api_ids(&original, &updated));
+
+    original.share_id = None;
+    updated.share_id = Some("88".to_string());
+    assert!(share_transition_has_api_ids(&original, &updated));
+
+    original.share_id = Some(String::new());
+    updated.share_id = Some(String::new());
+    assert!(!share_transition_has_api_ids(&original, &updated));
+}
+
+#[test]
+fn lpass_error_to_string_uses_display_text() {
+    let err = lpass_error_to_string(crate::error::LpassError::User("boom"));
+    assert_eq!(err, "boom");
+}
+
+#[test]
+fn non_empty_share_id_filters_missing_and_empty_values() {
+    assert_eq!(non_empty_share_id(None), None);
+    assert_eq!(non_empty_share_id(Some("")), None);
+    assert_eq!(non_empty_share_id(Some("77")), Some("77"));
+}
+
 fn configure_logged_in_mock_home(
 ) -> (
     TempDir,
@@ -485,4 +516,48 @@ fn run_inner_share_boundary_move_without_share_ids_errors_and_keeps_local_entry(
     assert_eq!(updated.accounts[0].fullname, "Shared-team/apps/entry");
     assert_eq!(updated.accounts[0].share_name.as_deref(), Some("Shared-team"));
     assert_eq!(updated.accounts[0].share_id, None);
+}
+
+#[test]
+fn run_inner_share_boundary_move_keeps_local_entry_when_upload_fails() {
+    let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
+    let mut blob = mock_blob_with_shared_entry();
+    let mut target = account("99", "other", "Shared-other/ops/other", Some("Shared-other"));
+    target.share_id = Some("88".to_string());
+    target.group = "ops".to_string();
+    blob.accounts.push(target);
+    blob.shares.clear();
+    save_blob(&blob).expect("save blob");
+
+    let err = run_inner(&[
+        "--sync=no".to_string(),
+        "Shared-team/apps/entry".to_string(),
+        "Shared-other/ops".to_string(),
+    ])
+    .expect_err("share move upload should fail");
+    assert!(err.contains("Unable to find shared folder key"));
+
+    let updated = load_blob(SyncMode::No).expect("load blob");
+    assert_eq!(updated.accounts.len(), 2);
+    assert_eq!(updated.accounts[0].fullname, "Shared-team/apps/entry");
+}
+
+#[test]
+fn run_inner_same_share_move_keeps_local_entry_when_update_fails() {
+    let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
+    let mut blob = mock_blob_with_shared_entry();
+    blob.shares.clear();
+    save_blob(&blob).expect("save blob");
+
+    let err = run_inner(&[
+        "--sync=no".to_string(),
+        "Shared-team/apps/entry".to_string(),
+        "Shared-team/ops".to_string(),
+    ])
+    .expect_err("standard update should fail");
+    assert!(err.contains("Unable to find shared folder key"));
+
+    let updated = load_blob(SyncMode::No).expect("load blob");
+    assert_eq!(updated.accounts.len(), 1);
+    assert_eq!(updated.accounts[0].fullname, "Shared-team/apps/entry");
 }

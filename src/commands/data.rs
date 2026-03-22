@@ -282,24 +282,23 @@ fn build_share_move_params(
     vault_key: &[u8; KDF_HASH_LEN],
     original_share_id: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
-    let current_share_id = account.share_id.as_deref().filter(|value| !value.is_empty());
-    let original_share_id = original_share_id.filter(|value| !value.is_empty());
+    let current_share_id = normalize_share_id(account.share_id.as_deref());
+    let original_share_id = normalize_share_id(original_share_id);
     if current_share_id.is_none() && original_share_id.is_none() { return Ok(Vec::new()); }
 
     let key = upload_key_for_account(account, blob, vault_key)?;
-    let mut params = vec![
-        ("token".to_string(), session.token.clone()),
-        ("cmd".to_string(), "uploadaccounts".to_string()),
-        ("aid0".to_string(), account.id.clone()),
-        ("name0".to_string(), encrypt_and_encode(&account.name, key)?),
-        ("grouping0".to_string(), encrypt_and_encode(&account.group, key)?),
-        ("url0".to_string(), encode_upload_url(account, session, key)?),
-        ("username0".to_string(), encrypt_and_encode(&account.username, key)?),
-        ("password0".to_string(), encrypt_and_encode(&account.password, key)?),
-        ("pwprotect0".to_string(), on_off(account.pwprotect)),
-        ("extra0".to_string(), encrypt_and_encode(&account.note, key)?),
-        ("todelete".to_string(), account.id.clone()),
-    ];
+    let mut params = Vec::with_capacity(13);
+    params.push(("token".to_string(), session.token.clone()));
+    params.push(("cmd".to_string(), "uploadaccounts".to_string()));
+    params.push(("aid0".to_string(), account.id.clone()));
+    params.push(("name0".to_string(), encrypt_and_encode(&account.name, key)?));
+    params.push(("grouping0".to_string(), encrypt_and_encode(&account.group, key)?));
+    params.push(("url0".to_string(), encode_upload_url(account, session, key)?));
+    params.push(("username0".to_string(), encrypt_and_encode(&account.username, key)?));
+    params.push(("password0".to_string(), encrypt_and_encode(&account.password, key)?));
+    params.push(("pwprotect0".to_string(), on_off(account.pwprotect)));
+    params.push(("extra0".to_string(), encrypt_and_encode(&account.note, key)?));
+    params.push(("todelete".to_string(), account.id.clone()));
 
     if let Some(share_id) = current_share_id {
         params.push(("sharedfolderid".to_string(), share_id.to_string()));
@@ -450,6 +449,13 @@ fn is_secure_note(account: &Account) -> bool {
 
 fn on_off(value: bool) -> String {
     if value { "on" } else { "off" }.to_string()
+}
+
+fn normalize_share_id(value: Option<&str>) -> Option<&str> {
+    match value {
+        Some(value) if !value.is_empty() => Some(value),
+        _ => None,
+    }
 }
 
 fn account_id_for_upload(account: &Account) -> String {
