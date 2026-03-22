@@ -5,6 +5,10 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lpass_core::blob::{Account, Blob};
+use lpass_core::config::{ConfigEnv, ConfigStore};
+use lpass_core::kdf::KDF_HASH_LEN;
+
 static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 
 fn unique_test_home() -> PathBuf {
@@ -27,6 +31,95 @@ fn write_askpass(home: &Path, content: &str) -> PathBuf {
     fs::write(&askpass, content).expect("write askpass");
     fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700)).expect("chmod askpass");
     askpass
+}
+
+fn store_for(home: &Path) -> ConfigStore {
+    ConfigStore::with_env(ConfigEnv {
+        lpass_home: Some(home.to_path_buf()),
+        ..ConfigEnv::default()
+    })
+}
+
+fn current_key(home: &Path) -> [u8; KDF_HASH_LEN] {
+    let store = store_for(home);
+    let key = store
+        .read_buffer("plaintext_key")
+        .expect("read key")
+        .expect("plaintext key present");
+    let mut out = [0u8; KDF_HASH_LEN];
+    out.copy_from_slice(&key);
+    out
+}
+
+fn seed_default_blob(home: &Path) {
+    let store = store_for(home);
+    let key = current_key(home);
+    let blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![
+            Account {
+                id: "100".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-account".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-account".to_string(),
+                url: "https://example.com".to_string(),
+                url_encrypted: None,
+                username: "xyz@example.com".to_string(),
+                username_encrypted: None,
+                password: "secret".to_string(),
+                password_encrypted: None,
+                note: "sample note".to_string(),
+                note_encrypted: None,
+                last_touch: String::new(),
+                last_modified_gmt: String::new(),
+                fav: false,
+                pwprotect: false,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+            Account {
+                id: "101".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-note".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-note".to_string(),
+                url: "http://sn".to_string(),
+                url_encrypted: None,
+                username: String::new(),
+                username_encrypted: None,
+                password: String::new(),
+                password_encrypted: None,
+                note: "NoteType:Secure Note\nField:Value".to_string(),
+                note_encrypted: None,
+                last_touch: String::new(),
+                last_modified_gmt: String::new(),
+                fav: false,
+                pwprotect: false,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+        ],
+        attachments: Vec::new(),
+    };
+    let json = serde_json::to_vec(&blob).expect("blob json");
+    store
+        .write_encrypted_buffer("blob.json", &json, &key)
+        .expect("blob write");
 }
 
 fn run(home: &Path, askpass: Option<&Path>, args: &[&str]) -> Output {
@@ -87,6 +180,7 @@ fn login_agent_status_ls_show_and_logout_cycle() {
         "stderr: {}",
         String::from_utf8_lossy(&login.stderr)
     );
+    seed_default_blob(&home);
     let trusted_id = fs::read_to_string(home.join("trusted_id")).expect("trusted_id");
     assert_eq!(trusted_id.trim().len(), 32);
 
@@ -148,6 +242,19 @@ fn login_warning_failure_and_option_error_paths() {
         "stderr: {}",
         String::from_utf8_lossy(&login_warn.stderr)
     );
+
+    let login = run(
+        &home,
+        Some(&askpass_ok),
+        &["login", "--plaintext-key", "--force", "user@example.com"],
+    );
+    assert_eq!(
+        login.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+    seed_default_blob(&home);
 
     let ls_bad_args = run(&home, None, &["ls", "group1", "group2"]);
     assert_eq!(ls_bad_args.status.code().unwrap_or(-1), 1);

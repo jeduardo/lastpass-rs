@@ -46,7 +46,7 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
-- parity test/gate consolidation follow-up items
+- remove `LPASS_HTTP_MOCK`-driven business-path divergence so tests exercise the same command logic as normal runtime paths
 
 ## Implementation status
 
@@ -263,7 +263,7 @@ Implementation status for environment variables (source audited from `lastpass-c
 Rust tests:
 
 ```bash
-cargo test
+cargo test --locked --all-targets
 ```
 
 Coverage report (Codecov-compatible LCOV):
@@ -291,6 +291,15 @@ You can pass individual test names to run a subset:
 ```bash
 cargo test-upstream -- test_login test_ls
 ```
+
+Merge-gate equivalents used for parity work:
+
+```bash
+act -j test --container-architecture linux/arm64
+act -j coverage --container-architecture linux/arm64
+```
+
+When running under local `act`, the coverage workflow generates the LCOV artifact and skips Codecov upload automatically.
 
 ## Project goals and fidelity rules
 

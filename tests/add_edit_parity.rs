@@ -7,6 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use lpass_core::blob::{Account, Blob, Share};
 use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
+use lpass_core::session::{Session, session_save_with_store};
+
+const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
 
 fn unique_test_home() -> PathBuf {
     let nanos = SystemTime::now()
@@ -38,6 +41,7 @@ fn write_editor_content(home: &Path, name: &str, content: &str) -> PathBuf {
 }
 
 fn run(home: &Path, args: &[&str], stdin: Option<&str>, editor: Option<(&Path, &Path)>) -> Output {
+    ensure_mock_state(home);
     let exe = env!("CARGO_BIN_EXE_lpass");
     let mut command = Command::new(exe);
     command
@@ -80,17 +84,73 @@ fn store_for(home: &Path) -> ConfigStore {
 
 fn write_mock_blob(home: &Path, blob: &Blob) {
     let store = store_for(home);
+    seed_mock_auth(home);
     let json = serde_json::to_vec(blob).expect("blob json");
-    store.write_buffer("blob", &json).expect("write blob");
+    store
+        .write_encrypted_buffer("blob.json", &json, &MOCK_KEY)
+        .expect("write blob");
 }
 
 fn read_mock_blob(home: &Path) -> Blob {
     let store = store_for(home);
     let buffer = store
-        .read_buffer("blob")
+        .read_encrypted_buffer("blob.json", &MOCK_KEY)
         .expect("read blob")
         .expect("blob contents");
     serde_json::from_slice(&buffer).expect("parse blob")
+}
+
+fn seed_mock_auth(home: &Path) {
+    let store = store_for(home);
+    store
+        .write_buffer("plaintext_key", &MOCK_KEY)
+        .expect("plaintext key");
+    store
+        .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &MOCK_KEY)
+        .expect("verify");
+    store.write_string("username", "tester").expect("username");
+    session_save_with_store(
+        &store,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+        &MOCK_KEY,
+    )
+    .expect("session save");
+}
+
+fn ensure_mock_state(home: &Path) {
+    let store = store_for(home);
+    if store
+        .read_buffer("plaintext_key")
+        .expect("read plaintext key")
+        .is_none()
+    {
+        seed_mock_auth(home);
+    }
+    if store
+        .read_buffer("blob.json")
+        .expect("read blob json")
+        .is_none()
+    {
+        write_mock_blob(
+            home,
+            &Blob {
+                version: 1,
+                local_version: false,
+                shares: Vec::new(),
+                accounts: Vec::new(),
+                attachments: Vec::new(),
+            },
+        );
+    }
 }
 
 fn shared_blob() -> Blob {
@@ -490,6 +550,7 @@ fn add_edit_parity_paths() {
 fn add_editor_uses_secure_tempdir_path() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
+    ensure_mock_state(&home);
     let editor = write_editor_script(&home);
     let add_content = write_editor_content(
         &home,

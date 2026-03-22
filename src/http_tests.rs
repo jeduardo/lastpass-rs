@@ -186,6 +186,32 @@ fn post_lastpass_bytes_returns_raw_body() {
 }
 
 #[test]
+fn mock_getaccts_returns_minimal_blob_bytes() {
+    let client = HttpClient::mock();
+    let response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("response");
+    assert_eq!(response.status, 200);
+    assert!(response.body.starts_with(b"LPAV"), "body: {:?}", response.body);
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+    let blob = crate::blob::blob_parse(&response.body, &key, None).expect("parse blob");
+    assert_eq!(blob.version, 123);
+    assert_eq!(blob.accounts.len(), 4);
+    assert_eq!(blob.accounts[0].fullname, "test-group/test-account");
+    assert_eq!(blob.accounts[2].pwprotect, true);
+}
+
+#[test]
+fn mock_getaccts_byte_overrides_take_precedence() {
+    let client = HttpClient::mock_with_overrides(&[("getaccts.php", 200, "LPAV\0\0\0\x011")]);
+    let response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("response");
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"LPAV\0\0\0\x011");
+}
+
+#[test]
 fn mock_show_website_returns_empty_body() {
     let client = HttpClient::mock();
     let response = client

@@ -300,6 +300,7 @@ mod tests {
         let home = TempDir::new().expect("temp home");
         crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        let key = [7u8; KDF_HASH_LEN];
         let blob = crate::blob::Blob {
             version: 1,
             local_version: false,
@@ -311,8 +312,29 @@ mod tests {
             lpass_home: Some(home.path().to_path_buf()),
             ..crate::config::ConfigEnv::default()
         });
+        store.write_buffer("plaintext_key", &key).expect("write key");
+        store
+            .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        store.write_string("username", "tester").expect("username");
+        crate::session::session_save(
+            &crate::session::Session {
+                uid: "u1".to_string(),
+                session_id: "s1".to_string(),
+                token: "t1".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
         let blob_json = serde_json::to_vec(&blob).expect("blob json");
-        store.write_buffer("blob", &blob_json).expect("write blob");
+        store
+            .write_encrypted_buffer("blob.json", &blob_json, &key)
+            .expect("write blob");
 
         let status = run_inner(&[
             "--sync=no".to_string(),

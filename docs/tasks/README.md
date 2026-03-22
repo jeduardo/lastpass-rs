@@ -17,7 +17,8 @@ Recommended execution order:
 8. `08-env-prompt-clipboard-logging-parity.md` (`done`)
 9. `10-shared-folder-move-parity.md` (`done`)
 10. `11-strict-option-parsing-and-color-output-parity.md` (`done`)
-11. `09-parity-tests-and-gates.md` (`todo`, final consolidation task)
+11. `09-parity-tests-and-gates.md` (`done`)
+12. `12-remove-test-mode-business-branches.md` (`todo`)
 
 Global rules for every task:
 - Match behavior and options from `lastpass-cli/` exactly unless explicitly documented.
@@ -25,5 +26,8 @@ Global rules for every task:
 - Add or update tests in the same change.
 - Keep project coverage at or above 80%.
 - Run:
-  - `cargo test`
-  - `./scripts/run-upstream-shell-tests.sh`
+  - `cargo test --locked --all-targets`
+  - `cargo test-upstream`
+  - `cargo coverage`
+  - `act -j test --container-architecture linux/arm64`
+  - `act -j coverage --container-architecture linux/arm64`

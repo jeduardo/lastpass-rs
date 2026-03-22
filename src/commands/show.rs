@@ -844,6 +844,7 @@ mod tests {
         config_write_buffer("plaintext_key", key).expect("plaintext key");
         config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
             .expect("verify");
+        crate::config::config_write_string("username", "tester").expect("username");
     }
 
     fn write_session(key: &[u8; KDF_HASH_LEN]) {
@@ -858,6 +859,42 @@ mod tests {
             private_key_enc: None,
         };
         session_save(&session, key).expect("session save");
+    }
+
+    fn write_mock_blob_state() {
+        let key = [7u8; KDF_HASH_LEN];
+        write_plaintext_key_and_verify(&key);
+        write_session(&key);
+        crate::commands::data::save_blob(&crate::blob::Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: vec![
+                {
+                    let mut acct = account("0001", "test-account", "test-group");
+                    acct.username = "xyz@example.com".to_string();
+                    acct.password = "test-account-password".to_string();
+                    acct.url = "https://test-url.example.com/".to_string();
+                    acct
+                },
+                {
+                    let mut acct = account("0002", "test-note", "test-group");
+                    acct.url = "http://sn".to_string();
+                    acct.note = "NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password".to_string();
+                    acct
+                },
+                {
+                    let mut acct = account("0003", "test-reprompt-account", "test-group");
+                    acct.username = "xyz@example.com".to_string();
+                    acct.password = "test-account-password".to_string();
+                    acct.url = "https://test-url.example.com/".to_string();
+                    acct.pwprotect = true;
+                    acct
+                },
+            ],
+            attachments: Vec::new(),
+        })
+        .expect("save blob");
     }
 
     #[test]
@@ -1046,7 +1083,10 @@ mod tests {
     #[test]
     fn run_inner_with_mock_covers_common_choice_paths() {
         let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_blob_state();
 
         assert_eq!(
             run_inner(&[
@@ -1158,6 +1198,7 @@ mod tests {
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "cat > /dev/null");
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
+        write_mock_blob_state();
 
         assert_eq!(
             run_inner(&[
@@ -1205,6 +1246,7 @@ mod tests {
         let home = TempDir::new().expect("temp home");
         crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_blob_state();
 
         let mut blob = crate::commands::data::load_blob(SyncMode::No).expect("load blob");
         let entry = blob

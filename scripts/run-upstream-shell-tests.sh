@@ -24,6 +24,18 @@ cleanup_agent() {
 }
 trap cleanup_agent EXIT
 
+discover_test_names() {
+  sed -n 's/^function \(test_[A-Za-z0-9_]*\).*/\1/p' "$UPSTREAM_TEST_DIR/tests"
+}
+
+run_test_case() {
+  local test_name="$1"
+  rm -rf "$UPSTREAM_TEST_DIR/.lpass"
+  mkdir -p "$UPSTREAM_TEST_DIR/.lpass"
+  printf '%s\n' "$$" > "$UPSTREAM_TEST_DIR/.lpass/uploader.pid"
+  (cd "$UPSTREAM_TEST_DIR" && ./tests "$test_name")
+}
+
 cargo build --bin lpass --manifest-path "$ROOT_DIR/Cargo.toml"
 
 mkdir -p "$UPSTREAM_BUILD_DIR"
@@ -33,12 +45,16 @@ cd "$UPSTREAM_TEST_DIR"
 export LPASS_HTTP_MOCK=1
 
 if [[ $# -eq 0 ]]; then
-  ./tests
-  exit $?
+  ret=0
+  while IFS= read -r test_name; do
+    [[ -n "$test_name" ]] || continue
+    run_test_case "$test_name" || ret=1
+  done < <(discover_test_names)
+  exit "$ret"
 fi
 
 ret=0
 for test_name in "$@"; do
-  ./tests "$test_name" || ret=1
+  run_test_case "$test_name" || ret=1
 done
 exit "$ret"

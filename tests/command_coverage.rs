@@ -6,8 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lpass_core::blob::Blob;
+use lpass_core::config::{ConfigEnv, ConfigStore};
+use lpass_core::kdf::KDF_HASH_LEN;
+use lpass_core::session::{Session, session_save_with_store};
 
 static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
+const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
 
 fn unique_test_home() -> PathBuf {
     let nanos = SystemTime::now()
@@ -62,8 +66,49 @@ fn write_empty_mock_blob(home: &Path) {
         accounts: Vec::new(),
         attachments: Vec::new(),
     };
-    let json = serde_json::to_vec(&blob).expect("blob json");
-    fs::write(home.join("blob"), json).expect("write mock blob");
+    write_mock_blob(home, &blob);
+}
+
+fn store_for(home: &Path) -> ConfigStore {
+    ConfigStore::with_env(ConfigEnv {
+        lpass_home: Some(home.to_path_buf()),
+        ..ConfigEnv::default()
+    })
+}
+
+fn write_key_and_session(home: &Path, key: &[u8; KDF_HASH_LEN]) {
+    let store = store_for(home);
+    store
+        .write_buffer("plaintext_key", key)
+        .expect("write plaintext key");
+    store
+        .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
+        .expect("write verify");
+    store.write_string("username", "tester").expect("username");
+    session_save_with_store(
+        &store,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+        key,
+    )
+    .expect("save session");
+}
+
+fn write_mock_blob(home: &Path, blob: &Blob) {
+    let store = store_for(home);
+    write_key_and_session(home, &MOCK_KEY);
+    let json = serde_json::to_vec(blob).expect("blob json");
+    store
+        .write_encrypted_buffer("blob.json", &json, &MOCK_KEY)
+        .expect("write blob");
 }
 
 #[cfg(unix)]
@@ -242,6 +287,7 @@ fn add_edit_duplicate_generate_and_export_flow() {
 fn secure_note_edit_paths_work() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
 
     let add_note = "Name: secure-note\nNumber: 000-00-0000\nNoteType: Social Security\n";
     let out = run(
@@ -312,6 +358,7 @@ fn secure_note_edit_paths_work() {
 fn usage_and_error_paths_are_reported() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
 
     let add_bad_choice = run(
         &home,
@@ -386,6 +433,7 @@ fn usage_and_error_paths_are_reported() {
 fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
     let home = unique_test_home();
     fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
 
     let add_in = "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\n";
     let add_out = run(
@@ -395,18 +443,40 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
     );
     assert_eq!(add_out.status.code().unwrap_or(-1), 0);
 
-    let mv_out = run(&home, &["mv", "team/service-one", "ops"], None);
+    let mv_out = run(&home, &["mv", "--sync=no", "team/service-one", "ops"], None);
     assert_eq!(mv_out.status.code().unwrap_or(-1), 0);
-    let show_name = run(&home, &["show", "--name", "ops/service-one"], None);
+    let show_name = run(&home, &["show", "--sync=no", "--name", "ops/service-one"], None);
     assert_eq!(show_name.status.code().unwrap_or(-1), 0);
     assert_eq!(
         String::from_utf8_lossy(&show_name.stdout).trim(),
         "service-one"
     );
 
-    let rm_out = run(&home, &["rm", "ops/service-one"], None);
+    let ls_fmt = run(
+        &home,
+        &["ls", "--sync=no", "--color=never", "--format", "%an"],
+        None,
+    );
+    assert_eq!(ls_fmt.status.code().unwrap_or(-1), 0);
+    let ls_fmt_stdout = String::from_utf8_lossy(&ls_fmt.stdout);
+    assert!(ls_fmt_stdout.contains("service-one"), "{ls_fmt_stdout}");
+
+    let show_fmt = run(
+        &home,
+        &[
+            "show",
+            "--sync=no",
+            "--format=%fn=%fv",
+            "--title-format=%an",
+            "ops/service-one",
+        ],
+        None,
+    );
+    assert_eq!(show_fmt.status.code().unwrap_or(-1), 0);
+
+    let rm_out = run(&home, &["rm", "--sync=no", "ops/service-one"], None);
     assert_eq!(rm_out.status.code().unwrap_or(-1), 0);
-    let show_removed = run(&home, &["show", "ops/service-one"], None);
+    let show_removed = run(&home, &["show", "--sync=no", "ops/service-one"], None);
     assert_eq!(show_removed.status.code().unwrap_or(-1), 1);
 
     let csv = "url,username,password,extra,name,grouping,fav\nhttps://one.example.com,u1,p1,n1,entry1,team,1\n";
@@ -420,23 +490,6 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
 
     let sync_out = run(&home, &["sync", "--background"], None);
     assert_eq!(sync_out.status.code().unwrap_or(-1), 0);
-
-    let ls_fmt = run(&home, &["ls", "--color=never", "--format", "%an"], None);
-    assert_eq!(ls_fmt.status.code().unwrap_or(-1), 0);
-    let ls_fmt_stdout = String::from_utf8_lossy(&ls_fmt.stdout);
-    assert!(ls_fmt_stdout.contains("entry1"), "{ls_fmt_stdout}");
-
-    let show_fmt = run(
-        &home,
-        &[
-            "show",
-            "--format=%fn=%fv",
-            "--title-format=%an",
-            "team/entry1",
-        ],
-        None,
-    );
-    assert_eq!(show_fmt.status.code().unwrap_or(-1), 0);
 
     let _ = fs::remove_dir_all(&home);
 }

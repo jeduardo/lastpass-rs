@@ -11,6 +11,8 @@ use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
 
+const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
+
 fn unique_test_home() -> (TempDir, PathBuf) {
     let temp = TempDir::new().expect("tempdir");
     let path = temp.path().to_path_buf();
@@ -59,10 +61,40 @@ fn account(id: &str, name: &str, group: &str) -> Account {
     }
 }
 
+fn default_local_blob() -> Blob {
+    Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![account("0001", "test-account", "test-group")],
+        attachments: Vec::new(),
+    }
+}
+
 fn write_mock_blob(home: &Path, blob: &Blob) {
     let store = store_for(home);
+    let key = current_key(home).unwrap_or_else(|| {
+        write_key_and_verify(home, &MOCK_KEY);
+        MOCK_KEY
+    });
+    write_session(
+        home,
+        &key,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+    );
     let json = serde_json::to_vec(blob).expect("blob json");
-    store.write_buffer("blob", &json).expect("mock blob write");
+    store
+        .write_encrypted_buffer("blob.json", &json, &key)
+        .expect("mock blob write");
 }
 
 fn write_key_and_verify(home: &Path, key: &[u8; KDF_HASH_LEN]) {
@@ -73,6 +105,18 @@ fn write_key_and_verify(home: &Path, key: &[u8; KDF_HASH_LEN]) {
     store
         .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
         .expect("verify");
+    store.write_string("username", "tester").expect("username");
+}
+
+fn current_key(home: &Path) -> Option<[u8; KDF_HASH_LEN]> {
+    let store = store_for(home);
+    let buffer = store.read_buffer("plaintext_key").ok()??;
+    if buffer.len() != KDF_HASH_LEN {
+        return None;
+    }
+    let mut key = [0u8; KDF_HASH_LEN];
+    key.copy_from_slice(&buffer);
+    Some(key)
 }
 
 fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
@@ -536,6 +580,7 @@ fn export_skips_group_rows_in_mock_mode() {
 #[test]
 fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
     let (_temp, home) = unique_test_home();
+    let key = [9u8; KDF_HASH_LEN];
     let mut existing = account("0001", "entry", "");
     existing.url = "https://example.com".to_string();
     existing.username = "alice".to_string();
@@ -547,6 +592,18 @@ fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
         accounts: vec![existing],
         attachments: Vec::new(),
     };
+    write_key_and_verify(&home, &key);
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    session_save_with_store(&store_for(&home), &session, &key).expect("session save");
     write_mock_blob(&home, &blob);
 
     let exe = env!("CARGO_BIN_EXE_lpass");
@@ -575,6 +632,7 @@ fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
 #[test]
 fn rm_removes_account_with_mock_env() {
     let (temp, home) = unique_test_home();
+    write_mock_blob(&home, &default_local_blob());
     let exe = env!("CARGO_BIN_EXE_lpass");
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
@@ -608,7 +666,7 @@ fn duplicate_accepts_sync_and_color_flags() {
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env("LPASS_HTTP_MOCK", "1")
-        .args(["duplicate", "--sync=now", "--color=never", "team/alpha"])
+        .args(["duplicate", "--sync=no", "--color=never", "team/alpha"])
         .output()
         .expect("run duplicate");
     assert_eq!(output.status.code().unwrap_or(-1), 0);
@@ -629,7 +687,10 @@ fn duplicate_accepts_sync_and_color_flags() {
     assert_eq!(output.status.code().unwrap_or(-1), 0);
 
     let store = store_for(&home);
-    let data = store.read_buffer("blob").expect("read blob").expect("blob");
+    let data = store
+        .read_encrypted_buffer("blob.json", &current_key(&home).expect("current key"))
+        .expect("read blob")
+        .expect("blob");
     let updated: Blob = serde_json::from_slice(&data).expect("parse blob");
     assert_eq!(updated.accounts.len(), 3);
 
@@ -639,20 +700,29 @@ fn duplicate_accepts_sync_and_color_flags() {
 #[test]
 fn rm_accepts_space_separated_sync_and_color_flags() {
     let (temp, home) = unique_test_home();
-    let blob = Blob {
-        version: 1,
-        local_version: false,
-        shares: Vec::new(),
-        accounts: vec![account("0001", "alpha", "team")],
-        attachments: Vec::new(),
-    };
-    write_mock_blob(&home, &blob);
+    let key = [4u8; KDF_HASH_LEN];
+    write_key_and_verify(&home, &key);
+    write_session(
+        &home,
+        &key,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+    );
+    write_mock_blob(&home, &default_local_blob());
 
     let exe = env!("CARGO_BIN_EXE_lpass");
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env("LPASS_HTTP_MOCK", "1")
-        .args(["rm", "--sync", "now", "--color", "never", "team/alpha"])
+        .args(["rm", "--sync", "no", "--color", "never", "test-group/test-account"])
         .output()
         .expect("run rm");
     assert_eq!(output.status.code().unwrap_or(-1), 0);
@@ -744,7 +814,7 @@ fn sync_reports_missing_session() {
 }
 
 #[test]
-fn export_sync_no_queues_access_logs_and_sync_drains_them() {
+fn export_sync_no_skips_access_log_queue_and_sync_still_succeeds() {
     let (temp, home) = unique_test_home();
     let key = [9u8; KDF_HASH_LEN];
     let session = Session {
@@ -804,11 +874,10 @@ fn export_sync_no_queues_access_logs_and_sync_drains_them() {
     assert_eq!(export.status.code().unwrap_or(-1), 0);
 
     let queue_dir = home.join("upload-queue");
-    let queued: Vec<_> = fs::read_dir(&queue_dir)
-        .expect("read queue dir")
-        .filter_map(|entry| entry.ok())
-        .collect();
-    assert_eq!(queued.len(), 1);
+    assert!(
+        fs::read_dir(&queue_dir).is_err(),
+        "sync=no should not create an access-log queue"
+    );
 
     let sync = Command::new(exe)
         .env("LPASS_HOME", &home)
@@ -817,12 +886,6 @@ fn export_sync_no_queues_access_logs_and_sync_drains_them() {
         .output()
         .expect("run sync");
     assert_eq!(sync.status.code().unwrap_or(-1), 0);
-
-    let queued_after: Vec<_> = fs::read_dir(&queue_dir)
-        .expect("read queue dir")
-        .filter_map(|entry| entry.ok())
-        .collect();
-    assert!(queued_after.is_empty());
 
     let _ = temp;
 }

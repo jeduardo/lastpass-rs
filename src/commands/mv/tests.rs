@@ -198,10 +198,7 @@ fn run_inner_rejects_invalid_arguments() {
 
 #[test]
 fn run_and_parse_color_paths() {
-    let _guard = crate::lpenv::begin_test_overrides();
-    let home = TempDir::new().expect("temp home");
-    crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
-    crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+    let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
 
     assert_eq!(run(&["--color".to_string()]), 1);
 
@@ -262,11 +259,7 @@ fn run_inner_reports_load_blob_errors() {
 
 #[test]
 fn run_inner_reports_readonly_move_error_in_mock_mode() {
-    let _guard = crate::lpenv::begin_test_overrides();
-    let home = TempDir::new().expect("temp home");
-    crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
-    crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
-
+    let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
     let mut blob = load_blob(SyncMode::No).expect("mock blob");
     let account = blob
         .accounts
@@ -384,6 +377,7 @@ fn configure_logged_in_mock_home(
     config_write_buffer("plaintext_key", &key).expect("write key");
     config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
         .expect("write verify");
+    crate::config::config_write_string("username", "tester").expect("write username");
     session_save(
         &Session {
             uid: "u".to_string(),
@@ -398,6 +392,21 @@ fn configure_logged_in_mock_home(
         &key,
     )
     .expect("save session");
+    save_blob(&crate::blob::Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![{
+            let mut acct = account("0001", "test-account", "test-group/test-account", None);
+            acct.group = "test-group".to_string();
+            acct.url = "https://example.com".to_string();
+            acct.username = "user".to_string();
+            acct.password = "secret".to_string();
+            acct
+        }],
+        attachments: Vec::new(),
+    })
+    .expect("save blob");
 
     (temp, guard, env_guard)
 }
@@ -438,9 +447,11 @@ fn run_inner_same_share_move_updates_blob_and_queues_standard_update() {
     let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
     let blob = mock_blob_with_shared_entry();
     crate::commands::data::save_blob(&blob).expect("save blob");
+    config_write_buffer("uploader.pid", std::process::id().to_string().as_bytes())
+        .expect("write pid");
 
     let code = run_inner(&[
-        "--sync=no".to_string(),
+        "--sync=auto".to_string(),
         "Shared-team/apps/entry".to_string(),
         "Shared-team/ops".to_string(),
     ])
@@ -550,7 +561,7 @@ fn run_inner_same_share_move_keeps_local_entry_when_update_fails() {
     save_blob(&blob).expect("save blob");
 
     let err = run_inner(&[
-        "--sync=no".to_string(),
+        "--sync=auto".to_string(),
         "Shared-team/apps/entry".to_string(),
         "Shared-team/ops".to_string(),
     ])

@@ -8,6 +8,8 @@ use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
 
+const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
+
 fn unique_test_home() -> (TempDir, PathBuf) {
     let temp = TempDir::new().expect("tempdir");
     let path = temp.path().to_path_buf();
@@ -23,8 +25,11 @@ fn store_for(home: &Path) -> ConfigStore {
 
 fn write_mock_blob(home: &Path, blob: &Blob) {
     let store = store_for(home);
+    write_key_and_session(home, &MOCK_KEY);
     let json = serde_json::to_vec(blob).expect("blob json");
-    store.write_buffer("blob", &json).expect("blob write");
+    store
+        .write_encrypted_buffer("blob.json", &json, &MOCK_KEY)
+        .expect("blob write");
 }
 
 fn write_key_and_session(home: &Path, key: &[u8; KDF_HASH_LEN]) {
@@ -35,6 +40,7 @@ fn write_key_and_session(home: &Path, key: &[u8; KDF_HASH_LEN]) {
     store
         .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
         .expect("verify");
+    store.write_string("username", "tester").expect("username");
     session_save_with_store(
         &store,
         &Session {
