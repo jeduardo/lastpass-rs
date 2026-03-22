@@ -73,6 +73,9 @@ pub(super) fn run_inner(args: &[String]) -> Result<i32, String> {
     }
 
     if share_changed(&original, &blob.accounts[idx]) {
+        if !share_transition_has_api_ids(&original, &blob.accounts[idx]) {
+            return Err("Move to/from shared folder failed (-22)".to_string());
+        }
         maybe_push_account_share_move(&blob.accounts[idx], &blob, original.share_id.as_deref())
             .map_err(lpass_error_to_string)?;
         blob.accounts.remove(idx);
@@ -213,6 +216,19 @@ pub(super) fn share_changed(original: &Account, updated: &Account) -> bool {
             updated.share_name.as_deref(),
         ),
     }
+}
+
+pub(super) fn share_transition_has_api_ids(original: &Account, updated: &Account) -> bool {
+    original
+        .share_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .is_some()
+        || updated
+            .share_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .is_some()
 }
 
 pub(super) fn share_name_eq_ignore_ascii_case(left: Option<&str>, right: Option<&str>) -> bool {

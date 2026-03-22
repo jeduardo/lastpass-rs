@@ -463,3 +463,26 @@ fn run_inner_share_boundary_move_removes_local_entry_after_success() {
     let updated = load_blob(SyncMode::No).expect("load blob");
     assert!(updated.accounts.is_empty());
 }
+
+#[test]
+fn run_inner_share_boundary_move_without_share_ids_errors_and_keeps_local_entry() {
+    let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
+    let mut blob = mock_blob_with_shared_entry();
+    blob.accounts[0].share_id = None;
+    blob.shares.clear();
+    crate::commands::data::save_blob(&blob).expect("save blob");
+
+    let err = run_inner(&[
+        "--sync=no".to_string(),
+        "Shared-team/apps/entry".to_string(),
+        "plain".to_string(),
+    ])
+    .expect_err("share move should fail");
+    assert!(err.contains("Move to/from shared folder failed (-22)"));
+
+    let updated = load_blob(SyncMode::No).expect("load blob");
+    assert_eq!(updated.accounts.len(), 1);
+    assert_eq!(updated.accounts[0].fullname, "Shared-team/apps/entry");
+    assert_eq!(updated.accounts[0].share_name.as_deref(), Some("Shared-team"));
+    assert_eq!(updated.accounts[0].share_id, None);
+}
