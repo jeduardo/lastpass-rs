@@ -87,13 +87,13 @@ jobs:
           CARGO_TARGET_DIR: target/coverage
         run: |
           cargo llvm-cov clean --workspace
-          cargo llvm-cov --workspace --all-targets --no-report
-          cargo llvm-cov report --lcov --output-path coverage/lcov.info --ignore-filename-regex 'src/bin/test-upstream.rs$'
+          cargo llvm-cov --workspace --all-targets --codecov --output-path coverage/codecov.json --ignore-filename-regex 'src/bin/test-upstream.rs$'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: coverage/lcov.info
+          disable_search: true
+          files: coverage/codecov.json
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: jeduardo/lastpass-rs

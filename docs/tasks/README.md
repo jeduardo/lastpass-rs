@@ -15,7 +15,7 @@ Recommended execution order:
 6. `06-passwd-command-parity.md` (`done`)
 7. `07-share-command-parity.md` (`done`)
 8. `08-env-prompt-clipboard-logging-parity.md` (`done`)
-9. `10-shared-folder-move-parity.md` (`todo`)
+9. `10-shared-folder-move-parity.md` (`done`)
 10. `11-strict-option-parsing-and-color-output-parity.md` (`todo`)
 11. `09-parity-tests-and-gates.md` (`todo`, final consolidation task)
 

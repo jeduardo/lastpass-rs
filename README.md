@@ -151,7 +151,7 @@ Per-command checklist:
 
   - default move behavior by ID/name: :white_check_mark: (basic parity)
   - `--sync`, `--color`: :white_check_mark:
-  - shared-folder move semantics parity: TODO
+  - shared-folder move semantics parity: :white_check_mark:
 
 - `rm`
 
