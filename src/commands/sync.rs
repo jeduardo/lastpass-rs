@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use crate::agent::agent_get_decryption_key;
-use crate::commands::data::ensure_mock_blob;
 use crate::error::LpassError;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_load};
@@ -21,13 +20,7 @@ pub fn run(args: &[String]) -> i32 {
 fn run_inner(args: &[String]) -> Result<i32, String> {
     let parsed = parse_args(args)?;
 
-    let credentials = load_key_and_session();
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") && credentials.is_err() {
-        ensure_mock_blob().map_err(|err| format!("{err}"))?;
-        return Ok(0);
-    }
-
-    let (key, session) = credentials?;
+    let (key, session) = load_key_and_session()?;
     if parsed.background {
         upload_queue::ensure_running(&key).map_err(|err| format!("{err}"))?;
         return Ok(0);
@@ -177,13 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn run_inner_mock_mode_without_session_is_a_noop() {
+    fn run_inner_without_session_reports_missing_key() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("tempdir");
         crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
-        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
 
-        assert_eq!(run_inner(&[]).expect("mock sync"), 0);
+        let err = run_inner(&[]).expect_err("missing key");
+        assert!(err.contains("Could not find decryption key"));
     }
 
     #[test]

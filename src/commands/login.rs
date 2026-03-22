@@ -2,7 +2,6 @@
 
 use std::io::{self, BufRead, Write};
 
-use super::data::ensure_mock_blob;
 use crate::agent::agent_save;
 use crate::config::config_unlink;
 use crate::config::{ConfigStore, config_write_buffer, config_write_string};
@@ -304,14 +303,12 @@ fn persist_blob_after_login(
     session: &Session,
     key: &[u8; KDF_HASH_LEN],
 ) -> std::result::Result<(), String> {
-    let use_mock = crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1");
     let store = ConfigStore::from_current();
-    persist_blob_after_login_with_fetch(&store, use_mock, session, key, fetch_blob)
+    persist_blob_after_login_with_fetch(&store, session, key, fetch_blob)
 }
 
 fn persist_blob_after_login_with_fetch<F>(
     store: &ConfigStore,
-    use_mock: bool,
     session: &Session,
     key: &[u8; KDF_HASH_LEN],
     fetch_blob_fn: F,
@@ -319,10 +316,6 @@ fn persist_blob_after_login_with_fetch<F>(
 where
     F: Fn(&Session) -> std::result::Result<Vec<u8>, String>,
 {
-    if use_mock {
-        ensure_mock_blob().map_err(|err| format!("{err}"))?;
-        return Ok(());
-    }
     let blob = fetch_blob_fn(session)?;
     store
         .write_encrypted_buffer("blob", &blob, key)
@@ -570,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_blob_with_mock_client_rejects_empty_body() {
+    fn fetch_blob_with_mock_client_returns_blob_bytes() {
         let client = HttpClient::mock();
         let session = Session {
             uid: "u".to_string(),
@@ -582,8 +575,8 @@ mod tests {
             private_key: None,
             private_key_enc: None,
         };
-        let err = fetch_blob_with_client(&client, &session).expect_err("empty blob must fail");
-        assert_eq!(err, "empty blob response");
+        let blob = fetch_blob_with_client(&client, &session).expect("mock blob");
+        assert!(blob.starts_with(b"LPAV"), "blob bytes: {blob:?}");
     }
 
     #[test]
@@ -625,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn persist_blob_after_login_with_fetch_handles_mock_and_non_mock_paths() {
+    fn persist_blob_after_login_with_fetch_persists_blob() {
         fn sample_blob(_session: &Session) -> std::result::Result<Vec<u8>, String> {
             Ok(vec![7, 8, 9])
         }
@@ -647,16 +640,7 @@ mod tests {
             ..ConfigEnv::default()
         });
 
-        persist_blob_after_login_with_fetch(&store, true, &session, &key, sample_blob)
-            .expect("mock mode");
-        assert!(
-            store
-                .read_encrypted_buffer("blob", &key)
-                .expect("read blob")
-                .is_none()
-        );
-
-        persist_blob_after_login_with_fetch(&store, false, &session, &key, sample_blob)
+        persist_blob_after_login_with_fetch(&store, &session, &key, sample_blob)
             .expect("persist blob");
 
         let stored = store
@@ -685,7 +669,7 @@ mod tests {
             lpass_home: Some(temp.path().to_path_buf()),
             ..ConfigEnv::default()
         });
-        let err = persist_blob_after_login_with_fetch(&store, false, &session, &key, |_session| {
+        let err = persist_blob_after_login_with_fetch(&store, &session, &key, |_session| {
             Err("fetch failed".to_string())
         })
         .expect_err("fetch error");
@@ -699,7 +683,7 @@ mod tests {
             ..ConfigEnv::default()
         });
         let err =
-            persist_blob_after_login_with_fetch(&bad_store, false, &session, &key, |_session| {
+            persist_blob_after_login_with_fetch(&bad_store, &session, &key, |_session| {
                 Ok(vec![1, 2, 3])
             })
             .expect_err("write error");

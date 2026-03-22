@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::{
     ConfigEnv, config_path, config_read_encrypted_buffer, config_unlink, config_write_buffer,
-    config_write_encrypted_buffer, config_write_encrypted_string, set_test_env,
+    config_write_encrypted_buffer, config_write_encrypted_string, config_write_string, set_test_env,
 };
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
 use crate::session::{session_load, session_save};
@@ -15,6 +15,15 @@ fn minimal_blob_bytes(version: u32) -> Vec<u8> {
     bytes.extend_from_slice(&(version.len() as u32).to_be_bytes());
     bytes.extend_from_slice(version.as_bytes());
     bytes
+}
+
+fn mock_client_with_blob_bytes(bytes: &[u8]) -> HttpClient {
+    let body = String::from_utf8(bytes.to_vec()).expect("blob text");
+    HttpClient::mock_with_overrides(&[("getaccts.php", 200, &body)])
+}
+
+fn mock_client_with_empty_blob() -> HttpClient {
+    HttpClient::mock_with_overrides(&[("getaccts.php", 200, "")])
 }
 
 fn setup_non_mock_logged_in_home(
@@ -36,6 +45,7 @@ fn setup_non_mock_logged_in_home(
         config_write_buffer("plaintext_key", &key).expect("write key");
         config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
             .expect("write verify");
+        config_write_string("username", "tester").expect("write username");
         session_save(
             &Session {
                 uid: "u".to_string(),
@@ -53,6 +63,27 @@ fn setup_non_mock_logged_in_home(
 
         (temp, config_guard, override_guard, key)
     }
+
+fn write_queue_credentials(key: &[u8; KDF_HASH_LEN]) {
+    config_write_buffer("plaintext_key", key).expect("write key");
+    config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
+        .expect("write verify");
+    config_write_string("username", "tester").expect("write username");
+    session_save(
+        &Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "tok".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+        key,
+    )
+    .expect("save session");
+}
 
 #[test]
 fn map_decryption_key_error_maps_missing_inputs_to_user_error() {
@@ -1258,14 +1289,9 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
     }
 
     #[test]
-    fn load_queue_credentials_returns_none_in_mock_mode_without_session() {
-        let _guard = crate::lpenv::begin_test_overrides();
-        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
-        assert!(
-            load_queue_credentials()
-                .expect("load queue credentials")
-                .is_none()
-        );
+    fn load_queue_credentials_reports_missing_key_without_session() {
+        let err = load_queue_credentials().expect_err("missing key");
+        assert!(matches!(err, LpassError::User(_)));
     }
 
     #[test]
@@ -1389,7 +1415,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             attachments: Vec::new(),
         };
 
-        maybe_push_account_update(&account, &blob, SyncMode::No).expect("queue update");
+        maybe_push_account_update(&account, &blob, SyncMode::Auto).expect("queue update");
 
         let queue_dir = config_path("upload-queue/.marker")
             .expect("queue marker")
@@ -1464,7 +1490,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             fields: Vec::new(),
         };
 
-        maybe_push_account_remove(&account, SyncMode::No).expect("queue remove");
+        maybe_push_account_remove(&account, SyncMode::Now).expect("queue remove");
 
         let queue_dir = config_path("upload-queue/.marker")
             .expect("queue marker")
@@ -1539,7 +1565,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             fields: Vec::new(),
         };
 
-        maybe_log_access(&account, SyncMode::No).expect("log access");
+        maybe_log_access(&account, SyncMode::Auto).expect("log access");
 
         let queue_dir = config_path("upload-queue/.marker")
             .expect("queue marker")
@@ -1616,7 +1642,11 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             ..ConfigEnv::default()
         });
 
-        ensure_mock_blob().expect("ensure");
+        let key = [6u8; KDF_HASH_LEN];
+        write_queue_credentials(&key);
+        let buffer = serde_json::to_vec_pretty(&mock_blob()).expect("blob json");
+        config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key).expect("write blob json");
+
         let mut blob = load_blob(SyncMode::Auto).expect("load auto");
         assert!(!blob.accounts.is_empty());
         blob.version = 99;
@@ -1627,18 +1657,6 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
         let account = loaded.accounts[0].clone();
         maybe_push_account_update(&account, &loaded, SyncMode::Auto).expect("mock update");
         maybe_push_account_remove(&account, SyncMode::Now).expect("mock remove");
-    }
-
-    #[test]
-    fn ensure_mock_blob_is_noop_without_mock_env() {
-        let temp = TempDir::new().expect("tempdir");
-        let _config_guard = set_test_env(ConfigEnv {
-            lpass_home: Some(temp.path().to_path_buf()),
-            ..ConfigEnv::default()
-        });
-
-        ensure_mock_blob().expect("noop");
-        assert!(!config_exists("blob"));
     }
 
     #[test]
@@ -1902,7 +1920,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             ..ConfigEnv::default()
         });
         let key = [9u8; KDF_HASH_LEN];
-        let client = HttpClient::mock();
+        let client = mock_client_with_empty_blob();
         let session = test_session();
 
         let err = fetch_and_store_blob(&client, &session, &key, None).expect_err("must fail");
@@ -1910,7 +1928,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
     }
 
     #[test]
-    fn maybe_push_account_share_move_is_noop_without_credentials_in_mock_mode() {
+    fn maybe_push_account_share_move_uses_mock_transport_with_credentials() {
         let _env_guard = crate::lpenv::begin_test_overrides();
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         let temp = TempDir::new().expect("tempdir");
@@ -1918,6 +1936,8 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             lpass_home: Some(temp.path().to_path_buf()),
             ..ConfigEnv::default()
         });
+        let key = [9u8; KDF_HASH_LEN];
+        write_queue_credentials(&key);
 
         let account = Account {
             id: "42".to_string(),
@@ -1959,7 +1979,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             attachments: Vec::new(),
         };
 
-        maybe_push_account_share_move(&account, &blob, Some("77")).expect("noop");
+        maybe_push_account_share_move(&account, &blob, Some("77")).expect("share move");
     }
 
     #[test]
@@ -2059,8 +2079,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
             bytes.extend_from_slice(b"1");
             bytes
         };
-        let blob_text = String::from_utf8(blob_bytes.clone()).expect("blob text");
-        let client = HttpClient::mock_with_overrides(&[("getaccts.php", 200, &blob_text)]);
+        let client = mock_client_with_blob_bytes(&blob_bytes);
         config_write_encrypted_buffer(BLOB_JSON_NAME, b"{}", &key).expect("write blob json");
 
         refresh_blob_from_server(&client, &test_session(), &key).expect("refresh");
@@ -2085,7 +2104,7 @@ fn build_share_move_params_reports_missing_shared_folder_key() {
         });
 
         let key = [7u8; KDF_HASH_LEN];
-        let err =
-            refresh_blob_from_server(&HttpClient::mock(), &test_session(), &key).expect_err("err");
+        let client = mock_client_with_empty_blob();
+        let err = refresh_blob_from_server(&client, &test_session(), &key).expect_err("err");
         assert!(format!("{err}").contains("Unable to fetch blob"));
     }

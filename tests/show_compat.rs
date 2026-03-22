@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lpass_core::blob::{Attachment, Blob, Share};
+use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
-use lpass_core::kdf::KDF_HASH_LEN;
+use lpass_core::kdf::{KDF_HASH_LEN, kdf_decryption_key};
+use lpass_core::session::{Session, session_save_with_store};
 
 static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 const MOCK_ATTACH_KEY_HEX: &str =
@@ -29,6 +31,7 @@ fn unique_test_home() -> PathBuf {
 }
 
 fn run(home: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> std::process::Output {
+    ensure_default_mock_state(home);
     let exe = env!("CARGO_BIN_EXE_lpass");
     let mut command = Command::new(exe);
     command.env("LPASS_HTTP_MOCK", "1");
@@ -41,12 +44,51 @@ fn run(home: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> std::process::
     command.output().expect("run command")
 }
 
+fn store_for(home: &Path) -> ConfigStore {
+    ConfigStore::with_env(ConfigEnv {
+        lpass_home: Some(home.to_path_buf()),
+        ..ConfigEnv::default()
+    })
+}
+
+fn write_session(home: &Path, username: &str, password: &str) {
+    let iterations = 2u32;
+    let key = kdf_decryption_key(username, password, iterations).expect("derive key");
+    let store = store_for(home);
+    store
+        .write_string("iterations", &iterations.to_string())
+        .expect("write iterations");
+    store
+        .write_buffer("plaintext_key", &key)
+        .expect("write plaintext key");
+    store
+        .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+        .expect("write verify");
+    store.write_string("username", username).expect("username");
+    session_save_with_store(
+        &store,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+        &key,
+    )
+    .expect("session save");
+}
+
 fn run_with_input(
     home: &Path,
     args: &[&str],
     extra_env: &[(&str, &str)],
     input: &str,
 ) -> std::process::Output {
+    ensure_default_mock_state(home);
     let exe = env!("CARGO_BIN_EXE_lpass");
     let mut command = Command::new(exe);
     command.env("LPASS_HTTP_MOCK", "1");
@@ -78,9 +120,68 @@ fn write_askpass(home: &Path, content: &str) -> PathBuf {
 }
 
 fn inject_mock_attachments(home: &Path) {
-    let blob_path = home.join("blob");
-    let blob_text = fs::read_to_string(&blob_path).expect("read mock blob");
-    let mut blob: Blob = serde_json::from_str(&blob_text).expect("parse mock blob");
+    let mut blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![
+            lpass_core::blob::Account {
+                id: "0001".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-account".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-account".to_string(),
+                url: "https://test-url.example.com/".to_string(),
+                url_encrypted: None,
+                username: "xyz@example.com".to_string(),
+                username_encrypted: None,
+                password: "test-account-password".to_string(),
+                password_encrypted: None,
+                note: String::new(),
+                note_encrypted: None,
+                last_touch: "skipped".to_string(),
+                last_modified_gmt: "skipped".to_string(),
+                fav: false,
+                pwprotect: false,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+            lpass_core::blob::Account {
+                id: "0003".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-reprompt-account".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-reprompt-account".to_string(),
+                url: "https://test-url.example.com/".to_string(),
+                url_encrypted: None,
+                username: "xyz@example.com".to_string(),
+                username_encrypted: None,
+                password: "test-account-password".to_string(),
+                password_encrypted: None,
+                note: String::new(),
+                note_encrypted: None,
+                last_touch: "skipped".to_string(),
+                last_modified_gmt: "skipped".to_string(),
+                fav: false,
+                pwprotect: true,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+        ],
+        attachments: Vec::new(),
+    };
 
     let account = blob
         .accounts
@@ -118,14 +219,129 @@ fn inject_mock_attachments(home: &Path) {
         filename: filename_cipher("mock.bin"),
     });
 
-    let updated = serde_json::to_vec_pretty(&blob).expect("serialize mock blob");
-    fs::write(&blob_path, updated).expect("write mock blob");
+    write_mock_blob(home, &blob);
 }
 
 fn write_mock_blob(home: &Path, blob: &Blob) {
-    let blob_path = home.join("blob");
+    let store = store_for(home);
+    let key = current_key(home).unwrap_or_else(|| kdf_decryption_key("tester", "123456", 2).expect("derive default key"));
     let updated = serde_json::to_vec_pretty(blob).expect("serialize mock blob");
-    fs::write(&blob_path, updated).expect("write mock blob");
+    store
+        .write_encrypted_buffer("blob.json", &updated, &key)
+        .expect("write mock blob");
+}
+
+fn current_key(home: &Path) -> Option<[u8; KDF_HASH_LEN]> {
+    let store = store_for(home);
+    let buffer = store.read_buffer("plaintext_key").ok()??;
+    if buffer.len() != KDF_HASH_LEN {
+        return None;
+    }
+    let mut key = [0u8; KDF_HASH_LEN];
+    key.copy_from_slice(&buffer);
+    Some(key)
+}
+
+fn default_mock_blob() -> Blob {
+    Blob {
+        version: 1,
+        local_version: false,
+        shares: Vec::new(),
+        accounts: vec![
+            lpass_core::blob::Account {
+                id: "0001".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-account".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-account".to_string(),
+                url: "https://test-url.example.com/".to_string(),
+                url_encrypted: None,
+                username: "xyz@example.com".to_string(),
+                username_encrypted: None,
+                password: "test-account-password".to_string(),
+                password_encrypted: None,
+                note: String::new(),
+                note_encrypted: None,
+                last_touch: "skipped".to_string(),
+                last_modified_gmt: "skipped".to_string(),
+                fav: false,
+                pwprotect: false,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+            lpass_core::blob::Account {
+                id: "0002".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-note".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-note".to_string(),
+                url: "http://sn".to_string(),
+                url_encrypted: None,
+                username: String::new(),
+                username_encrypted: None,
+                password: String::new(),
+                password_encrypted: None,
+                note: "NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password".to_string(),
+                note_encrypted: None,
+                last_touch: "skipped".to_string(),
+                last_modified_gmt: "skipped".to_string(),
+                fav: false,
+                pwprotect: false,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+            lpass_core::blob::Account {
+                id: "0003".to_string(),
+                share_name: None,
+                share_id: None,
+                share_readonly: false,
+                name: "test-reprompt-account".to_string(),
+                name_encrypted: None,
+                group: "test-group".to_string(),
+                group_encrypted: None,
+                fullname: "test-group/test-reprompt-account".to_string(),
+                url: "https://test-url.example.com/".to_string(),
+                url_encrypted: None,
+                username: "xyz@example.com".to_string(),
+                username_encrypted: None,
+                password: "test-account-password".to_string(),
+                password_encrypted: None,
+                note: String::new(),
+                note_encrypted: None,
+                last_touch: "skipped".to_string(),
+                last_modified_gmt: "skipped".to_string(),
+                fav: false,
+                pwprotect: true,
+                attachkey: String::new(),
+                attachkey_encrypted: None,
+                attachpresent: false,
+                fields: Vec::new(),
+            },
+        ],
+        attachments: Vec::new(),
+    }
+}
+
+fn ensure_default_mock_state(home: &Path) {
+    let store = store_for(home);
+    if store.read_buffer("plaintext_key").expect("key").is_none() {
+        write_session(home, "tester", "123456");
+    }
+    if store.read_buffer("blob.json").expect("blob").is_none() {
+        write_mock_blob(home, &default_mock_blob());
+    }
 }
 
 #[test]
@@ -154,6 +370,7 @@ fn show_password_short_option_works_with_shared_style_fullname() {
     let exe = env!("CARGO_BIN_EXE_lpass");
     let test_home = unique_test_home();
     fs::create_dir_all(&test_home).expect("create test home");
+    write_session(&test_home, "tester", "123456");
     write_mock_blob(
         &test_home,
         &Blob {
@@ -354,30 +571,12 @@ fn show_json_clip_copies_json_and_suppresses_stdout() {
     let _ = fs::remove_dir_all(&test_home);
 }
 
-#[cfg(unix)]
 #[test]
-fn show_attach_downloads_mock_attachment_after_login() {
+fn show_attach_downloads_mock_attachment_with_saved_session() {
     let test_home = unique_test_home();
     fs::create_dir_all(&test_home).expect("create test home");
     let askpass = write_askpass(&test_home, "#!/bin/sh\necho 123456\n");
-
-    let login = run(
-        &test_home,
-        &[
-            "login",
-            "--trust",
-            "--plaintext-key",
-            "--force",
-            "user@example.com",
-        ],
-        &[("LPASS_ASKPASS", askpass.to_str().expect("path"))],
-    );
-    assert_eq!(
-        login.status.code().unwrap_or(-1),
-        0,
-        "stderr: {}",
-        String::from_utf8_lossy(&login.stderr)
-    );
+    write_session(&test_home, "tester", "123456");
     inject_mock_attachments(&test_home);
 
     let show_attach = run(

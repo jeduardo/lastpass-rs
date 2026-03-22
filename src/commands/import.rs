@@ -6,7 +6,7 @@ use std::io::{self, Read};
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::commands::argparse::parse_sync_option;
-use crate::commands::data::{SyncMode, encrypt_and_encode, load_blob, save_blob};
+use crate::commands::data::{SyncMode, encrypt_and_encode, load_blob};
 use crate::error::LpassError;
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
@@ -58,7 +58,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             .map_err(|err| format!("stdin: {err}"))?;
     }
 
-    let mut blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
+    let blob = load_blob(sync_mode).map_err(|err| format!("{err}"))?;
     let mut imported = parse_import_accounts(&input)?;
     println!("Parsed {} accounts", imported.len());
 
@@ -69,13 +69,6 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     };
     if removed > 0 {
         println!("Removed {removed} duplicate accounts");
-    }
-
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
-        assign_mock_ids(&blob, &mut imported);
-        blob.accounts.extend(imported);
-        save_blob(&blob).map_err(|err| format!("{err}"))?;
-        return Ok(0);
     }
 
     let (key, session) = load_upload_credentials()?;
@@ -265,22 +258,6 @@ fn dedupe_against_blob(blob: &Blob, imported: &mut Vec<Account>) -> usize {
         })
     });
     before.saturating_sub(imported.len())
-}
-
-fn next_id_value(blob: &Blob) -> u32 {
-    blob.accounts
-        .iter()
-        .filter_map(|account| account.id.parse::<u32>().ok())
-        .max()
-        .unwrap_or(0)
-}
-
-fn assign_mock_ids(blob: &Blob, imported: &mut [Account]) {
-    let mut next_id = next_id_value(blob).saturating_add(1);
-    for account in imported {
-        account.id = format!("{next_id:04}");
-        next_id = next_id.saturating_add(1);
-    }
 }
 
 fn load_upload_credentials() -> Result<([u8; KDF_HASH_LEN], Session), String> {
@@ -523,14 +500,49 @@ mod tests {
     fn run_inner_imports_from_file_in_mock_mode() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let key = [3u8; KDF_HASH_LEN];
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        crate::config::config_write_string("username", "tester").expect("write username");
+        session_save(
+            &Session {
+                uid: "u".to_string(),
+                session_id: "s".to_string(),
+                token: "tok".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("save session");
         let file = NamedTempFile::new().expect("temp csv");
         fs::write(
             file.path(),
             "url,username,password,extra,name,grouping,fav\nhttps://x,u,p,n,entry,team,1\n",
         )
         .expect("write csv");
+        crate::config::config_write_encrypted_buffer(
+            "blob.json",
+            &serde_json::to_vec_pretty(&Blob {
+                version: 1,
+                local_version: false,
+                shares: Vec::new(),
+                accounts: Vec::new(),
+                attachments: Vec::new(),
+            })
+            .expect("blob json"),
+            &key,
+        )
+        .expect("write blob");
 
         let status = run_inner(&[
             "--sync=no".to_string(),
@@ -539,38 +551,6 @@ mod tests {
         ])
         .expect("import");
         assert_eq!(status, 0);
-    }
-
-    #[test]
-    fn next_id_value_uses_highest_numeric_id() {
-        let mut blob = Blob {
-            version: 1,
-            local_version: false,
-            shares: Vec::new(),
-            accounts: vec![new_import_account(), new_import_account()],
-            attachments: Vec::new(),
-        };
-        blob.accounts[0].id = "0003".to_string();
-        blob.accounts[1].id = "n/a".to_string();
-        assert_eq!(next_id_value(&blob), 3);
-    }
-
-    #[test]
-    fn assign_mock_ids_uses_next_numeric_id() {
-        let blob = Blob {
-            version: 1,
-            local_version: false,
-            shares: Vec::new(),
-            accounts: vec![Account {
-                id: "0007".to_string(),
-                ..new_import_account()
-            }],
-            attachments: Vec::new(),
-        };
-        let mut imported = vec![new_import_account(), new_import_account()];
-        assign_mock_ids(&blob, &mut imported);
-        assert_eq!(imported[0].id, "0008");
-        assert_eq!(imported[1].id, "0009");
     }
 
     #[test]

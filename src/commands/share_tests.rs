@@ -1,6 +1,9 @@
 use super::*;
 use crate::blob::{Account, Blob, Share as BlobShare};
-use crate::config::{ConfigEnv, config_write_buffer, config_write_encrypted_string, set_test_env};
+use crate::config::{
+    ConfigEnv, config_write_buffer, config_write_encrypted_buffer, config_write_encrypted_string,
+    config_write_string, set_test_env,
+};
 use crate::http::HttpClient;
 use crate::terminal::{self, ColorMode};
 use crate::xml::ShareParseError;
@@ -121,8 +124,10 @@ fn unreachable_session() -> Session {
 }
 
 fn write_mock_blob(blob: &Blob) {
+    write_plaintext_key(&[7u8; KDF_HASH_LEN]);
+    config_write_string("username", "tester").expect("username");
     let json = serde_json::to_vec(blob).expect("blob json");
-    config_write_buffer("blob", &json).expect("blob write");
+    config_write_encrypted_buffer("blob.json", &json, &[7u8; KDF_HASH_LEN]).expect("blob write");
 }
 
 fn write_plaintext_key(key: &[u8; KDF_HASH_LEN]) {

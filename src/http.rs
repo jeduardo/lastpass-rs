@@ -12,7 +12,12 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
 
-use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, encrypt_private_key};
+use crate::blob::{Account, Blob};
+use crate::config::ConfigStore;
+use crate::crypto::{
+    aes_decrypt_base64_lastpass, aes_encrypt_lastpass, base64_lastpass_encode,
+    encrypt_private_key,
+};
 use crate::error::{LpassError, Result};
 use crate::kdf::{kdf_decryption_key, kdf_login_key};
 use crate::session::Session;
@@ -26,6 +31,8 @@ const MOCK_ATTACH_STORAGE_KEY_EMPTY_JSON: &str = "mock-storage-0001-empty-json";
 const MOCK_PRIVATE_KEY_HEX: &str = "30820276020100300d06092a864886f70d0101010500048202603082025c02010002818100a1a227a8887870284bd831eb4a16dbba04c1092ce93e821b1523dcac45c84e34ea07139bee3a21b703fe78a3765995944c6646f4820341486a0f1c4472050110099b28b410d89d9fe2ebc2af752e95efdbaa9393a70dd09024719ea4fbb98c4498f7feced228a29462239f955ae0d028bb0cc5a641bdedc66f67fd2b5b4514d5020301000102818100920fadd4df962e8c4b958feeb6e217276f5a5d874733647142d64879290a4c9a068de48b7968f0c4a908514e2e09e060c5f57ad34395db6dabe201c25c62e7447dd91d051e1c614eaae5e51c90c6dc155665b91adc40c9b00dbcbcf7c3b86076274b7c0f411df082369e46788062afd6f6838be1eb0e92835d07ce9b3c80da55024100d49e0f79d17befdf79005e7f80a1cfe9b6c0875a1e157e1c0b8aac538e6bd387854718c0d1b5a75a1d73606be981ec4e7652c973dbfd3f650223b6787126fdb3024100c29cf9f94b7d3d48eaec0d7c6d7b91ec1c745ec6ae49f6d18550a1d63ef3864849eb8f4aac735f3c546514724c1e071d2b237927646c69bef2fffd14694b2f5702402a17385d17597fbd2fc920ec00dd07b9eed1e279b6a6ee9642baab2ec76d152d28f750312bd2d85480ac0c94905f86166a5a2d4360739c0f350338e6531032fd02400f081ceeba7bf3eddbe75bab4eb18ab5d804cd053f950af16800b05f6201614fd815cfbd8ed0627cc070064245cad3f5d6cd28a0784b3f67b6513b750624fe85024004ddedf0e84ddafcc86999697526fb0cad99928334f656f38ac14854db2551be0a683984f85dde12e1a5be921d1d86f5f53210a0c0f8e9de8495a10fee4d4fd3";
 const MOCK_PWCHANGE_REENCRYPT_ID: &str = "mock-reencrypt-id";
 const MOCK_PWCHANGE_TOKEN: &str = "mock-pwchange-token";
+const MOCK_BLOB_VERSION: &str = "123";
+const MOCK_REMOTE_BLOB_NAME: &str = "mock-remote-blob.json";
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -301,7 +308,10 @@ impl MockTransport {
                 self.uid
             ),
             "getaccts.php" => String::new(),
-            "show_website.php" => String::new(),
+            "show_website.php" => {
+                self.apply_show_website_update(&map);
+                String::new()
+            }
             "loglogin.php" => String::new(),
             "lastpass/api.php" => match map.get("cmd").map(String::as_str) {
                 Some("uploadaccounts") => "<lastpass rc=\"OK\"><ok/></lastpass>".to_string(),
@@ -334,6 +344,20 @@ impl MockTransport {
     }
 
     fn respond_bytes(&self, page: &str, params: &[(&str, &str)]) -> HttpResponseBytes {
+        #[cfg(test)]
+        if let Some(response) = self.override_response(page) {
+            return HttpResponseBytes {
+                status: response.status,
+                body: response.body.into_bytes(),
+            };
+        }
+
+        if page == "getaccts.php" {
+            return HttpResponseBytes {
+                status: 200,
+                body: self.mock_blob_bytes(),
+            };
+        }
         let response = self.respond(page, params);
         HttpResponseBytes {
             status: response.status,
@@ -470,11 +494,263 @@ impl MockTransport {
         "<xmlresponse><hidebydefault>0</hidebydefault><aids><aid0>100</aid0></aids></xmlresponse>"
             .to_string()
     }
+
+    fn mock_blob_bytes(&self) -> Vec<u8> {
+        mock_blob_bytes_from_blob(&self.load_mock_remote_blob(), &self.decryption_key)
+    }
+
+    fn load_mock_remote_blob(&self) -> Blob {
+        let store = ConfigStore::from_current();
+        match store.read_buffer(MOCK_REMOTE_BLOB_NAME) {
+            Ok(Some(buffer)) => serde_json::from_slice(&buffer).unwrap_or_else(|_| default_mock_blob()),
+            Ok(None) | Err(_) => default_mock_blob(),
+        }
+    }
+
+    fn save_mock_remote_blob(&self, blob: &Blob) {
+        let store = ConfigStore::from_current();
+        if let Ok(buffer) = serde_json::to_vec(blob) {
+            let _ = store.write_buffer(MOCK_REMOTE_BLOB_NAME, &buffer);
+        }
+    }
+
+    fn apply_show_website_update(&self, map: &HashMap<String, String>) {
+        let Some(aid) = map.get("aid") else {
+            return;
+        };
+
+        let mut blob = self.load_mock_remote_blob();
+        let Some(account) = blob.accounts.iter_mut().find(|account| account.id == *aid) else {
+            return;
+        };
+
+        if let Some(value) = map.get("name") {
+            account.name = decrypt_mock_value(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("grouping") {
+            account.group = decrypt_mock_value(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("username") {
+            account.username = decrypt_mock_value(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("password") {
+            account.password = decrypt_mock_value(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("extra") {
+            account.note = decrypt_mock_value(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("url") {
+            account.url = decode_mock_url(value, &self.decryption_key);
+        }
+        if let Some(value) = map.get("pwprotect") {
+            account.pwprotect = value == "on";
+        }
+
+        account.fullname = if account.group.is_empty() {
+            account.name.clone()
+        } else {
+            format!("{}/{}", account.group, account.name)
+        };
+        self.save_mock_remote_blob(&blob);
+    }
+}
+
+fn mock_blob_bytes_from_blob(blob: &Blob, key: &[u8; 32]) -> Vec<u8> {
+    fn push_chunk(out: &mut Vec<u8>, tag: &str, body: &[u8]) {
+        out.extend_from_slice(tag.as_bytes());
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(body);
+    }
+
+    fn push_item(body: &mut Vec<u8>, bytes: &[u8]) {
+        body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        body.extend_from_slice(bytes);
+    }
+
+    fn push_encrypted_item(
+        body: &mut Vec<u8>,
+        key: &[u8; 32],
+        value: &str,
+    ) {
+        let encrypted = aes_encrypt_lastpass(value.as_bytes(), key).expect("mock blob encrypt");
+        push_item(body, &encrypted);
+    }
+
+    fn push_account(
+        out: &mut Vec<u8>,
+        key: &[u8; 32],
+        id: &str,
+        name: &str,
+        group: &str,
+        url: &str,
+        username: &str,
+        password: &str,
+        note: &str,
+        pwprotect: bool,
+    ) {
+        let mut acct = Vec::new();
+        push_item(&mut acct, id.as_bytes());
+        push_encrypted_item(&mut acct, key, name);
+        push_encrypted_item(&mut acct, key, group);
+        push_encrypted_item(&mut acct, key, url);
+        push_encrypted_item(&mut acct, key, note);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_encrypted_item(&mut acct, key, username);
+        push_encrypted_item(&mut acct, key, password);
+        push_item(&mut acct, if pwprotect { b"1" } else { b"0" });
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"skipped");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"skipped");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_chunk(out, "ACCT", &acct);
+    }
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"LPAV");
+    bytes.extend_from_slice(&(MOCK_BLOB_VERSION.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(MOCK_BLOB_VERSION.as_bytes());
+    for account in &blob.accounts {
+        push_account(
+            &mut bytes,
+            key,
+            &account.id,
+            &account.name,
+            &account.group,
+            &account.url,
+            &account.username,
+            &account.password,
+            &account.note,
+            account.pwprotect,
+        );
+    }
+    bytes
 }
 
 fn mock_login_hash(username: &str, password: &str, iterations: u32) -> String {
     kdf_login_key(username, password, iterations)
         .expect("fixed mock credentials should derive a login hash")
+}
+
+fn decrypt_mock_value(value: &str, key: &[u8; 32]) -> String {
+    aes_decrypt_base64_lastpass(value, key)
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .unwrap_or_default()
+}
+
+fn decode_mock_url(value: &str, key: &[u8; 32]) -> String {
+    if value.starts_with('!') {
+        return decrypt_mock_value(value, key);
+    }
+
+    hex::decode(value)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .unwrap_or_default()
+}
+
+fn default_mock_blob() -> Blob {
+    let mut blob = Blob {
+        version: MOCK_BLOB_VERSION.parse().expect("mock blob version"),
+        local_version: false,
+        shares: Vec::new(),
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    };
+
+    blob.accounts.push(default_mock_account(
+        "0001",
+        "test-account",
+        "test-group",
+        "https://test-url.example.com/",
+        "xyz@example.com",
+        "test-account-password",
+        "",
+        false,
+    ));
+    blob.accounts.push(default_mock_account(
+        "0002",
+        "test-note",
+        "test-group",
+        "http://sn",
+        "",
+        "",
+        "NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password",
+        false,
+    ));
+    blob.accounts.push(default_mock_account(
+        "0003",
+        "test-reprompt-account",
+        "test-group",
+        "https://test-url.example.com/",
+        "xyz@example.com",
+        "test-account-password",
+        "",
+        true,
+    ));
+    blob.accounts.push(default_mock_account(
+        "0004",
+        "test-reprompt-note",
+        "test-group",
+        "http://sn",
+        "",
+        "",
+        "NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password",
+        true,
+    ));
+    blob
+}
+
+#[allow(clippy::too_many_arguments)]
+fn default_mock_account(
+    id: &str,
+    name: &str,
+    group: &str,
+    url: &str,
+    username: &str,
+    password: &str,
+    note: &str,
+    pwprotect: bool,
+) -> Account {
+    Account {
+        id: id.to_string(),
+        share_name: None,
+        share_id: None,
+        share_readonly: false,
+        name: name.to_string(),
+        name_encrypted: None,
+        group: group.to_string(),
+        group_encrypted: None,
+        fullname: format!("{group}/{name}"),
+        url: url.to_string(),
+        url_encrypted: None,
+        username: username.to_string(),
+        username_encrypted: None,
+        password: password.to_string(),
+        password_encrypted: None,
+        note: note.to_string(),
+        note_encrypted: None,
+        last_touch: "skipped".to_string(),
+        last_modified_gmt: "skipped".to_string(),
+        fav: false,
+        pwprotect,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    }
 }
 
 fn mock_public_key_hex(private_key_der: &[u8]) -> String {

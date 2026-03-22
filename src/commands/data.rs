@@ -3,8 +3,8 @@
 use crate::agent::agent_get_decryption_key;
 use crate::blob::{Account, Blob};
 use crate::config::{
-    config_exists, config_mtime, config_read_buffer, config_read_encrypted_buffer, config_touch,
-    config_write_buffer, config_write_encrypted_buffer,
+    config_exists, config_mtime, config_read_encrypted_buffer, config_touch,
+    config_write_encrypted_buffer,
 };
 use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode, decrypt_private_key};
 use crate::error::{LpassError, Result};
@@ -36,10 +36,6 @@ impl SyncMode {
 }
 
 pub(crate) fn load_blob(sync_mode: SyncMode) -> Result<Blob> {
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
-        return load_mock_blob();
-    }
-
     let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
     let mut session = crate::session::session_load(&key)
         .map_err(map_decryption_key_error)?
@@ -186,9 +182,6 @@ fn blob_fetch_error() -> LpassError {
 }
 
 pub(crate) fn save_blob(blob: &Blob) -> Result<()> {
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") {
-        return save_mock_blob(blob);
-    }
     let key = agent_get_decryption_key()?;
     let buffer = serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
     config_write_encrypted_buffer(BLOB_JSON_NAME, &buffer, &key)
@@ -199,9 +192,12 @@ pub(crate) fn maybe_push_account_update(
     blob: &Blob,
     sync_mode: SyncMode,
 ) -> Result<()> {
+    if matches!(sync_mode, SyncMode::No) {
+        return Ok(());
+    }
     let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
     let params = build_show_website_params(account, blob, &session, &key)?;
-    upload_queue::enqueue(&key, "show_website.php", params, !matches!(sync_mode, SyncMode::No))
+    upload_queue::enqueue(&key, "show_website.php", params, true)
 }
 
 pub(crate) fn maybe_push_account_share_move(
@@ -215,19 +211,25 @@ pub(crate) fn maybe_push_account_share_move(
 }
 
 pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) -> Result<()> {
+    if matches!(sync_mode, SyncMode::No) {
+        return Ok(());
+    }
     let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
     let params = build_show_website_delete_params(account, &session);
-    upload_queue::enqueue(&key, "show_website.php", params, !matches!(sync_mode, SyncMode::No))
+    upload_queue::enqueue(&key, "show_website.php", params, true)
 }
 
 pub(crate) fn maybe_log_access(account: &Account, sync_mode: SyncMode) -> Result<()> {
+    if matches!(sync_mode, SyncMode::No) {
+        return Ok(());
+    }
     if account.id == "0" {
         return Ok(());
     }
 
     let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
     let params = build_log_access_params(account, &session);
-    upload_queue::enqueue(&key, "loglogin.php", params, !matches!(sync_mode, SyncMode::No))
+    upload_queue::enqueue(&key, "loglogin.php", params, true)
 }
 
 fn build_show_website_delete_params(account: &Account, session: &Session) -> Vec<(String, String)> {
@@ -330,11 +332,7 @@ fn build_log_access_params(account: &Account, session: &Session) -> Vec<(String,
 }
 
 fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
-    let key = match agent_get_decryption_key().map_err(map_decryption_key_error) {
-        Ok(key) => key,
-        Err(_) if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() == Ok("1") => return Ok(None),
-        Err(err) => return Err(err),
-    };
+    let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
 
     let session = crate::session::session_load(&key)
         .map_err(map_decryption_key_error)?
@@ -542,24 +540,6 @@ fn url_encode_component(value: &str) -> String {
     out
 }
 
-pub(crate) fn ensure_mock_blob() -> Result<()> {
-    if crate::lpenv::var("LPASS_HTTP_MOCK").as_deref() != Ok("1") { return Ok(()); }
-    let _ = load_mock_blob()?;
-    Ok(())
-}
-
-fn load_mock_blob() -> Result<Blob> {
-    if let Some(buffer) = config_read_buffer("blob")?
-        && let Ok(blob) = serde_json::from_slice::<Blob>(&buffer)
-    {
-        return Ok(blob);
-    }
-
-    let blob = mock_blob();
-    let _ = save_mock_blob(&blob);
-    Ok(blob)
-}
-
 fn load_private_key(key: &[u8; KDF_HASH_LEN]) -> Result<Option<Vec<u8>>> {
     if let Some(private_key) = config_read_encrypted_buffer("session_privatekey", key)? {
         return Ok(Some(private_key));
@@ -580,11 +560,7 @@ fn looks_like_blob(bytes: &[u8]) -> bool {
     bytes.starts_with(b"LPAV")
 }
 
-fn save_mock_blob(blob: &Blob) -> Result<()> {
-    let buffer = serde_json::to_vec_pretty(blob).map_err(|_| LpassError::Crypto("invalid blob"))?;
-    config_write_buffer("blob", &buffer)
-}
-
+#[cfg(test)]
 fn mock_blob() -> Blob {
     let mut blob = Blob {
         version: 1,
@@ -642,6 +618,7 @@ fn mock_blob() -> Blob {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn mock_account(
     id: &str,
     name: &str,

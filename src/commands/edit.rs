@@ -641,6 +641,12 @@ fn share_identity(account: &Account) -> ShareIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob::Blob;
+    use crate::config::{
+        ConfigEnv, ConfigStore, config_write_buffer, config_write_encrypted_string,
+    };
+    use crate::kdf::KDF_HASH_LEN;
+    use crate::session::{Session, session_save};
     use tempfile::TempDir;
 
     fn account() -> Account {
@@ -677,6 +683,33 @@ mod tests {
                 checked: false,
             }],
         }
+    }
+
+    fn write_mock_state(home: &TempDir, blob: &Blob) {
+        let key = [7u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        store.write_string("username", "tester").expect("username");
+        session_save(
+            &Session {
+                uid: "u1".to_string(),
+                session_id: "s1".to_string(),
+                token: "t1".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("session save");
+        crate::commands::data::save_blob(blob).expect("write blob");
     }
 
     #[test]
@@ -1081,8 +1114,28 @@ mod tests {
     fn run_inner_mock_reports_readonly_and_non_secure_field_errors() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = crate::config::set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(
+            &home,
+            &Blob {
+                version: 1,
+                local_version: false,
+                shares: Vec::new(),
+                accounts: vec![{
+                    let mut acct = account();
+                    acct.id = "0001".to_string();
+                    acct.name = "test-account".to_string();
+                    acct.group = "test-group".to_string();
+                    acct.fullname = "test-group/test-account".to_string();
+                    acct
+                }],
+                attachments: Vec::new(),
+            },
+        );
 
         let mut blob = crate::commands::data::load_blob(SyncMode::No).expect("blob");
         let first = blob
