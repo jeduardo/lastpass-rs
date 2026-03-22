@@ -206,12 +206,12 @@ Every push to `main` updates a rolling GitHub release tagged `latest` with fresh
 
 Available targets:
 
-- `lpass-linux-x86_64.tar.gz`
-- `lpass-linux-arm64.tar.gz`
-- `lpass-macos-x86_64.tar.gz`
-- `lpass-macos-arm64.tar.gz`
-- `lpass-windows-x86_64.zip`
-- `lpass-windows-arm64.zip`
+- [lpass-linux-x86_64.tar.gz](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-linux-x86_64.tar.gz)
+- [lpass-linux-arm64.tar.gz](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-linux-arm64.tar.gz)
+- [lpass-macos-x86_64.tar.gz](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-macos-x86_64.tar.gz)
+- [lpass-macos-arm64.tar.gz](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-macos-arm64.tar.gz)
+- [lpass-windows-x86_64.zip](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-windows-x86_64.zip)
+- [lpass-windows-arm64.zip](https://github.com/jeduardo/lastpass-rs/releases/latest/download/lpass-windows-arm64.zip)
 
 ## Usage
 
