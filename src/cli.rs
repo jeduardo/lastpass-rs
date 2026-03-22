@@ -178,23 +178,24 @@ fn apply_requested_color_mode(args: &[String]) {
 
 fn requested_color_mode(args: &[String]) -> Option<terminal::ColorMode> {
     let mut iter = args.iter().skip(1);
+    let mut requested = None;
     while let Some(arg) = iter.next() {
         if arg == "--color" {
             let Some(value) = iter.next() else {
                 continue;
             };
             if let Some(mode) = terminal::parse_color_mode(value) {
-                return Some(mode);
+                requested = Some(mode);
             }
             continue;
         }
         if let Some(value) = arg.strip_prefix("--color=")
             && let Some(mode) = terminal::parse_color_mode(value)
         {
-            return Some(mode);
+            requested = Some(mode);
         }
     }
-    None
+    requested
 }
 
 fn program_names(args: &[String]) -> (String, String) {
@@ -223,7 +224,15 @@ fn print_help(program_path: &str, program_name: &str) {
 mod tests {
     use super::*;
     use crate::config::{ConfigEnv, config_path, config_write_string, set_test_env};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::TempDir;
+
+    fn color_mode_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("lock color mode")
+    }
 
     #[test]
     fn expand_aliases_keeps_args_when_no_alias_exists() {
@@ -294,6 +303,7 @@ mod tests {
 
     #[test]
     fn requested_color_mode_uses_command_flag_values() {
+        let _guard = color_mode_lock();
         assert_eq!(
             requested_color_mode(&[
                 "lpass".to_string(),
@@ -319,10 +329,20 @@ mod tests {
             ]),
             Some(terminal::ColorMode::Auto)
         );
+        assert_eq!(
+            requested_color_mode(&[
+                "lpass".to_string(),
+                "status".to_string(),
+                "--color=never".to_string(),
+                "--color=always".to_string(),
+            ]),
+            Some(terminal::ColorMode::Always)
+        );
     }
 
     #[test]
     fn apply_requested_color_mode_sets_terminal_mode_when_value_is_valid() {
+        let _guard = color_mode_lock();
         terminal::set_color_mode(terminal::ColorMode::Auto);
         apply_requested_color_mode(&[
             "lpass".to_string(),
@@ -345,6 +365,7 @@ mod tests {
 
     #[test]
     fn requested_color_mode_ignores_invalid_or_missing_values() {
+        let _guard = color_mode_lock();
         assert_eq!(
             requested_color_mode(&[
                 "lpass".to_string(),
@@ -365,6 +386,7 @@ mod tests {
 
     #[test]
     fn apply_requested_color_mode_leaves_existing_mode_for_invalid_or_missing_values() {
+        let _guard = color_mode_lock();
         terminal::set_color_mode(terminal::ColorMode::Never);
         apply_requested_color_mode(&[
             "lpass".to_string(),

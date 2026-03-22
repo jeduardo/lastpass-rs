@@ -222,6 +222,49 @@ fn mock_show_website_returns_empty_body() {
 }
 
 #[test]
+fn mock_show_website_persists_updates_for_following_getaccts_requests() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    let response = client
+        .post_lastpass(
+            None,
+            "show_website.php",
+            None,
+            &[
+                ("aid", "0001"),
+                ("name", &crate::commands::data::encrypt_and_encode("test-account", &key).expect("name")),
+                ("grouping", &crate::commands::data::encrypt_and_encode("test-group", &key).expect("group")),
+                ("username", &crate::commands::data::encrypt_and_encode("updated-user", &key).expect("user")),
+                ("password", &crate::commands::data::encrypt_and_encode("updated-pass", &key).expect("pass")),
+                ("extra", &crate::commands::data::encrypt_and_encode("", &key).expect("note")),
+                ("url", &hex::encode("https://test-url.example.com/")),
+                ("pwprotect", "on"),
+            ],
+        )
+        .expect("update response");
+    assert_eq!(response.status, 200);
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "0001")
+        .expect("account");
+    assert_eq!(account.username, "updated-user");
+    assert_eq!(account.password, "updated-pass");
+    assert!(account.pwprotect);
+}
+
+#[test]
 fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
     let _guard = crate::lpenv::begin_test_overrides();
     crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");

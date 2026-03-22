@@ -31,8 +31,6 @@ discover_test_names() {
 run_test_case() {
   local test_name="$1"
   rm -rf "$UPSTREAM_TEST_DIR/.lpass"
-  mkdir -p "$UPSTREAM_TEST_DIR/.lpass"
-  printf '%s\n' "$$" > "$UPSTREAM_TEST_DIR/.lpass/uploader.pid"
   (cd "$UPSTREAM_TEST_DIR" && ./tests "$test_name")
 }
 
