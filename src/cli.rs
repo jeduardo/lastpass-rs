@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::commands;
 use crate::config::config_read_string;
 use crate::lpenv;
+use crate::terminal;
 use crate::version;
 
 #[derive(Copy, Clone)]
@@ -36,7 +37,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "mv",
-        usage: "mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
+        usage: "mv [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
     },
     CommandSpec {
         name: "add",
@@ -72,7 +73,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "import",
-        usage: "import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]",
+        usage: "import [--keep-dupes] [CSV_FILENAME]",
     },
     CommandSpec {
         name: "share",
@@ -89,7 +90,10 @@ enum Dispatch {
 
 pub fn run(args: Vec<String>) -> i32 {
     if let Err(err) = lpenv::reload_saved_environment() {
-        eprintln!("warning: failed to load saved environment: {err}");
+        eprintln!(
+            "{}",
+            terminal::cli_warning_text(&format!("failed to load saved environment: {err}"))
+        );
     }
 
     let args = expand_aliases(args);
@@ -190,7 +194,7 @@ fn print_help(program_path: &str, program_name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ConfigEnv, config_write_string, set_test_env};
+    use crate::config::{ConfigEnv, config_path, config_write_string, set_test_env};
     use tempfile::TempDir;
 
     #[test]
@@ -234,5 +238,29 @@ mod tests {
     fn expand_aliases_does_not_apply_to_global_flags() {
         let args = vec!["lpass".to_string(), "--help".to_string()];
         assert_eq!(expand_aliases(args.clone()), args);
+    }
+
+    #[test]
+    fn expand_aliases_ignores_alias_read_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let alias_path = config_path("alias.badalias").expect("alias path");
+        std::fs::create_dir_all(&alias_path).expect("make alias dir");
+
+        let args = vec![
+            "lpass".to_string(),
+            "badalias".to_string(),
+            "test-group/test-account".to_string(),
+        ];
+        assert_eq!(expand_aliases(args.clone()), args);
+    }
+
+    #[test]
+    fn dispatch_treats_unknown_global_flags_as_help_only() {
+        let args = vec!["lpass".to_string(), "--bogus".to_string()];
+        assert!(matches!(dispatch(&args), Dispatch::HelpOnly));
     }
 }

@@ -107,7 +107,7 @@ pub fn run(args: &[String]) -> i32 {
             1
         }
         Err(CommandError::Message(err)) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", terminal::cli_failure_text(&err));
             1
         }
     }

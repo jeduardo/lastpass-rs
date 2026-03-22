@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::env;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -41,6 +42,26 @@ pub fn render_stdout(text: &str) -> String {
 
 pub fn render_stderr(text: &str) -> String {
     render(text, std::io::stderr().is_terminal())
+}
+
+pub fn cli_usage_text(usage: &str) -> String {
+    format_cli_usage(&current_program_path(), usage, std::io::stderr().is_terminal())
+}
+
+pub fn cli_error_text(message: &str) -> String {
+    render_stderr(&format!("{FG_RED}{BOLD}Error{RESET}: {message}"))
+}
+
+pub fn cli_warning_text(message: &str) -> String {
+    render_stderr(&format!("{FG_YELLOW}{BOLD}Warning{RESET}: {message}"))
+}
+
+pub fn cli_failure_text(message: &str) -> String {
+    if is_usage_text(message) {
+        cli_usage_text(message)
+    } else {
+        cli_error_text(message)
+    }
 }
 
 fn render(text: &str, is_tty: bool) -> String {
@@ -85,4 +106,84 @@ fn strip_ansi(value: &str) -> String {
     }
 
     out
+}
+
+fn current_program_path() -> String {
+    env::args().next().unwrap_or_else(|| "lpass".to_string())
+}
+
+fn is_usage_text(message: &str) -> bool {
+    message.starts_with("usage: ")
+}
+
+fn format_cli_usage(program_path: &str, usage: &str, is_tty: bool) -> String {
+    let usage = usage.strip_prefix("usage: ").unwrap_or(usage);
+    render_with_mode(&format!("Usage: {program_path} {usage}"), is_tty, current_mode())
+}
+
+fn current_mode() -> ColorMode {
+    match COLOR_MODE.load(Ordering::Relaxed) {
+        1 => ColorMode::Never,
+        2 => ColorMode::Always,
+        _ => ColorMode::Auto,
+    }
+}
+
+fn render_with_mode(text: &str, is_tty: bool, mode: ColorMode) -> String {
+    let use_color = match mode {
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+        ColorMode::Auto => is_tty,
+    };
+
+    if use_color {
+        text.to_string()
+    } else {
+        strip_ansi(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_cli_usage_prefixes_program_and_capitalizes_usage() {
+        let text = format_cli_usage(
+            "/tmp/lpass",
+            "usage: status [--quiet, -q] [--color=auto|never|always]",
+            false,
+        );
+        assert_eq!(
+            text,
+            "Usage: /tmp/lpass status [--quiet, -q] [--color=auto|never|always]"
+        );
+    }
+
+    #[test]
+    fn cli_failure_text_formats_errors_and_usages_differently() {
+        set_color_mode(ColorMode::Never);
+        assert_eq!(
+            cli_failure_text("usage: status [--quiet, -q] [--color=auto|never|always]"),
+            format_cli_usage(
+                &current_program_path(),
+                "usage: status [--quiet, -q] [--color=auto|never|always]",
+                false
+            )
+        );
+        assert_eq!(cli_failure_text("boom"), "Error: boom");
+    }
+
+    #[test]
+    fn cli_warning_text_formats_warning_prefix() {
+        set_color_mode(ColorMode::Never);
+        assert_eq!(cli_warning_text("heads up"), "Warning: heads up");
+    }
+
+    #[test]
+    fn render_with_mode_strips_or_keeps_ansi() {
+        let text = format!("{FG_RED}{BOLD}Error{RESET}: boom");
+        assert_eq!(render_with_mode(&text, false, ColorMode::Auto), "Error: boom");
+        assert_eq!(render_with_mode(&text, false, ColorMode::Always), text);
+    }
 }

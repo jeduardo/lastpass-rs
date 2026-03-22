@@ -28,7 +28,7 @@ pub fn maybe_run_agent(args: &[String]) -> Option<i32> {
     match read_key_from_stdin().and_then(|key| run_agent(&key)) {
         Ok(()) => Some(0),
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", crate::terminal::cli_failure_text(&err.to_string()));
             Some(1)
         }
     }

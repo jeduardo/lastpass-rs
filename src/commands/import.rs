@@ -11,19 +11,20 @@ use crate::error::LpassError;
 use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_load};
+use crate::terminal;
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", terminal::cli_failure_text(&err));
             1
         }
     }
 }
 
 fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage = "usage: import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]";
+    let usage = "usage: import [--keep-dupes] [CSV_FILENAME]";
     let mut keep_dupes = false;
     let mut positional: Vec<String> = Vec::new();
     let mut sync_mode = SyncMode::Auto;

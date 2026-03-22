@@ -1,6 +1,6 @@
 # Task 11: Strict Option Parsing and Color Output Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Close the remaining cross-cutting CLI compatibility gaps around getopt-style parsing, help/usage behavior, and ANSI color handling.
@@ -40,3 +40,15 @@ Acceptance criteria:
 - Global and command-level option parsing behavior matches the C client closely enough to remove the remaining documented parity TODOs.
 - User-facing diagnostics follow the C color/TTY rules on both stdout and stderr.
 - No new flags or fallback behaviors are introduced; the task is strictly parity cleanup.
+
+Implemented:
+- Routed command-wrapper failures through shared terminal-aware `Error:` / `Usage:` rendering so stderr follows the same color rules as stdout.
+- Aligned top-level warning formatting and `mv` / `import` displayed usage text with the C client while preserving their actual supported parsing behavior.
+- Added public CLI coverage for non-TTY stderr stripping, `--color=always`, saved-environment warning rendering, and the `mv` / `import` usage/help output drift.
+- Added unit coverage for the top-level unknown-flag dispatch path, alias read-error fallback, and warning/usage formatter helpers.
+
+Verification:
+- `cargo test --locked --all-targets`
+- `cargo llvm-cov --workspace --all-targets --json --output-path coverage/task11.json --ignore-filename-regex 'src/bin/test-upstream.rs$'`
+- `act -j test --container-architecture linux/arm64`
+- `act -j coverage --container-architecture linux/arm64`

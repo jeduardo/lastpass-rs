@@ -22,15 +22,14 @@ pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", terminal::cli_failure_text(&err));
             1
         }
     }
 }
 
 pub(super) fn run_inner(args: &[String]) -> Result<i32, String> {
-    let usage =
-        "usage: mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP";
+    let usage = "usage: mv [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP";
     let mut positional: Vec<String> = Vec::new();
     let mut sync_mode = SyncMode::Auto;
 

@@ -46,8 +46,6 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
-- shared-folder `mv` parity follow-up items
-- strict getopt/help/error/color parity follow-up items
 - parity test/gate consolidation follow-up items
 
 ## Implementation status
@@ -178,8 +176,8 @@ Per-command checklist:
   - share lookup, user formatting, and limit-list behavior parity: :white_check_mark:
 
 - Cross-cutting
-  - strict C-like option parsing errors for unknown/invalid flags: TODO
-  - exact color semantics parity for all implemented commands: TODO
+  - strict C-like option parsing errors for unknown/invalid flags: :white_check_mark:
+  - exact color semantics parity for all implemented commands: :white_check_mark:
 
 ## Build
 
