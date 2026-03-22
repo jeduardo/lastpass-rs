@@ -15,5 +15,6 @@ fn mv_rejects_invalid_space_separated_color_value() {
         .expect("run mv");
 
     assert_eq!(output.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("usage: mv"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:") && stderr.contains(" mv "), "stderr: {stderr}");
 }

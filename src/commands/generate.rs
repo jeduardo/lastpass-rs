@@ -7,6 +7,7 @@ use crate::commands::argparse::parse_sync_option;
 use crate::commands::clipboard::copy_to_clipboard;
 use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
 use crate::notes::{collapse_notes, expand_notes};
+use crate::terminal;
 
 const USAGE: &str = "usage: generate [--sync=auto|now|no] [--clip, -c] [--username=USERNAME] [--url=URL] [--no-symbols] {NAME|UNIQUEID} LENGTH";
 const ALL_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890`~!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?";
@@ -34,7 +35,7 @@ pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", terminal::cli_failure_text(&err));
             1
         }
     }

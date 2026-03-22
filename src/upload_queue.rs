@@ -64,7 +64,7 @@ fn maybe_run_uploader_with<R: Read, W: Write>(
     match outcome {
         Ok(()) => Some(0),
         Err(err) => {
-            let _ = writeln!(stderr, "error: {err}");
+            let _ = writeln!(stderr, "{}", crate::terminal::cli_failure_text(&err.to_string()));
             Some(1)
         }
     }

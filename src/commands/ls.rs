@@ -13,7 +13,7 @@ pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("{}", terminal::cli_failure_text(&err));
             1
         }
     }

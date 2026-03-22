@@ -152,7 +152,8 @@ fn login_warning_failure_and_option_error_paths() {
     let ls_bad_args = run(&home, None, &["ls", "group1", "group2"]);
     assert_eq!(ls_bad_args.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&ls_bad_args.stderr).contains("usage: ls"),
+        String::from_utf8_lossy(&ls_bad_args.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&ls_bad_args.stderr).contains(" ls "),
         "stderr: {}",
         String::from_utf8_lossy(&ls_bad_args.stderr)
     );
@@ -186,7 +187,8 @@ fn login_warning_failure_and_option_error_paths() {
     let status_bad = run(&home, None, &["status", "unexpected"]);
     assert_eq!(status_bad.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&status_bad.stderr).contains("usage: status"),
+        String::from_utf8_lossy(&status_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&status_bad.stderr).contains(" status "),
         "stderr: {}",
         String::from_utf8_lossy(&status_bad.stderr)
     );
@@ -194,7 +196,8 @@ fn login_warning_failure_and_option_error_paths() {
     let logout_bad_color = run(&home, None, &["logout", "--color=rainbow"]);
     assert_eq!(logout_bad_color.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&logout_bad_color.stderr).contains("usage: logout"),
+        String::from_utf8_lossy(&logout_bad_color.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&logout_bad_color.stderr).contains(" logout "),
         "stderr: {}",
         String::from_utf8_lossy(&logout_bad_color.stderr)
     );

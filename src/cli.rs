@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::commands;
 use crate::config::config_read_string;
 use crate::lpenv;
+use crate::terminal;
 use crate::version;
 
 #[derive(Copy, Clone)]
@@ -36,7 +37,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "mv",
-        usage: "mv [--sync=auto|now|no] [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
+        usage: "mv [--color=auto|never|always] {UNIQUENAME|UNIQUEID} GROUP",
     },
     CommandSpec {
         name: "add",
@@ -72,7 +73,7 @@ const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "import",
-        usage: "import [--sync=auto|now|no] [--keep-dupes] [CSV_FILENAME]",
+        usage: "import [--keep-dupes] [CSV_FILENAME]",
     },
     CommandSpec {
         name: "share",
@@ -88,11 +89,15 @@ enum Dispatch {
 }
 
 pub fn run(args: Vec<String>) -> i32 {
+    let args = expand_aliases(args);
+    apply_requested_color_mode(&args);
     if let Err(err) = lpenv::reload_saved_environment() {
-        eprintln!("warning: failed to load saved environment: {err}");
+        eprintln!(
+            "{}",
+            terminal::cli_warning_text(&format!("failed to load saved environment: {err}"))
+        );
     }
 
-    let args = expand_aliases(args);
     let (program_path, program_name) = program_names(&args);
     match dispatch(&args) {
         Dispatch::HelpOnly => {
@@ -165,6 +170,26 @@ fn dispatch(args: &[String]) -> Dispatch {
     }
 }
 
+fn apply_requested_color_mode(args: &[String]) {
+    let mut iter = args.iter().skip(1).peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--color" {
+            let Some(value) = iter.next() else {
+                continue;
+            };
+            if let Some(mode) = terminal::parse_color_mode(value) {
+                terminal::set_color_mode(mode);
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--color=") {
+            if let Some(mode) = terminal::parse_color_mode(value) {
+                terminal::set_color_mode(mode);
+            }
+        }
+    }
+}
+
 fn program_names(args: &[String]) -> (String, String) {
     let program_path = args.first().cloned().unwrap_or_else(|| "lpass".to_string());
     let program_name = Path::new(&program_path)
@@ -190,7 +215,7 @@ fn print_help(program_path: &str, program_name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ConfigEnv, config_write_string, set_test_env};
+    use crate::config::{ConfigEnv, config_path, config_write_string, set_test_env};
     use tempfile::TempDir;
 
     #[test]
@@ -234,5 +259,91 @@ mod tests {
     fn expand_aliases_does_not_apply_to_global_flags() {
         let args = vec!["lpass".to_string(), "--help".to_string()];
         assert_eq!(expand_aliases(args.clone()), args);
+    }
+
+    #[test]
+    fn expand_aliases_ignores_alias_read_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = set_test_env(ConfigEnv {
+            lpass_home: Some(temp.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let alias_path = config_path("alias.badalias").expect("alias path");
+        std::fs::create_dir_all(&alias_path).expect("make alias dir");
+
+        let args = vec![
+            "lpass".to_string(),
+            "badalias".to_string(),
+            "test-group/test-account".to_string(),
+        ];
+        assert_eq!(expand_aliases(args.clone()), args);
+    }
+
+    #[test]
+    fn dispatch_treats_unknown_global_flags_as_help_only() {
+        let args = vec!["lpass".to_string(), "--bogus".to_string()];
+        assert!(matches!(dispatch(&args), Dispatch::HelpOnly));
+    }
+
+    #[test]
+    fn apply_requested_color_mode_uses_command_flag_values() {
+        terminal::set_color_mode(terminal::ColorMode::Auto);
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=never".to_string(),
+        ]);
+        assert_eq!(
+            terminal::render_stderr(&format!(
+                "{}{}Warning{}: café",
+                terminal::FG_YELLOW,
+                terminal::BOLD,
+                terminal::RESET
+            )),
+            "Warning: café"
+        );
+
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=always".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert!(rendered.contains("\x1b["), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn apply_requested_color_mode_ignores_invalid_or_missing_values() {
+        terminal::set_color_mode(terminal::ColorMode::Auto);
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert_eq!(rendered, "Warning: café");
+
+        apply_requested_color_mode(&[
+            "lpass".to_string(),
+            "status".to_string(),
+            "--color=rainbow".to_string(),
+        ]);
+        let rendered = terminal::render_stderr(&format!(
+            "{}{}Warning{}: café",
+            terminal::FG_YELLOW,
+            terminal::BOLD,
+            terminal::RESET
+        ));
+        assert_eq!(rendered, "Warning: café");
     }
 }

@@ -62,7 +62,9 @@ fn finish_run_result_writes_error_and_returns_one() {
     let mut stderr = Vec::new();
     let code = finish_run_result(Err("boom".to_string()), &mut stderr);
     assert_eq!(code, 1);
-    assert_eq!(String::from_utf8(stderr).expect("utf8"), "error: boom\n");
+    let text = String::from_utf8(stderr).expect("utf8");
+    assert!(text.contains("Error"), "stderr: {text:?}");
+    assert!(text.contains("boom"), "stderr: {text:?}");
 }
 
 #[test]

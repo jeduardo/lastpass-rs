@@ -332,30 +332,46 @@ fn usage_and_error_paths_are_reported() {
     );
     assert_eq!(edit_bad_choice.status.code().unwrap_or(-1), 1);
     assert!(
-        String::from_utf8_lossy(&edit_bad_choice.stderr).contains("usage: edit"),
+        String::from_utf8_lossy(&edit_bad_choice.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&edit_bad_choice.stderr).contains(" edit "),
         "stderr: {}",
         String::from_utf8_lossy(&edit_bad_choice.stderr)
     );
 
     let duplicate_bad = run(&home, &["duplicate", "--bogus"], None);
     assert_eq!(duplicate_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&duplicate_bad.stderr).contains("usage: duplicate"));
+    assert!(
+        String::from_utf8_lossy(&duplicate_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&duplicate_bad.stderr).contains(" duplicate ")
+    );
 
     let generate_bad = run(&home, &["generate", "name", "abc"], None);
     assert_eq!(generate_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&generate_bad.stderr).contains("usage: generate"));
+    assert!(
+        String::from_utf8_lossy(&generate_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&generate_bad.stderr).contains(" generate ")
+    );
 
     let export_bad = run(&home, &["export", "unexpected"], None);
     assert_eq!(export_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&export_bad.stderr).contains("usage: export"));
+    assert!(
+        String::from_utf8_lossy(&export_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&export_bad.stderr).contains(" export ")
+    );
 
     let status_bad = run(&home, &["status", "unexpected"], None);
     assert_eq!(status_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&status_bad.stderr).contains("usage: status"));
+    assert!(
+        String::from_utf8_lossy(&status_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&status_bad.stderr).contains(" status ")
+    );
 
     let show_bad = run(&home, &["show", "--bogus"], None);
     assert_eq!(show_bad.status.code().unwrap_or(-1), 1);
-    assert!(String::from_utf8_lossy(&show_bad.stderr).contains("usage: show"));
+    assert!(
+        String::from_utf8_lossy(&show_bad.stderr).contains("Usage:")
+            && String::from_utf8_lossy(&show_bad.stderr).contains(" show ")
+    );
 
     let rm_missing = run(&home, &["rm", "x"], None);
     assert_eq!(rm_missing.status.code().unwrap_or(-1), 1);

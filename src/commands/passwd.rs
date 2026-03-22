@@ -473,7 +473,7 @@ fn finish_run_result<E: Write>(result: Result<i32, String>, stderr: &mut E) -> i
     match result {
         Ok(code) => code,
         Err(err) => {
-            let _ = writeln!(stderr, "error: {err}");
+            let _ = writeln!(stderr, "{}", terminal::cli_failure_text(&err));
             1
         }
     }
