@@ -1,6 +1,6 @@
 # Task 08: Environment, Prompt, Clipboard, and Logging Parity
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Match C handling for environment-driven prompt, clipboard, logging, and tempdir behavior.
@@ -36,3 +36,9 @@ Acceptance criteria:
 - Env vars documented in parity audit are implemented or intentionally documented as deviations.
 - `show --clip` and `generate --clip` use parity-compatible clipboard handling.
 - Prompt and fallback behavior follows C precedence rules.
+
+Implemented:
+- `LPASS_PINENTRY`, `LPASS_DISABLE_PINENTRY`, `TERM`, and `DISPLAY` now follow the upstream prompt precedence and pinentry protocol.
+- `LPASS_CLIPBOARD_COMMAND` now uses the C-compatible shell execution path, including empty-but-set override handling.
+- `LPASS_LOG_LEVEL` now writes `lpass.log` through the standard config path.
+- Editor workflows now use secure tempdir selection shared by `add` and `edit`.

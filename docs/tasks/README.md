@@ -14,7 +14,7 @@ Execution order:
 5. `05-sync-import-export-parity.md` (`done`)
 6. `06-passwd-command-parity.md` (`done`)
 7. `07-share-command-parity.md` (`done`)
-8. `08-env-prompt-clipboard-logging-parity.md` (`todo`)
+8. `08-env-prompt-clipboard-logging-parity.md` (`done`)
 9. `09-parity-tests-and-gates.md` (`todo`)
 
 Global rules for every task:

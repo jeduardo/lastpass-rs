@@ -88,6 +88,7 @@ impl HttpClient {
         session: Option<&Session>,
         params: &[(&str, &str)],
     ) -> Result<HttpResponse> {
+        crate::logging::log(5, &format!("Making request to {page}."));
         match &self.transport {
             Transport::Real(client) => post_real(client, server, page, session, params),
             Transport::Mock(mock) => Ok(mock.respond(page, params)),
@@ -101,6 +102,7 @@ impl HttpClient {
         session: Option<&Session>,
         params: &[(&str, &str)],
     ) -> Result<HttpResponseBytes> {
+        crate::logging::log(5, &format!("Making request to {page}."));
         match &self.transport {
             Transport::Real(client) => post_real_bytes(client, server, page, session, params),
             Transport::Mock(mock) => Ok(mock.respond_bytes(page, params)),

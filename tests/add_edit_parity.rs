@@ -23,7 +23,7 @@ fn write_editor_script(home: &Path) -> PathBuf {
     let script = home.join("editor.sh");
     fs::write(
         &script,
-        "#!/bin/sh\nset -eu\nsrc=\"$LPASS_EDITOR_CONTENT\"\ntmp=\"$1.tmp-replace\"\ncat \"$src\" > \"$tmp\"\nmv \"$tmp\" \"$1\"\n",
+        "#!/bin/sh\nset -eu\nif [ -n \"${LPASS_EDITOR_PATH_OUT:-}\" ]; then\n  printf '%s\n' \"$1\" > \"$LPASS_EDITOR_PATH_OUT\"\nfi\nsrc=\"$LPASS_EDITOR_CONTENT\"\ntmp=\"$1.tmp-replace\"\ncat \"$src\" > \"$tmp\"\nmv \"$tmp\" \"$1\"\n",
     )
     .expect("write editor");
     fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).expect("chmod editor");
@@ -483,6 +483,47 @@ fn add_edit_parity_paths() {
     edit_missing_entry_creates_new_entry();
     interactive_secure_note_field_edit_updates_and_removes();
     add_non_interactive_choice_paths_work();
+}
+
+#[cfg(unix)]
+#[test]
+fn add_editor_uses_secure_tempdir_path() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    let editor = write_editor_script(&home);
+    let add_content = write_editor_content(
+        &home,
+        "add-secure-path.txt",
+        "Name: team/secure-temp\nURL: https://example.com\nUsername: bob\nPassword: pass\nNotes: note\n",
+    );
+    let path_out = home.join("editor-path.txt");
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let output = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .env_remove("VISUAL")
+        .env("EDITOR", &editor)
+        .env("LPASS_EDITOR_CONTENT", &add_content)
+        .env("LPASS_EDITOR_PATH_OUT", &path_out)
+        .args(["add", "--sync=no", "team/secure-temp"])
+        .output()
+        .expect("run add");
+
+    assert_eq!(
+        output.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    #[cfg(target_os = "linux")]
+    {
+        let path = fs::read_to_string(&path_out).expect("editor path");
+        assert!(path.trim().starts_with("/dev/shm/lpass."));
+    }
+
+    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
