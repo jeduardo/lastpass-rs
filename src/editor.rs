@@ -84,9 +84,8 @@ mod tests {
 
     #[test]
     fn create_secure_temp_file_in_reports_errors() {
-        let err =
-            create_secure_temp_file_in(std::path::Path::new("/path/that/does/not/exist"))
-                .expect_err("temp file must fail");
+        let err = create_secure_temp_file_in(std::path::Path::new("/path/that/does/not/exist"))
+            .expect_err("temp file must fail");
         assert!(err.contains("mkstemp"));
     }
 

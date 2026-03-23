@@ -45,7 +45,11 @@ pub fn render_stderr(text: &str) -> String {
 }
 
 pub fn cli_usage_text(usage: &str) -> String {
-    format_cli_usage(&current_program_path(), usage, std::io::stderr().is_terminal())
+    format_cli_usage(
+        &current_program_path(),
+        usage,
+        std::io::stderr().is_terminal(),
+    )
 }
 
 pub fn cli_error_text(message: &str) -> String {
@@ -114,7 +118,11 @@ fn is_usage_text(message: &str) -> bool {
 
 fn format_cli_usage(program_path: &str, usage: &str, is_tty: bool) -> String {
     let usage = usage.strip_prefix("usage: ").unwrap_or(usage);
-    render_with_mode(&format!("Usage: {program_path} {usage}"), is_tty, current_mode())
+    render_with_mode(
+        &format!("Usage: {program_path} {usage}"),
+        is_tty,
+        current_mode(),
+    )
 }
 
 fn current_mode() -> ColorMode {
@@ -179,7 +187,10 @@ mod tests {
     #[test]
     fn render_with_mode_strips_or_keeps_ansi() {
         let text = format!("{FG_RED}{BOLD}Error{RESET}: boom");
-        assert_eq!(render_with_mode(&text, false, ColorMode::Auto), "Error: boom");
+        assert_eq!(
+            render_with_mode(&text, false, ColorMode::Auto),
+            "Error: boom"
+        );
         assert_eq!(render_with_mode(&text, false, ColorMode::Always), text);
     }
 

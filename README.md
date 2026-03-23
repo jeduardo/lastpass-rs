@@ -46,7 +46,7 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
-- remove `LPASS_HTTP_MOCK`-driven business-path divergence so tests exercise the same command logic as normal runtime paths
+- none currently tracked in the parity backlog
 
 ## Implementation status
 
@@ -256,14 +256,14 @@ Implementation status for environment variables (source audited from `lastpass-c
 | `SHELL` | Shell used to execute clipboard command wrappers. | ✅ Implemented (`show --clip`, `generate --clip`) |
 | `TERM` | TTY type passed to pinentry integration. | ✅ Implemented |
 | `DISPLAY` | Display target passed to pinentry integration. | ✅ Implemented |
-| `LPASS_HTTP_MOCK` | Rust-only mock HTTP/test mode toggle (`1` enables mock). | ✅ Implemented (Rust extension) |
+| `LPASS_HTTP_MOCK` | Rust-only mock HTTP toggle for test-harness builds (`1` enables mock transport). | ✅ Implemented (Rust extension) |
 
 ## Testing
 
 Rust tests:
 
 ```bash
-cargo test --locked --all-targets
+cargo test --locked --all-targets --features test-harness
 ```
 
 Coverage report (Codecov-compatible LCOV):

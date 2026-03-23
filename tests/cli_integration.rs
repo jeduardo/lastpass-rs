@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use lpass_core::blob::{Account, Blob, Share};
 use lpass_core::config::{ConfigEnv, ConfigStore};
-use lpass_core::kdf::KDF_HASH_LEN;
+use lpass_core::kdf::{KDF_HASH_LEN, kdf_decryption_key};
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
 
@@ -630,6 +630,80 @@ fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
 }
 
 #[test]
+fn import_updates_mock_remote_blob_through_normal_upload_path() {
+    let (_temp, home) = unique_test_home();
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("mock key");
+    write_session(
+        &home,
+        &key,
+        &Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+    );
+    write_mock_blob(
+        &home,
+        &Blob {
+            version: 1,
+            local_version: false,
+            shares: Vec::new(),
+            accounts: Vec::new(),
+            attachments: Vec::new(),
+        },
+    );
+
+    let exe = env!("CARGO_BIN_EXE_lpass");
+    let mut child = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["import"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn import");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(
+            b"url,username,password,name,grouping\nhttps://example.com,alice,secret,entry,team\n",
+        )
+        .expect("write csv");
+    let output = child.wait_with_output().expect("wait import");
+    assert_eq!(
+        output.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let store = store_for(&home);
+    let _ = store.unlink("blob.json");
+    let _ = store.unlink("blob");
+
+    let show = Command::new(exe)
+        .env("LPASS_HOME", &home)
+        .env("LPASS_HTTP_MOCK", "1")
+        .args(["show", "--sync=now", "--username", "team/entry"])
+        .output()
+        .expect("run show");
+    assert_eq!(
+        show.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), "alice");
+}
+
+#[test]
 fn rm_removes_account_with_mock_env() {
     let (temp, home) = unique_test_home();
     write_mock_blob(&home, &default_local_blob());
@@ -722,7 +796,14 @@ fn rm_accepts_space_separated_sync_and_color_flags() {
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env("LPASS_HTTP_MOCK", "1")
-        .args(["rm", "--sync", "no", "--color", "never", "test-group/test-account"])
+        .args([
+            "rm",
+            "--sync",
+            "no",
+            "--color",
+            "never",
+            "test-group/test-account",
+        ])
         .output()
         .expect("run rm");
     assert_eq!(output.status.code().unwrap_or(-1), 0);

@@ -349,10 +349,7 @@ mod tests {
             "status".to_string(),
             "--color=never".to_string(),
         ]);
-        assert_eq!(
-            terminal::cli_warning_text("café"),
-            "Warning: café"
-        );
+        assert_eq!(terminal::cli_warning_text("café"), "Warning: café");
         terminal::set_color_mode(terminal::ColorMode::Auto);
         apply_requested_color_mode(&[
             "lpass".to_string(),

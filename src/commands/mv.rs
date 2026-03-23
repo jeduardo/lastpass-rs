@@ -89,7 +89,8 @@ pub(super) fn run_inner(args: &[String]) -> Result<i32, String> {
         return Ok(0);
     }
 
-    maybe_push_account_update(&blob.accounts[idx], &blob, sync_mode).map_err(lpass_error_to_string)?;
+    maybe_push_account_update(&blob.accounts[idx], &blob, sync_mode)
+        .map_err(lpass_error_to_string)?;
     save_blob(&blob).map_err(lpass_error_to_string)?;
     Ok(0)
 }

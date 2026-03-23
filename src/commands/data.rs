@@ -127,7 +127,9 @@ fn fetch_and_store_blob(
         ("hasplugin", crate::version::generated_version()),
     ];
     let response = client.post_lastpass_bytes(None, "getaccts.php", Some(session), &params)?;
-    if response.body.is_empty() { return Err(blob_fetch_error()); }
+    if response.body.is_empty() {
+        return Err(blob_fetch_error());
+    }
     config_write_encrypted_buffer("blob", &response.body, key)?;
     let _ = crate::config::config_unlink(BLOB_JSON_NAME);
     crate::blob::blob_parse(&response.body, key, private_key)
@@ -195,7 +197,7 @@ pub(crate) fn maybe_push_account_update(
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
+    let (key, session) = load_queue_credentials()?;
     let params = build_show_website_params(account, blob, &session, &key)?;
     upload_queue::enqueue(&key, "show_website.php", params, true)
 }
@@ -205,7 +207,7 @@ pub(crate) fn maybe_push_account_share_move(
     blob: &Blob,
     original_share_id: Option<&str>,
 ) -> Result<()> {
-    let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
+    let (key, session) = load_queue_credentials()?;
     let client = HttpClient::from_env()?;
     push_account_share_move_with_client(&client, &session, &key, account, blob, original_share_id)
 }
@@ -214,7 +216,7 @@ pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) 
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
+    let (key, session) = load_queue_credentials()?;
     let params = build_show_website_delete_params(account, &session);
     upload_queue::enqueue(&key, "show_website.php", params, true)
 }
@@ -227,7 +229,7 @@ pub(crate) fn maybe_log_access(account: &Account, sync_mode: SyncMode) -> Result
         return Ok(());
     }
 
-    let Some((key, session)) = load_queue_credentials()? else { return Ok(()); };
+    let (key, session) = load_queue_credentials()?;
     let params = build_log_access_params(account, &session);
     upload_queue::enqueue(&key, "loglogin.php", params, true)
 }
@@ -286,7 +288,9 @@ fn build_share_move_params(
 ) -> Result<Vec<(String, String)>> {
     let current_share_id = normalize_share_id(account.share_id.as_deref());
     let original_share_id = normalize_share_id(original_share_id);
-    if current_share_id.is_none() && original_share_id.is_none() { return Ok(Vec::new()); }
+    if current_share_id.is_none() && original_share_id.is_none() {
+        return Ok(Vec::new());
+    }
 
     let key = upload_key_for_account(account, blob, vault_key)?;
     let mut params = Vec::with_capacity(13);
@@ -294,12 +298,27 @@ fn build_share_move_params(
     params.push(("cmd".to_string(), "uploadaccounts".to_string()));
     params.push(("aid0".to_string(), account.id.clone()));
     params.push(("name0".to_string(), encrypt_and_encode(&account.name, key)?));
-    params.push(("grouping0".to_string(), encrypt_and_encode(&account.group, key)?));
-    params.push(("url0".to_string(), encode_upload_url(account, session, key)?));
-    params.push(("username0".to_string(), encrypt_and_encode(&account.username, key)?));
-    params.push(("password0".to_string(), encrypt_and_encode(&account.password, key)?));
+    params.push((
+        "grouping0".to_string(),
+        encrypt_and_encode(&account.group, key)?,
+    ));
+    params.push((
+        "url0".to_string(),
+        encode_upload_url(account, session, key)?,
+    ));
+    params.push((
+        "username0".to_string(),
+        encrypt_and_encode(&account.username, key)?,
+    ));
+    params.push((
+        "password0".to_string(),
+        encrypt_and_encode(&account.password, key)?,
+    ));
     params.push(("pwprotect0".to_string(), on_off(account.pwprotect)));
-    params.push(("extra0".to_string(), encrypt_and_encode(&account.note, key)?));
+    params.push((
+        "extra0".to_string(),
+        encrypt_and_encode(&account.note, key)?,
+    ));
     params.push(("todelete".to_string(), account.id.clone()));
 
     if let Some(share_id) = current_share_id {
@@ -331,7 +350,7 @@ fn build_log_access_params(account: &Account, session: &Session) -> Vec<(String,
     params
 }
 
-fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
+fn load_queue_credentials() -> Result<([u8; KDF_HASH_LEN], Session)> {
     let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
 
     let session = crate::session::session_load(&key)
@@ -339,7 +358,7 @@ fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
         .ok_or(LpassError::User(
             "Could not find session. Perhaps you need to login with `lpass login`.",
         ))?;
-    Ok(Some((key, session)))
+    Ok((key, session))
 }
 
 fn map_decryption_key_error(err: LpassError) -> LpassError {
@@ -384,11 +403,20 @@ pub(crate) fn build_show_website_params(
         ("token".to_string(), session.token.clone()),
         ("method".to_string(), "cli".to_string()),
         ("name".to_string(), encrypt_and_encode(&account.name, key)?),
-        ("grouping".to_string(), encrypt_and_encode(&account.group, key)?),
+        (
+            "grouping".to_string(),
+            encrypt_and_encode(&account.group, key)?,
+        ),
         ("pwprotect".to_string(), on_off(account.pwprotect)),
         ("aid".to_string(), account_id_for_upload(account)),
-        ("username".to_string(), encrypt_and_encode(&account.username, key)?),
-        ("password".to_string(), encrypt_and_encode(&account.password, key)?),
+        (
+            "username".to_string(),
+            encrypt_and_encode(&account.username, key)?,
+        ),
+        (
+            "password".to_string(),
+            encrypt_and_encode(&account.password, key)?,
+        ),
         ("extra".to_string(), encrypt_and_encode(&account.note, key)?),
         ("url".to_string(), encode_upload_url(account, session, key)?),
     ];

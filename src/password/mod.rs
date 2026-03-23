@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
 #[cfg(target_os = "linux")]
 use std::io::IsTerminal;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use crate::error::{LpassError, Result};
@@ -15,7 +15,10 @@ pub fn prompt_password(username: &str) -> Result<String> {
     prompt_password_with_description(
         "Master Password",
         None,
-        &format!("Please enter the LastPass master password for <{}>.", username),
+        &format!(
+            "Please enter the LastPass master password for <{}>.",
+            username
+        ),
     )
 }
 
@@ -83,7 +86,16 @@ fn prompt_password_with_pinentry(
     error: Option<&str>,
     description: &str,
 ) -> std::result::Result<String, PinentryError> {
-    let mut child = spawn_pinentry(pinentry)?;
+    let child = spawn_pinentry(pinentry)?;
+    prompt_password_with_pinentry_child(child, prompt, error, description)
+}
+
+fn prompt_password_with_pinentry_child(
+    mut child: Child,
+    prompt: &str,
+    error: Option<&str>,
+    description: &str,
+) -> std::result::Result<String, PinentryError> {
     let (stdin, stdout) = match take_pinentry_stdio(&mut child) {
         Ok(stdio) => stdio,
         Err(err) => {
@@ -106,9 +118,11 @@ fn prompt_password_with_pinentry(
         }
         send_pinentry_command(&mut input, "SETDESC", Some(description))?;
         expect_pinentry_ok(&mut output)?;
-        send_pinentry_option(&mut input, &mut output, "ttytype", crate::lpenv::var("TERM").ok())?;
+        let term = crate::lpenv::var("TERM").ok();
+        send_pinentry_option(&mut input, &mut output, "ttytype", term)?;
         send_pinentry_option(&mut input, &mut output, "ttyname", tty_name_for_stdin())?;
-        send_pinentry_option(&mut input, &mut output, "display", crate::lpenv::var("DISPLAY").ok())?;
+        let display = crate::lpenv::var("DISPLAY").ok();
+        send_pinentry_option(&mut input, &mut output, "display", display)?;
         send_pinentry_command(&mut input, "GETPIN", None)?;
         let password = read_pinentry_data(&mut output)?;
         Ok(pinentry_unescape(&password))
@@ -197,7 +211,9 @@ fn read_pinentry_line(
     output: &mut BufReader<ChildStdout>,
 ) -> std::result::Result<String, PinentryError> {
     let mut line = String::new();
-    let read = output.read_line(&mut line).map_err(|_| PinentryError::Failed)?;
+    let read = output
+        .read_line(&mut line)
+        .map_err(|_| PinentryError::Failed)?;
     if read == 0 {
         return Err(PinentryError::Failed);
     }
@@ -208,7 +224,10 @@ fn read_pinentry_line(
 }
 
 fn pinentry_disabled() -> bool {
-    matches!(crate::lpenv::var("LPASS_DISABLE_PINENTRY").as_deref(), Ok("1"))
+    matches!(
+        crate::lpenv::var("LPASS_DISABLE_PINENTRY").as_deref(),
+        Ok("1")
+    )
 }
 
 fn askpass_program_from_env() -> Option<OsString> {
