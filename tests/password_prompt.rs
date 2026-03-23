@@ -113,7 +113,11 @@ fn login_prompt_omits_ttyname_when_stdin_is_redirected() {
 fn login_prompt_reports_failed_pinentry_without_fallback() {
     let temp = TempDir::new().expect("tempdir");
     let exe = env!("CARGO_BIN_EXE_lpass");
-    let pinentry = write_script(&temp, "pinentry-fail.sh", "#!/bin/sh\nprintf 'ERR fail\\n'\n");
+    let pinentry = write_script(
+        &temp,
+        "pinentry-fail.sh",
+        "#!/bin/sh\nprintf 'ERR fail\\n'\n",
+    );
 
     let output = Command::new(exe)
         .env("LPASS_HOME", temp.path())

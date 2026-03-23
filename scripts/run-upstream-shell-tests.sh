@@ -34,7 +34,7 @@ run_test_case() {
   (cd "$UPSTREAM_TEST_DIR" && ./tests "$test_name")
 }
 
-cargo build --bin lpass --manifest-path "$ROOT_DIR/Cargo.toml"
+cargo build --features test-harness --bin lpass --manifest-path "$ROOT_DIR/Cargo.toml"
 
 mkdir -p "$UPSTREAM_BUILD_DIR"
 ln -snf ../../target/debug/lpass "$UPSTREAM_TEST_BIN"

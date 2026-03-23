@@ -224,7 +224,8 @@ fn inject_mock_attachments(home: &Path) {
 
 fn write_mock_blob(home: &Path, blob: &Blob) {
     let store = store_for(home);
-    let key = current_key(home).unwrap_or_else(|| kdf_decryption_key("tester", "123456", 2).expect("derive default key"));
+    let key = current_key(home)
+        .unwrap_or_else(|| kdf_decryption_key("tester", "123456", 2).expect("derive default key"));
     let updated = serde_json::to_vec_pretty(blob).expect("serialize mock blob");
     store
         .write_encrypted_buffer("blob.json", &updated, &key)

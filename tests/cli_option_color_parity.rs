@@ -117,7 +117,10 @@ fn mv_and_import_invalid_sync_show_c_usage_text() {
     let mv_stderr = String::from_utf8_lossy(&mv.stderr);
     assert!(mv_stderr.contains("Usage:"), "stderr: {mv_stderr}");
     assert!(mv_stderr.contains(" mv "), "stderr: {mv_stderr}");
-    assert!(!mv_stderr.contains("--sync=auto|now|no"), "stderr: {mv_stderr}");
+    assert!(
+        !mv_stderr.contains("--sync=auto|now|no"),
+        "stderr: {mv_stderr}"
+    );
 
     let import = Command::new(exe)
         .env("LPASS_HOME", home.path())
@@ -128,7 +131,10 @@ fn mv_and_import_invalid_sync_show_c_usage_text() {
     assert_eq!(import.status.code().unwrap_or(-1), 1);
     let import_stderr = String::from_utf8_lossy(&import.stderr);
     assert!(import_stderr.contains("Usage:"), "stderr: {import_stderr}");
-    assert!(import_stderr.contains(" import "), "stderr: {import_stderr}");
+    assert!(
+        import_stderr.contains(" import "),
+        "stderr: {import_stderr}"
+    );
     assert!(
         !import_stderr.contains("--sync=auto|now|no"),
         "stderr: {import_stderr}"

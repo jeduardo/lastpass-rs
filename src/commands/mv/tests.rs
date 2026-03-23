@@ -323,7 +323,10 @@ fn share_changed_only_when_membership_changes() {
 fn share_name_eq_ignore_ascii_case_covers_matching_and_missing_values() {
     assert!(share_name_eq_ignore_ascii_case(Some("Team"), Some("team")));
     assert!(share_name_eq_ignore_ascii_case(None, None));
-    assert!(!share_name_eq_ignore_ascii_case(Some("Team"), Some("Other")));
+    assert!(!share_name_eq_ignore_ascii_case(
+        Some("Team"),
+        Some("Other")
+    ));
     assert!(!share_name_eq_ignore_ascii_case(Some("Team"), None));
 }
 
@@ -358,8 +361,7 @@ fn non_empty_share_id_filters_missing_and_empty_values() {
     assert_eq!(non_empty_share_id(Some("77")), Some("77"));
 }
 
-fn configure_logged_in_mock_home(
-) -> (
+fn configure_logged_in_mock_home() -> (
     TempDir,
     crate::config::TestEnvGuard,
     crate::lpenv::TestOverrideGuard,
@@ -525,7 +527,10 @@ fn run_inner_share_boundary_move_without_share_ids_errors_and_keeps_local_entry(
     let updated = load_blob(SyncMode::No).expect("load blob");
     assert_eq!(updated.accounts.len(), 1);
     assert_eq!(updated.accounts[0].fullname, "Shared-team/apps/entry");
-    assert_eq!(updated.accounts[0].share_name.as_deref(), Some("Shared-team"));
+    assert_eq!(
+        updated.accounts[0].share_name.as_deref(),
+        Some("Shared-team")
+    );
     assert_eq!(updated.accounts[0].share_id, None);
 }
 
@@ -533,7 +538,12 @@ fn run_inner_share_boundary_move_without_share_ids_errors_and_keeps_local_entry(
 fn run_inner_share_boundary_move_keeps_local_entry_when_upload_fails() {
     let (_temp, _guard, _env_guard) = configure_logged_in_mock_home();
     let mut blob = mock_blob_with_shared_entry();
-    let mut target = account("99", "other", "Shared-other/ops/other", Some("Shared-other"));
+    let mut target = account(
+        "99",
+        "other",
+        "Shared-other/ops/other",
+        Some("Shared-other"),
+    );
     target.share_id = Some("88".to_string());
     target.group = "ops".to_string();
     blob.accounts.push(target);

@@ -445,7 +445,11 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
 
     let mv_out = run(&home, &["mv", "--sync=no", "team/service-one", "ops"], None);
     assert_eq!(mv_out.status.code().unwrap_or(-1), 0);
-    let show_name = run(&home, &["show", "--sync=no", "--name", "ops/service-one"], None);
+    let show_name = run(
+        &home,
+        &["show", "--sync=no", "--name", "ops/service-one"],
+        None,
+    );
     assert_eq!(show_name.status.code().unwrap_or(-1), 0);
     assert_eq!(
         String::from_utf8_lossy(&show_name.stdout).trim(),

@@ -42,6 +42,7 @@ Implementation rules:
 - Do not add new test-only env vars or runtime shortcuts.
 - If a path is hard to test, refactor toward reusable production seams instead of adding test-only behavior.
 - Keep `LPASS_HTTP_MOCK` as a Rust-only testing aid only where it selects mock transport/input sources, not where it changes command semantics.
+- Compile the mock transport only in test-harness builds so production binaries do not include it.
 
 Implementation steps:
 1. Audit all `LPASS_HTTP_MOCK` branches in production modules and classify them as:
@@ -72,5 +73,6 @@ Acceptance criteria:
 
 Implementation notes:
 - `login`, `import`, `sync`, and `data` now use the same business flow regardless of `LPASS_HTTP_MOCK`; the env var only selects the mock HTTP transport.
+- The mock HTTP transport now lives in its own module and is only compiled in `test-harness` or `cfg(test)` builds.
 - The mock transport persists `show_website.php` and `uploadaccounts` mutations into a mock remote blob and bumps the remote blob version, so tests can verify normal fetch/update behavior without command-level shortcuts.
 - Task validation is covered by Rust unit/integration tests, the upstream shell wrapper, and the Linux arm64 `act` workflow.

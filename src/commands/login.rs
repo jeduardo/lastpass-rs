@@ -682,11 +682,10 @@ mod tests {
             lpass_home: Some(invalid_home),
             ..ConfigEnv::default()
         });
-        let err =
-            persist_blob_after_login_with_fetch(&bad_store, &session, &key, |_session| {
-                Ok(vec![1, 2, 3])
-            })
-            .expect_err("write error");
+        let err = persist_blob_after_login_with_fetch(&bad_store, &session, &key, |_session| {
+            Ok(vec![1, 2, 3])
+        })
+        .expect_err("write error");
         assert!(err.contains("IO error while"));
     }
 

@@ -6,8 +6,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Once};
 use std::thread;
 
-use crate::session::Session;
+use crate::blob::Blob;
 use crate::config::{ConfigEnv, ConfigStore, set_test_env};
+use crate::kdf::{kdf_decryption_key, kdf_login_key};
+use crate::session::Session;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -197,7 +199,11 @@ fn mock_getaccts_returns_minimal_blob_bytes() {
         .post_lastpass_bytes(None, "getaccts.php", None, &[])
         .expect("response");
     assert_eq!(response.status, 200);
-    assert!(response.body.starts_with(b"LPAV"), "body: {:?}", response.body);
+    assert!(
+        response.body.starts_with(b"LPAV"),
+        "body: {:?}",
+        response.body
+    );
     let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
     let blob = crate::blob::blob_parse(&response.body, &key, None).expect("parse blob");
     assert_eq!(blob.version, 123);
@@ -243,11 +249,26 @@ fn mock_show_website_persists_updates_for_following_getaccts_requests() {
             None,
             &[
                 ("aid", "0001"),
-                ("name", &crate::commands::data::encrypt_and_encode("test-account", &key).expect("name")),
-                ("grouping", &crate::commands::data::encrypt_and_encode("test-group", &key).expect("group")),
-                ("username", &crate::commands::data::encrypt_and_encode("updated-user", &key).expect("user")),
-                ("password", &crate::commands::data::encrypt_and_encode("updated-pass", &key).expect("pass")),
-                ("extra", &crate::commands::data::encrypt_and_encode("", &key).expect("note")),
+                (
+                    "name",
+                    &crate::commands::data::encrypt_and_encode("test-account", &key).expect("name"),
+                ),
+                (
+                    "grouping",
+                    &crate::commands::data::encrypt_and_encode("test-group", &key).expect("group"),
+                ),
+                (
+                    "username",
+                    &crate::commands::data::encrypt_and_encode("updated-user", &key).expect("user"),
+                ),
+                (
+                    "password",
+                    &crate::commands::data::encrypt_and_encode("updated-pass", &key).expect("pass"),
+                ),
+                (
+                    "extra",
+                    &crate::commands::data::encrypt_and_encode("", &key).expect("note"),
+                ),
                 ("url", &hex::encode("https://test-url.example.com/")),
                 ("pwprotect", "on"),
             ],
@@ -423,12 +444,27 @@ fn mock_uploadaccounts_persists_new_accounts_for_following_getaccts_requests() {
             None,
             &[
                 ("cmd", "uploadaccounts"),
-                ("name0", &crate::commands::data::encrypt_and_encode("imported", &key).expect("name")),
-                ("grouping0", &crate::commands::data::encrypt_and_encode("team", &key).expect("group")),
+                (
+                    "name0",
+                    &crate::commands::data::encrypt_and_encode("imported", &key).expect("name"),
+                ),
+                (
+                    "grouping0",
+                    &crate::commands::data::encrypt_and_encode("team", &key).expect("group"),
+                ),
                 ("url0", &hex::encode("https://imported.example/")),
-                ("username0", &crate::commands::data::encrypt_and_encode("alice", &key).expect("user")),
-                ("password0", &crate::commands::data::encrypt_and_encode("secret", &key).expect("pass")),
-                ("extra0", &crate::commands::data::encrypt_and_encode("note", &key).expect("note")),
+                (
+                    "username0",
+                    &crate::commands::data::encrypt_and_encode("alice", &key).expect("user"),
+                ),
+                (
+                    "password0",
+                    &crate::commands::data::encrypt_and_encode("secret", &key).expect("pass"),
+                ),
+                (
+                    "extra0",
+                    &crate::commands::data::encrypt_and_encode("note", &key).expect("note"),
+                ),
                 ("fav0", "1"),
             ],
         )
@@ -439,7 +475,11 @@ fn mock_uploadaccounts_persists_new_accounts_for_following_getaccts_requests() {
     let version = client
         .post_lastpass(None, "login_check.php", None, &[])
         .expect("version response");
-    assert!(version.body.contains("accts_version=\"124\""), "body: {}", version.body);
+    assert!(
+        version.body.contains("accts_version=\"124\""),
+        "body: {}",
+        version.body
+    );
 
     let blob_response = client
         .post_lastpass_bytes(None, "getaccts.php", None, &[])
@@ -475,12 +515,27 @@ fn mock_uploadaccounts_updates_existing_account_when_aid_is_present() {
             &[
                 ("cmd", "uploadaccounts"),
                 ("aid0", "0001"),
-                ("name0", &crate::commands::data::encrypt_and_encode("renamed", &key).expect("name")),
-                ("grouping0", &crate::commands::data::encrypt_and_encode("ops", &key).expect("group")),
+                (
+                    "name0",
+                    &crate::commands::data::encrypt_and_encode("renamed", &key).expect("name"),
+                ),
+                (
+                    "grouping0",
+                    &crate::commands::data::encrypt_and_encode("ops", &key).expect("group"),
+                ),
                 ("url0", &hex::encode("https://renamed.example/")),
-                ("username0", &crate::commands::data::encrypt_and_encode("bob", &key).expect("user")),
-                ("password0", &crate::commands::data::encrypt_and_encode("updated", &key).expect("pass")),
-                ("extra0", &crate::commands::data::encrypt_and_encode("note", &key).expect("note")),
+                (
+                    "username0",
+                    &crate::commands::data::encrypt_and_encode("bob", &key).expect("user"),
+                ),
+                (
+                    "password0",
+                    &crate::commands::data::encrypt_and_encode("updated", &key).expect("pass"),
+                ),
+                (
+                    "extra0",
+                    &crate::commands::data::encrypt_and_encode("note", &key).expect("note"),
+                ),
                 ("fav0", "1"),
                 ("pwprotect0", "on"),
             ],
@@ -503,6 +558,96 @@ fn mock_uploadaccounts_updates_existing_account_when_aid_is_present() {
     assert_eq!(account.note, "note");
     assert_eq!(account.url, "https://renamed.example/");
     assert!(account.pwprotect);
+}
+
+#[test]
+fn mock_uploadaccounts_uses_target_share_key_and_round_trips_shared_entries() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+    let store = ConfigStore::from_current();
+    store
+        .write_buffer("plaintext_key", &key)
+        .expect("write plaintext key");
+
+    let shared_blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![crate::blob::Share {
+            id: "88".to_string(),
+            name: "Shared-other".to_string(),
+            readonly: false,
+            key: Some([8u8; 32]),
+        }],
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    };
+    let local_blob = serde_json::to_vec(&shared_blob).expect("blob json");
+    store
+        .write_encrypted_buffer("blob.json", &local_blob, &key)
+        .expect("write seeded local blob");
+
+    client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "uploadaccounts"),
+                ("sharedfolderid", "88"),
+                (
+                    "name0",
+                    &crate::commands::data::encrypt_and_encode("entry", &[8u8; 32]).expect("name"),
+                ),
+                (
+                    "grouping0",
+                    &crate::commands::data::encrypt_and_encode("ops", &[8u8; 32]).expect("group"),
+                ),
+                (
+                    "url0",
+                    &crate::commands::data::encrypt_and_encode(
+                        "https://shared.example/",
+                        &[8u8; 32],
+                    )
+                    .expect("url"),
+                ),
+                (
+                    "username0",
+                    &crate::commands::data::encrypt_and_encode("alice", &[8u8; 32]).expect("user"),
+                ),
+                (
+                    "password0",
+                    &crate::commands::data::encrypt_and_encode("secret", &[8u8; 32]).expect("pass"),
+                ),
+                (
+                    "extra0",
+                    &crate::commands::data::encrypt_and_encode("note", &[8u8; 32]).expect("note"),
+                ),
+            ],
+        )
+        .expect("upload response");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("private key");
+    let blob =
+        crate::blob::blob_parse(&blob_response.body, &key, Some(&private_key)).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.name == "entry")
+        .expect("shared account");
+    assert_eq!(account.share_id.as_deref(), Some("88"));
+    assert_eq!(account.share_name.as_deref(), Some("Shared-other"));
+    assert_eq!(account.fullname, "Shared-other/ops/entry");
+    assert_eq!(account.username, "alice");
+    assert_eq!(account.password, "secret");
+    assert_eq!(account.url, "https://shared.example/");
 }
 
 #[test]

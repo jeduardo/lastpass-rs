@@ -1,8 +1,8 @@
 use std::ffi::OsString;
-#[cfg(unix)]
-use std::io::Write;
 #[cfg(target_os = "linux")]
 use std::io::IsTerminal;
+#[cfg(unix)]
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -14,8 +14,7 @@ use super::{
     PinentryError, askpass_program_from_env, askpass_program_from_value, decode_password_output,
     pinentry_disabled, pinentry_escape, pinentry_program_from_env, pinentry_unescape,
     prompt_password, prompt_password_from_tty_with, prompt_password_with_description_and_tty,
-    prompt_password_with_pinentry, take_pinentry_stdio,
-    write_prompt_description,
+    prompt_password_with_pinentry, take_pinentry_stdio, write_prompt_description,
 };
 use tempfile::TempDir;
 
@@ -68,7 +67,10 @@ fn pinentry_disabled_only_accepts_one() {
 fn pinentry_program_from_env_reads_override() {
     let _guard = crate::lpenv::begin_test_overrides();
     crate::lpenv::set_override_for_tests("LPASS_PINENTRY", "/tmp/pinentry");
-    assert_eq!(pinentry_program_from_env().as_deref(), Some("/tmp/pinentry"));
+    assert_eq!(
+        pinentry_program_from_env().as_deref(),
+        Some("/tmp/pinentry")
+    );
 }
 
 #[test]

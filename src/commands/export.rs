@@ -312,7 +312,9 @@ mod tests {
             lpass_home: Some(home.path().to_path_buf()),
             ..crate::config::ConfigEnv::default()
         });
-        store.write_buffer("plaintext_key", &key).expect("write key");
+        store
+            .write_buffer("plaintext_key", &key)
+            .expect("write key");
         store
             .write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
             .expect("write verify");

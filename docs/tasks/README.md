@@ -26,7 +26,7 @@ Global rules for every task:
 - Add or update tests in the same change.
 - Keep project coverage at or above 80%.
 - Run:
-  - `cargo test --locked --all-targets`
+  - `cargo test --locked --all-targets --features test-harness`
   - `cargo test-upstream`
   - `cargo coverage`
   - `act -j test --container-architecture linux/arm64`

@@ -672,7 +672,9 @@ fn import_updates_mock_remote_blob_through_normal_upload_path() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"url,username,password,name,grouping\nhttps://example.com,alice,secret,entry,team\n")
+        .write_all(
+            b"url,username,password,name,grouping\nhttps://example.com,alice,secret,entry,team\n",
+        )
         .expect("write csv");
     let output = child.wait_with_output().expect("wait import");
     assert_eq!(
@@ -794,7 +796,14 @@ fn rm_accepts_space_separated_sync_and_color_flags() {
     let output = Command::new(exe)
         .env("LPASS_HOME", &home)
         .env("LPASS_HTTP_MOCK", "1")
-        .args(["rm", "--sync", "no", "--color", "never", "test-group/test-account"])
+        .args([
+            "rm",
+            "--sync",
+            "no",
+            "--color",
+            "never",
+            "test-group/test-account",
+        ])
         .output()
         .expect("run rm");
     assert_eq!(output.status.code().unwrap_or(-1), 0);
