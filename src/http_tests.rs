@@ -188,6 +188,11 @@ fn post_lastpass_bytes_returns_raw_body() {
 #[test]
 fn mock_getaccts_returns_minimal_blob_bytes() {
     let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
     let response = client
         .post_lastpass_bytes(None, "getaccts.php", None, &[])
         .expect("response");
@@ -399,6 +404,105 @@ fn mock_show_website_decodes_encrypted_url_payloads() {
         .find(|account| account.id == "0001")
         .expect("updated account");
     assert_eq!(account.url, "https://encrypted.example/");
+}
+
+#[test]
+fn mock_uploadaccounts_persists_new_accounts_for_following_getaccts_requests() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    let response = client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "uploadaccounts"),
+                ("name0", &crate::commands::data::encrypt_and_encode("imported", &key).expect("name")),
+                ("grouping0", &crate::commands::data::encrypt_and_encode("team", &key).expect("group")),
+                ("url0", &hex::encode("https://imported.example/")),
+                ("username0", &crate::commands::data::encrypt_and_encode("alice", &key).expect("user")),
+                ("password0", &crate::commands::data::encrypt_and_encode("secret", &key).expect("pass")),
+                ("extra0", &crate::commands::data::encrypt_and_encode("note", &key).expect("note")),
+                ("fav0", "1"),
+            ],
+        )
+        .expect("upload response");
+    assert_eq!(response.status, 200);
+    assert!(response.body.contains("rc=\"OK\""));
+
+    let version = client
+        .post_lastpass(None, "login_check.php", None, &[])
+        .expect("version response");
+    assert!(version.body.contains("accts_version=\"124\""), "body: {}", version.body);
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.name == "imported")
+        .expect("imported account");
+    assert_eq!(account.group, "team");
+    assert_eq!(account.url, "https://imported.example/");
+    assert_eq!(account.username, "alice");
+    assert_eq!(account.password, "secret");
+    assert_eq!(account.note, "note");
+}
+
+#[test]
+fn mock_uploadaccounts_updates_existing_account_when_aid_is_present() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+
+    client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "uploadaccounts"),
+                ("aid0", "0001"),
+                ("name0", &crate::commands::data::encrypt_and_encode("renamed", &key).expect("name")),
+                ("grouping0", &crate::commands::data::encrypt_and_encode("ops", &key).expect("group")),
+                ("url0", &hex::encode("https://renamed.example/")),
+                ("username0", &crate::commands::data::encrypt_and_encode("bob", &key).expect("user")),
+                ("password0", &crate::commands::data::encrypt_and_encode("updated", &key).expect("pass")),
+                ("extra0", &crate::commands::data::encrypt_and_encode("note", &key).expect("note")),
+                ("fav0", "1"),
+                ("pwprotect0", "on"),
+            ],
+        )
+        .expect("update response");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let blob = crate::blob::blob_parse(&blob_response.body, &key, None).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.id == "0001")
+        .expect("updated account");
+    assert_eq!(account.name, "renamed");
+    assert_eq!(account.group, "ops");
+    assert_eq!(account.username, "bob");
+    assert_eq!(account.password, "updated");
+    assert_eq!(account.note, "note");
+    assert_eq!(account.url, "https://renamed.example/");
+    assert!(account.pwprotect);
 }
 
 #[test]

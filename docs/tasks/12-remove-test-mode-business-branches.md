@@ -1,6 +1,6 @@
 # Task 12: Remove Test-Mode Business Branches
 
-Status: `todo`
+Status: `done`
 
 Objective:
 - Eliminate runtime business-logic divergence driven by test/mock mode while preserving the existing ability to test the CLI without live LastPass network access.
@@ -69,3 +69,8 @@ Acceptance criteria:
   - `cargo coverage`
   - `act -j test --container-architecture linux/arm64`
   - `act -j coverage --container-architecture linux/arm64`
+
+Implementation notes:
+- `login`, `import`, `sync`, and `data` now use the same business flow regardless of `LPASS_HTTP_MOCK`; the env var only selects the mock HTTP transport.
+- The mock transport persists `show_website.php` and `uploadaccounts` mutations into a mock remote blob and bumps the remote blob version, so tests can verify normal fetch/update behavior without command-level shortcuts.
+- Task validation is covered by Rust unit/integration tests, the upstream shell wrapper, and the Linux arm64 `act` workflow.

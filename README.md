@@ -46,7 +46,7 @@ Implemented (working, with ongoing parity improvements):
 - `share`
 
 Planned / not fully implemented yet:
-- remove `LPASS_HTTP_MOCK`-driven business-path divergence so tests exercise the same command logic as normal runtime paths
+- none currently tracked in the parity backlog
 
 ## Implementation status
 

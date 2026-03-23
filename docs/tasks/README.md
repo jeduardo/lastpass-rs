@@ -18,7 +18,7 @@ Recommended execution order:
 9. `10-shared-folder-move-parity.md` (`done`)
 10. `11-strict-option-parsing-and-color-output-parity.md` (`done`)
 11. `09-parity-tests-and-gates.md` (`done`)
-12. `12-remove-test-mode-business-branches.md` (`todo`)
+12. `12-remove-test-mode-business-branches.md` (`done`)
 
 Global rules for every task:
 - Match behavior and options from `lastpass-cli/` exactly unless explicitly documented.

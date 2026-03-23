@@ -304,8 +304,9 @@ impl MockTransport {
                 }
             }
             "login_check.php" => format!(
-                "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\" accts_version=\"123\"/></response>",
-                self.uid
+                "<response><ok uid=\"{}\" sessionid=\"1234\" token=\"abcd\" accts_version=\"{}\"/></response>",
+                self.uid,
+                self.load_mock_remote_blob().version
             ),
             "getaccts.php" => String::new(),
             "show_website.php" => {
@@ -314,7 +315,7 @@ impl MockTransport {
             }
             "loglogin.php" => String::new(),
             "lastpass/api.php" => match map.get("cmd").map(String::as_str) {
-                Some("uploadaccounts") => "<lastpass rc=\"OK\"><ok/></lastpass>".to_string(),
+                Some("uploadaccounts") => self.respond_uploadaccounts(&map),
                 Some("getacctschangepw") => self.respond_pwchange_start(&map),
                 Some("updatepassword") => self.respond_pwchange_complete(&map),
                 _ => "<lastpass rc=\"FAIL\"><error/></lastpass>".to_string(),
@@ -419,6 +420,11 @@ impl MockTransport {
         }
     }
 
+    fn respond_uploadaccounts(&self, map: &HashMap<String, String>) -> String {
+        self.apply_uploadaccounts(map);
+        "<lastpass rc=\"OK\"><ok/></lastpass>".to_string()
+    }
+
     fn respond_share(&self, map: &HashMap<String, String>) -> String {
         if map.get("getinfo").map(String::as_str) == Some("1") {
             return self.respond_share_getinfo();
@@ -514,6 +520,85 @@ impl MockTransport {
         }
     }
 
+    fn apply_uploadaccounts(&self, map: &HashMap<String, String>) {
+        let mut blob = self.load_mock_remote_blob();
+        let mut changed = false;
+
+        for index in 0.. {
+            let name_key = format!("name{index}");
+            let aid_key = format!("aid{index}");
+            if !map.contains_key(&name_key) && !map.contains_key(&aid_key) {
+                break;
+            }
+
+            let account_id = map
+                .get(&aid_key)
+                .cloned()
+                .filter(|value| !value.is_empty() && value != "0")
+                .unwrap_or_else(|| next_mock_account_id(&blob.accounts));
+            let mut account = blob
+                .accounts
+                .iter()
+                .find(|account| account.id == account_id)
+                .cloned()
+                .unwrap_or_else(|| default_mock_account(&account_id, "", "", "", "", "", "", false));
+
+            if let Some(value) = map.get(&name_key) {
+                account.name = decrypt_mock_value(value, &self.decryption_key);
+            }
+            let grouping_key = format!("grouping{index}");
+            if let Some(value) = map.get(&grouping_key) {
+                account.group = decrypt_mock_value(value, &self.decryption_key);
+            }
+            let url_key = format!("url{index}");
+            if let Some(value) = map.get(&url_key) {
+                account.url = decode_mock_url(value, &self.decryption_key);
+            }
+            let username_key = format!("username{index}");
+            if let Some(value) = map.get(&username_key) {
+                account.username = decrypt_mock_value(value, &self.decryption_key);
+            }
+            let password_key = format!("password{index}");
+            if let Some(value) = map.get(&password_key) {
+                account.password = decrypt_mock_value(value, &self.decryption_key);
+            }
+            let extra_key = format!("extra{index}");
+            if let Some(value) = map.get(&extra_key) {
+                account.note = decrypt_mock_value(value, &self.decryption_key);
+            }
+            let fav_key = format!("fav{index}");
+            if let Some(value) = map.get(&fav_key) {
+                account.fav = value == "1";
+            }
+            let pwprotect_key = format!("pwprotect{index}");
+            if let Some(value) = map.get(&pwprotect_key) {
+                account.pwprotect = value == "on";
+            }
+
+            account.fullname = if account.group.is_empty() {
+                account.name.clone()
+            } else {
+                format!("{}/{}", account.group, account.name)
+            };
+
+            if let Some(existing) = blob
+                .accounts
+                .iter_mut()
+                .find(|existing| existing.id == account.id)
+            {
+                *existing = account;
+            } else {
+                blob.accounts.push(account);
+            }
+            changed = true;
+        }
+
+        if changed {
+            blob.version = blob.version.saturating_add(1);
+            self.save_mock_remote_blob(&blob);
+        }
+    }
+
     fn apply_show_website_update(&self, map: &HashMap<String, String>) {
         let Some(aid) = map.get("aid") else {
             return;
@@ -551,6 +636,7 @@ impl MockTransport {
         } else {
             format!("{}/{}", account.group, account.name)
         };
+        blob.version = blob.version.saturating_add(1);
         self.save_mock_remote_blob(&blob);
     }
 }
@@ -619,9 +705,10 @@ fn mock_blob_bytes_from_blob(blob: &Blob, key: &[u8; 32]) -> Vec<u8> {
     }
 
     let mut bytes = Vec::new();
+    let version = blob.version.to_string();
     bytes.extend_from_slice(b"LPAV");
-    bytes.extend_from_slice(&(MOCK_BLOB_VERSION.len() as u32).to_be_bytes());
-    bytes.extend_from_slice(MOCK_BLOB_VERSION.as_bytes());
+    bytes.extend_from_slice(&(version.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(version.as_bytes());
     for account in &blob.accounts {
         push_account(
             &mut bytes,
@@ -659,6 +746,16 @@ fn decode_mock_url(value: &str, key: &[u8; 32]) -> String {
         .ok()
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
         .unwrap_or_default()
+}
+
+fn next_mock_account_id(accounts: &[Account]) -> String {
+    let next = accounts
+        .iter()
+        .filter_map(|account| account.id.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    format!("{next:04}")
 }
 
 fn default_mock_blob() -> Blob {
