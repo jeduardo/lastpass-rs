@@ -86,7 +86,16 @@ fn prompt_password_with_pinentry(
     error: Option<&str>,
     description: &str,
 ) -> std::result::Result<String, PinentryError> {
-    let mut child = spawn_pinentry(pinentry)?;
+    let child = spawn_pinentry(pinentry)?;
+    prompt_password_with_pinentry_child(child, prompt, error, description)
+}
+
+fn prompt_password_with_pinentry_child(
+    mut child: Child,
+    prompt: &str,
+    error: Option<&str>,
+    description: &str,
+) -> std::result::Result<String, PinentryError> {
     let (stdin, stdout) = match take_pinentry_stdio(&mut child) {
         Ok(stdio) => stdio,
         Err(err) => {
@@ -109,19 +118,11 @@ fn prompt_password_with_pinentry(
         }
         send_pinentry_command(&mut input, "SETDESC", Some(description))?;
         expect_pinentry_ok(&mut output)?;
-        send_pinentry_option(
-            &mut input,
-            &mut output,
-            "ttytype",
-            crate::lpenv::var("TERM").ok(),
-        )?;
+        let term = crate::lpenv::var("TERM").ok();
+        send_pinentry_option(&mut input, &mut output, "ttytype", term)?;
         send_pinentry_option(&mut input, &mut output, "ttyname", tty_name_for_stdin())?;
-        send_pinentry_option(
-            &mut input,
-            &mut output,
-            "display",
-            crate::lpenv::var("DISPLAY").ok(),
-        )?;
+        let display = crate::lpenv::var("DISPLAY").ok();
+        send_pinentry_option(&mut input, &mut output, "display", display)?;
         send_pinentry_command(&mut input, "GETPIN", None)?;
         let password = read_pinentry_data(&mut output)?;
         Ok(pinentry_unescape(&password))

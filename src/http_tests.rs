@@ -651,6 +651,152 @@ fn mock_uploadaccounts_uses_target_share_key_and_round_trips_shared_entries() {
 }
 
 #[test]
+fn mock_uploadaccounts_sets_shared_fullname_when_group_is_empty() {
+    let client = HttpClient::mock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+    let store = ConfigStore::from_current();
+    store
+        .write_buffer("plaintext_key", &key)
+        .expect("write plaintext key");
+
+    let shared_blob = Blob {
+        version: 1,
+        local_version: false,
+        shares: vec![crate::blob::Share {
+            id: "88".to_string(),
+            name: "Shared-other".to_string(),
+            readonly: false,
+            key: Some([8u8; 32]),
+        }],
+        accounts: Vec::new(),
+        attachments: Vec::new(),
+    };
+    let local_blob = serde_json::to_vec(&shared_blob).expect("blob json");
+    store
+        .write_encrypted_buffer("blob.json", &local_blob, &key)
+        .expect("write seeded local blob");
+
+    client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "uploadaccounts"),
+                ("sharedfolderid", "88"),
+                (
+                    "name0",
+                    &crate::commands::data::encrypt_and_encode("entry", &[8u8; 32]).expect("name"),
+                ),
+                (
+                    "grouping0",
+                    &crate::commands::data::encrypt_and_encode("", &[8u8; 32]).expect("group"),
+                ),
+            ],
+        )
+        .expect("upload response");
+
+    let blob_response = client
+        .post_lastpass_bytes(None, "getaccts.php", None, &[])
+        .expect("blob response");
+    let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("private key");
+    let blob =
+        crate::blob::blob_parse(&blob_response.body, &key, Some(&private_key)).expect("parse blob");
+    let account = blob
+        .accounts
+        .iter()
+        .find(|account| account.name == "entry")
+        .expect("shared account");
+    assert_eq!(account.group, "");
+    assert_eq!(account.fullname, "Shared-other/entry");
+}
+
+#[test]
+fn mock_transport_skips_shares_without_keys_when_building_blob_bytes() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let transport = MockTransport::new();
+    let blob = Blob {
+        version: 9,
+        local_version: false,
+        shares: vec![crate::blob::Share {
+            id: "99".to_string(),
+            name: "Shared-missing".to_string(),
+            readonly: false,
+            key: None,
+        }],
+        accounts: vec![crate::blob::Account {
+            id: "9001".to_string(),
+            share_name: Some("Shared-missing".to_string()),
+            share_id: Some("99".to_string()),
+            share_readonly: false,
+            name: "entry".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "Shared-missing/entry".to_string(),
+            url: "https://example.com".to_string(),
+            url_encrypted: None,
+            username: "user".to_string(),
+            username_encrypted: None,
+            password: "pass".to_string(),
+            password_encrypted: None,
+            note: String::new(),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: String::new(),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: Vec::new(),
+        }],
+        attachments: Vec::new(),
+    };
+    transport.save_mock_remote_blob(&blob);
+
+    let response = transport.respond_bytes("getaccts.php", &[]);
+    let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+    let private_key = hex::decode(MOCK_PRIVATE_KEY_HEX).expect("private key");
+    let parsed =
+        crate::blob::blob_parse(&response.body, &key, Some(&private_key)).expect("parse blob");
+    assert!(!parsed.shares.iter().any(|share| share.id == "99"));
+    let account = parsed
+        .accounts
+        .iter()
+        .find(|account| account.id == "9001")
+        .expect("shared account still present");
+    assert_eq!(account.share_id, None);
+}
+
+#[test]
+fn mock_transport_ignores_invalid_plaintext_key_length_when_loading_local_seed() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let store = ConfigStore::from_current();
+    store
+        .write_buffer("plaintext_key", b"too-short")
+        .expect("write invalid plaintext key");
+    let transport = MockTransport::new();
+
+    let blob = transport.load_mock_remote_blob();
+    assert_eq!(blob.version, 123);
+    assert_eq!(blob.accounts.len(), 4);
+}
+
+#[test]
 fn free_post_lastpass_wrapper_uses_mock_transport_from_env() {
     let _guard = crate::lpenv::begin_test_overrides();
     crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");

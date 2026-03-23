@@ -1644,6 +1644,44 @@ fn maybe_log_access_skips_zero_id_entries() {
 }
 
 #[test]
+fn maybe_log_access_skips_zero_id_entries_when_sync_is_enabled() {
+    let temp = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+    let account = Account {
+        id: "0".to_string(),
+        share_name: None,
+        share_id: None,
+        share_readonly: false,
+        name: "generated".to_string(),
+        name_encrypted: None,
+        group: String::new(),
+        group_encrypted: None,
+        fullname: "generated".to_string(),
+        url: String::new(),
+        url_encrypted: None,
+        username: String::new(),
+        username_encrypted: None,
+        password: String::new(),
+        password_encrypted: None,
+        note: String::new(),
+        note_encrypted: None,
+        last_touch: String::new(),
+        last_modified_gmt: String::new(),
+        fav: false,
+        pwprotect: false,
+        attachkey: String::new(),
+        attachkey_encrypted: None,
+        attachpresent: false,
+        fields: Vec::new(),
+    };
+
+    maybe_log_access(&account, SyncMode::Auto).expect("skip zero id");
+}
+
+#[test]
 fn mock_mode_paths_cover_load_save_and_push_helpers() {
     let _env_guard = crate::lpenv::begin_test_overrides();
     crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");

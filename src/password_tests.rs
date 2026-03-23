@@ -14,7 +14,8 @@ use super::{
     PinentryError, askpass_program_from_env, askpass_program_from_value, decode_password_output,
     pinentry_disabled, pinentry_escape, pinentry_program_from_env, pinentry_unescape,
     prompt_password, prompt_password_from_tty_with, prompt_password_with_description_and_tty,
-    prompt_password_with_pinentry, take_pinentry_stdio, write_prompt_description,
+    prompt_password_with_pinentry, prompt_password_with_pinentry_child, take_pinentry_stdio,
+    write_prompt_description,
 };
 use tempfile::TempDir;
 
@@ -466,5 +467,31 @@ fn take_pinentry_stdio_reports_missing_stdout() {
         .expect("spawn child");
     let err = take_pinentry_stdio(&mut child).expect_err("missing stdout");
     let _ = child.wait();
+    assert!(matches!(err, PinentryError::Failed));
+}
+
+#[test]
+fn prompt_password_with_pinentry_child_reports_missing_stdin() {
+    let child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("exit 0")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn child");
+    let err = prompt_password_with_pinentry_child(child, "Master Password", None, "Prompt")
+        .expect_err("missing stdin");
+    assert!(matches!(err, PinentryError::Failed));
+}
+
+#[test]
+fn prompt_password_with_pinentry_child_reports_missing_stdout() {
+    let child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("exit 0")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn child");
+    let err = prompt_password_with_pinentry_child(child, "Master Password", None, "Prompt")
+        .expect_err("missing stdout");
     assert!(matches!(err, PinentryError::Failed));
 }

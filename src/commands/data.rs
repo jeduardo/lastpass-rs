@@ -197,9 +197,7 @@ pub(crate) fn maybe_push_account_update(
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    let Some((key, session)) = load_queue_credentials()? else {
-        return Ok(());
-    };
+    let (key, session) = load_queue_credentials()?;
     let params = build_show_website_params(account, blob, &session, &key)?;
     upload_queue::enqueue(&key, "show_website.php", params, true)
 }
@@ -209,9 +207,7 @@ pub(crate) fn maybe_push_account_share_move(
     blob: &Blob,
     original_share_id: Option<&str>,
 ) -> Result<()> {
-    let Some((key, session)) = load_queue_credentials()? else {
-        return Ok(());
-    };
+    let (key, session) = load_queue_credentials()?;
     let client = HttpClient::from_env()?;
     push_account_share_move_with_client(&client, &session, &key, account, blob, original_share_id)
 }
@@ -220,9 +216,7 @@ pub(crate) fn maybe_push_account_remove(account: &Account, sync_mode: SyncMode) 
     if matches!(sync_mode, SyncMode::No) {
         return Ok(());
     }
-    let Some((key, session)) = load_queue_credentials()? else {
-        return Ok(());
-    };
+    let (key, session) = load_queue_credentials()?;
     let params = build_show_website_delete_params(account, &session);
     upload_queue::enqueue(&key, "show_website.php", params, true)
 }
@@ -235,9 +229,7 @@ pub(crate) fn maybe_log_access(account: &Account, sync_mode: SyncMode) -> Result
         return Ok(());
     }
 
-    let Some((key, session)) = load_queue_credentials()? else {
-        return Ok(());
-    };
+    let (key, session) = load_queue_credentials()?;
     let params = build_log_access_params(account, &session);
     upload_queue::enqueue(&key, "loglogin.php", params, true)
 }
@@ -358,7 +350,7 @@ fn build_log_access_params(account: &Account, session: &Session) -> Vec<(String,
     params
 }
 
-fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
+fn load_queue_credentials() -> Result<([u8; KDF_HASH_LEN], Session)> {
     let key = agent_get_decryption_key().map_err(map_decryption_key_error)?;
 
     let session = crate::session::session_load(&key)
@@ -366,7 +358,7 @@ fn load_queue_credentials() -> Result<Option<([u8; KDF_HASH_LEN], Session)>> {
         .ok_or(LpassError::User(
             "Could not find session. Perhaps you need to login with `lpass login`.",
         ))?;
-    Ok(Some((key, session)))
+    Ok((key, session))
 }
 
 fn map_decryption_key_error(err: LpassError) -> LpassError {
