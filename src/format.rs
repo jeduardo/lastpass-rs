@@ -150,6 +150,7 @@ fn format_account_item(out: &mut String, spec: char, account: &Account, add_slas
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
 
     fn sample_account() -> Account {
         Account {
@@ -164,17 +165,17 @@ mod tests {
             fullname: "group/test".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "user".to_string(),
+            username: Zeroizing::new("user".to_string()),
             username_encrypted: None,
-            password: "pass".to_string(),
+            password: Zeroizing::new("pass".to_string()),
             password_encrypted: None,
-            note: "".to_string(),
+            note: Zeroizing::new("".to_string()),
             note_encrypted: None,
             last_touch: "0".to_string(),
             last_modified_gmt: "0".to_string(),
             fav: false,
             pwprotect: false,
-            attachkey: "".to_string(),
+            attachkey: Zeroizing::new("".to_string()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

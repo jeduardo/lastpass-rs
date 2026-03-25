@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rand::{Rng, thread_rng};
+use zeroize::Zeroizing;
 
 use crate::blob::{Account, Blob, Share};
 use crate::commands::argparse::parse_sync_option;
@@ -161,12 +162,12 @@ fn update_existing_account(
     let mut working = expanded.clone().unwrap_or(original);
 
     if let Some(value) = parsed.username.as_ref() {
-        working.username = value.clone();
+        working.username = Zeroizing::new(value.clone());
     }
     if let Some(value) = parsed.url.as_ref() {
         working.url = value.clone();
     }
-    working.password = password.to_string();
+    working.password = Zeroizing::new(password.to_string());
 
     let updated = if expanded.is_some() {
         collapse_notes(&working)
@@ -239,17 +240,17 @@ fn build_account(fullname: &str, blob: &Blob) -> Result<Account, String> {
         fullname: fullname.to_string(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -260,9 +261,9 @@ fn build_account(fullname: &str, blob: &Blob) -> Result<Account, String> {
 }
 
 fn populate_new_account(mut account: Account, parsed: &GenerateArgs, password: &str) -> Account {
-    account.username = parsed.username.clone().unwrap_or_default();
+    account.username = Zeroizing::new(parsed.username.clone().unwrap_or_default());
     account.url = parsed.url.clone().unwrap_or_default();
-    account.password = password.to_string();
+    account.password = Zeroizing::new(password.to_string());
     account
 }
 
@@ -338,6 +339,7 @@ fn split_group(full: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
 
     fn account(id: &str, name: &str, group: &str) -> Account {
         let fullname = if group.is_empty() {
@@ -357,17 +359,17 @@ mod tests {
             fullname,
             url: String::new(),
             url_encrypted: None,
-            username: String::new(),
+            username: Zeroizing::new(String::new()),
             username_encrypted: None,
-            password: String::new(),
+            password: Zeroizing::new(String::new()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),
@@ -588,7 +590,7 @@ mod tests {
         let mut account = account("0001", "note", "team");
         account.url = "http://sn".to_string();
         account.note =
-            "NoteType: Server\nHostname: srv\nUsername: old-user\nPassword: old-pass".to_string();
+            Zeroizing::new("NoteType: Server\nHostname: srv\nUsername: old-user\nPassword: old-pass".to_string());
 
         let updated = update_existing_account(
             &mut account,

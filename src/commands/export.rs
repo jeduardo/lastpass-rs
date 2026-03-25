@@ -96,9 +96,9 @@ fn parse_fields(value: &str) -> Vec<String> {
 fn export_value(account: &Account, field: &str) -> String {
     match field {
         "url" => account.url.clone(),
-        "username" => account.username.clone(),
-        "password" => account.password.clone(),
-        "extra" => account.note.clone(),
+        "username" => account.username.to_string(),
+        "password" => account.password.to_string(),
+        "extra" => account.note.to_string(),
         "name" => account.name.clone(),
         "grouping" => grouping_value(account),
         "fav" => bool_str(account.fav),
@@ -193,6 +193,7 @@ mod tests {
     };
     use crate::kdf::kdf_decryption_key;
     use tempfile::TempDir;
+    use zeroize::Zeroizing;
 
     fn account() -> Account {
         Account {
@@ -207,17 +208,17 @@ mod tests {
             fullname: "team/entry".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "alice".to_string(),
+            username: Zeroizing::new("alice".to_string()),
             username_encrypted: None,
-            password: "secret".to_string(),
+            password: Zeroizing::new("secret".to_string()),
             password_encrypted: None,
-            note: "line1\nline2".to_string(),
+            note: Zeroizing::new("line1\nline2".to_string()),
             note_encrypted: None,
             last_touch: "yesterday".to_string(),
             last_modified_gmt: "now".to_string(),
             fav: true,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: true,
             fields: Vec::new(),

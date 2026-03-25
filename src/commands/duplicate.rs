@@ -92,6 +92,7 @@ fn next_id(blob: &Blob) -> String {
 mod tests {
     use super::*;
     use crate::blob::Account;
+    use zeroize::Zeroizing;
 
     fn account(id: &str, name: &str, group: &str) -> Account {
         let fullname = if group.is_empty() {
@@ -111,17 +112,17 @@ mod tests {
             fullname,
             url: String::new(),
             url_encrypted: None,
-            username: String::new(),
+            username: Zeroizing::new(String::new()),
             username_encrypted: None,
-            password: String::new(),
+            password: Zeroizing::new(String::new()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

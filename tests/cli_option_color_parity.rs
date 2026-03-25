@@ -6,6 +6,7 @@ use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 fn run(args: &[&str]) -> (i32, String, String) {
     let exe = env!("CARGO_BIN_EXE_lpass");
@@ -69,17 +70,17 @@ fn seed_logged_in_blob(home: &Path) {
             fullname: "group/present-entry".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "user".to_string(),
+            username: Zeroizing::new("user".to_string()),
             username_encrypted: None,
-            password: "secret".to_string(),
+            password: Zeroizing::new("secret".to_string()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

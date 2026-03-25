@@ -14,6 +14,8 @@ use crate::session::Session;
 use crate::upload_queue;
 use serde_json;
 use std::time::{Duration, SystemTime};
+#[cfg(test)]
+use zeroize::Zeroizing;
 
 const BLOB_JSON_NAME: &str = "blob.json";
 
@@ -675,17 +677,17 @@ fn mock_account(
         fullname,
         url: url.to_string(),
         url_encrypted: None,
-        username: username.to_string(),
+        username: Zeroizing::new(username.to_string()),
         username_encrypted: None,
-        password: password.to_string(),
+        password: Zeroizing::new(password.to_string()),
         password_encrypted: None,
-        note: note.to_string(),
+        note: Zeroizing::new(note.to_string()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),

@@ -793,6 +793,7 @@ mod tests {
     use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
     use crate::session::{Session, session_save};
     use tempfile::TempDir;
+    use zeroize::Zeroizing;
 
     fn account(id: &str, name: &str, group: &str) -> Account {
         let fullname = if group.is_empty() {
@@ -812,17 +813,17 @@ mod tests {
             fullname,
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "alice".to_string(),
+            username: Zeroizing::new("alice".to_string()),
             username_encrypted: None,
-            password: "secret".to_string(),
+            password: Zeroizing::new("secret".to_string()),
             password_encrypted: None,
-            note: "note".to_string(),
+            note: Zeroizing::new("note".to_string()),
             note_encrypted: None,
             last_touch: "touch".to_string(),
             last_modified_gmt: "gmt".to_string(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),
@@ -872,21 +873,21 @@ mod tests {
             accounts: vec![
                 {
                     let mut acct = account("0001", "test-account", "test-group");
-                    acct.username = "xyz@example.com".to_string();
-                    acct.password = "test-account-password".to_string();
+                    acct.username = Zeroizing::new("xyz@example.com".to_string());
+                    acct.password = Zeroizing::new("test-account-password".to_string());
                     acct.url = "https://test-url.example.com/".to_string();
                     acct
                 },
                 {
                     let mut acct = account("0002", "test-note", "test-group");
                     acct.url = "http://sn".to_string();
-                    acct.note = "NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password".to_string();
+                    acct.note = Zeroizing::new("NoteType: Server\nHostname: foo.example.com\nUsername: test-note-user\nPassword: test-note-password".to_string());
                     acct
                 },
                 {
                     let mut acct = account("0003", "test-reprompt-account", "test-group");
-                    acct.username = "xyz@example.com".to_string();
-                    acct.password = "test-account-password".to_string();
+                    acct.username = Zeroizing::new("xyz@example.com".to_string());
+                    acct.password = Zeroizing::new("test-account-password".to_string());
                     acct.url = "https://test-url.example.com/".to_string();
                     acct.pwprotect = true;
                     acct
@@ -1003,7 +1004,7 @@ mod tests {
         let err = decode_attachment_key(&acct).expect_err("missing");
         assert!(err.contains("Missing attach key"));
 
-        acct.attachkey = "zz".repeat(32);
+        acct.attachkey = Zeroizing::new("zz".repeat(32));
         let err = decode_attachment_key(&acct).expect_err("invalid");
         assert!(err.contains("Invalid attach key"));
     }
@@ -1164,7 +1165,7 @@ mod tests {
     #[test]
     fn format_json_escapes_quoted_fields() {
         let mut acct = account("0003", "quoted", "team");
-        acct.note = "line1\n\"line2\"".to_string();
+        acct.note = Zeroizing::new("line1\n\"line2\"".to_string());
         let json = format_json(&[&acct]);
         assert!(json.contains("\"id\": \"0003\""));
         assert!(json.contains("\\n"));
@@ -1254,7 +1255,7 @@ mod tests {
             .iter_mut()
             .find(|account| account.fullname == "test-group/test-account")
             .expect("mock entry");
-        entry.note = "line one\nline two".to_string();
+        entry.note = Zeroizing::new("line one\nline two".to_string());
         entry.fields.push(Field {
             name: "Environment".to_string(),
             field_type: "text".to_string(),
@@ -1264,7 +1265,7 @@ mod tests {
         });
 
         let attach_key = [9u8; KDF_HASH_LEN];
-        entry.attachkey = hex::encode(attach_key);
+        entry.attachkey = Zeroizing::new(hex::encode(attach_key));
         entry.attachpresent = true;
 
         let encrypted_filename = aes_encrypt_lastpass(b"sample.txt", &attach_key).expect("encrypt");
@@ -1307,7 +1308,7 @@ mod tests {
         let key = [7u8; KDF_HASH_LEN];
         write_plaintext_key_and_verify(&key);
         let mut acct = account("0001", "entry", "team");
-        acct.attachkey = "00".repeat(32);
+        acct.attachkey = Zeroizing::new("00".repeat(32));
         let mut att = attachment("1", "0001");
         att.storagekey = "mock-storage-0001-text".to_string();
 

@@ -7,6 +7,7 @@ use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
 
@@ -77,17 +78,17 @@ fn shared_account(
         fullname: fullname.to_string(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),

@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use lpass_core::blob::{Account, Blob};
 use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
+use zeroize::Zeroizing;
 
 static NEXT_TEST_HOME_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -71,17 +72,17 @@ fn seed_default_blob(home: &Path) {
                 fullname: "test-group/test-account".to_string(),
                 url: "https://example.com".to_string(),
                 url_encrypted: None,
-                username: "xyz@example.com".to_string(),
+                username: Zeroizing::new("xyz@example.com".to_string()),
                 username_encrypted: None,
-                password: "secret".to_string(),
+                password: Zeroizing::new("secret".to_string()),
                 password_encrypted: None,
-                note: "sample note".to_string(),
+                note: Zeroizing::new("sample note".to_string()),
                 note_encrypted: None,
                 last_touch: String::new(),
                 last_modified_gmt: String::new(),
                 fav: false,
                 pwprotect: false,
-                attachkey: String::new(),
+                attachkey: Zeroizing::new(String::new()),
                 attachkey_encrypted: None,
                 attachpresent: false,
                 fields: Vec::new(),
@@ -98,17 +99,17 @@ fn seed_default_blob(home: &Path) {
                 fullname: "test-group/test-note".to_string(),
                 url: "http://sn".to_string(),
                 url_encrypted: None,
-                username: String::new(),
+                username: Zeroizing::new(String::new()),
                 username_encrypted: None,
-                password: String::new(),
+                password: Zeroizing::new(String::new()),
                 password_encrypted: None,
-                note: "NoteType:Secure Note\nField:Value".to_string(),
+                note: Zeroizing::new("NoteType:Secure Note\nField:Value".to_string()),
                 note_encrypted: None,
                 last_touch: String::new(),
                 last_modified_gmt: String::new(),
                 fav: false,
                 pwprotect: false,
-                attachkey: String::new(),
+                attachkey: Zeroizing::new(String::new()),
                 attachkey_encrypted: None,
                 attachpresent: false,
                 fields: Vec::new(),

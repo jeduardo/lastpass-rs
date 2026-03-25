@@ -8,6 +8,7 @@ use crate::http::HttpClient;
 use crate::terminal::{self, ColorMode};
 use crate::xml::ShareParseError;
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 fn run_inner_with<L, A>(
     args: &[String],
@@ -81,17 +82,17 @@ fn shared_account(id: &str, name: &str, fullname: &str, share_id: &str) -> Accou
         fullname: fullname.to_string(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),

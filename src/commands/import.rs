@@ -12,6 +12,7 @@ use crate::http::HttpClient;
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_load};
 use crate::terminal;
+use zeroize::Zeroizing;
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -112,13 +113,13 @@ fn parse_import_accounts(input: &str) -> Result<Vec<Account>, String> {
             account.url = record.get(idx).cloned().unwrap_or_default();
         }
         if let Some(idx) = username_idx {
-            account.username = record.get(idx).cloned().unwrap_or_default();
+            account.username = Zeroizing::new(record.get(idx).cloned().unwrap_or_default());
         }
         if let Some(idx) = password_idx {
-            account.password = record.get(idx).cloned().unwrap_or_default();
+            account.password = Zeroizing::new(record.get(idx).cloned().unwrap_or_default());
         }
         if let Some(idx) = extra_idx {
-            account.note = record.get(idx).cloned().unwrap_or_default();
+            account.note = Zeroizing::new(record.get(idx).cloned().unwrap_or_default());
         }
         if let Some(idx) = name_idx {
             account.name = record.get(idx).cloned().unwrap_or_default();
@@ -230,17 +231,17 @@ fn new_import_account() -> Account {
         fullname: String::new(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -374,6 +375,7 @@ mod tests {
     use crate::session::session_save;
     use std::fs;
     use tempfile::{NamedTempFile, TempDir};
+    use zeroize::Zeroizing;
 
     #[test]
     fn parse_csv_records_handles_quotes_and_commas() {
@@ -402,9 +404,9 @@ mod tests {
         assert_eq!(accounts.len(), 1);
         let account = &accounts[0];
         assert_eq!(account.url, "https://x");
-        assert_eq!(account.username, "u");
-        assert_eq!(account.password, "p");
-        assert_eq!(account.note, "n");
+        assert_eq!(*account.username, "u");
+        assert_eq!(*account.password, "p");
+        assert_eq!(*account.note, "n");
         assert_eq!(account.name, "entry");
         assert_eq!(account.group, "team");
         assert_eq!(account.fullname, "team/entry");
@@ -461,14 +463,14 @@ mod tests {
             attachments: Vec::new(),
         };
         blob.accounts[0].name = "entry".to_string();
-        blob.accounts[0].username = "u".to_string();
-        blob.accounts[0].password = "p".to_string();
+        blob.accounts[0].username = Zeroizing::new("u".to_string());
+        blob.accounts[0].password = Zeroizing::new("p".to_string());
         blob.accounts[0].url = "https://x".to_string();
 
         let mut imported = vec![new_import_account(), new_import_account()];
         imported[0].name = "entry".to_string();
-        imported[0].username = "u".to_string();
-        imported[0].password = "p".to_string();
+        imported[0].username = Zeroizing::new("u".to_string());
+        imported[0].password = Zeroizing::new("p".to_string());
         imported[0].url = "https://x".to_string();
         imported[1].name = "entry2".to_string();
 
@@ -625,9 +627,9 @@ mod tests {
         account.name = "entry".to_string();
         account.group = "team".to_string();
         account.url = "https://example.com".to_string();
-        account.username = "alice".to_string();
-        account.password = "secret".to_string();
-        account.note = "note".to_string();
+        account.username = Zeroizing::new("alice".to_string());
+        account.password = Zeroizing::new("secret".to_string());
+        account.note = Zeroizing::new("note".to_string());
         account.fav = true;
 
         let session = Session {

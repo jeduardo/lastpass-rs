@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::blob::{Account, Field};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum NoteType {
@@ -374,11 +375,11 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
         fullname: account.fullname.clone(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: account.last_touch.clone(),
         last_modified_gmt: account.last_modified_gmt.clone(),
@@ -422,9 +423,9 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
                 field.value.push('\n');
                 field.value.push_str(line);
             } else if name == "Username" {
-                expanded.username = value.to_string();
+                expanded.username = Zeroizing::new(value.to_string());
             } else if name == "Password" {
-                expanded.password = value.to_string();
+                expanded.password = Zeroizing::new(value.to_string());
             } else if name == "URL" {
                 expanded.url = value.to_string();
             } else if name == "Notes" {
@@ -434,7 +435,7 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
                 if note.ends_with('\n') {
                     note.pop();
                 }
-                expanded.note = note;
+                expanded.note = Zeroizing::new(note);
                 break;
             } else {
                 let field = Field {
@@ -467,7 +468,7 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
     {
         expanded.note = account.note.clone();
     } else if expanded.note.is_empty() {
-        expanded.note = String::new();
+        expanded.note = Zeroizing::new(String::new());
     }
 
     Some(expanded)
@@ -519,11 +520,11 @@ pub fn collapse_notes(account: &Account) -> Account {
         fullname: account.fullname.clone(),
         url: "http://sn".to_string(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note,
+        note: Zeroizing::new(note),
         note_encrypted: None,
         last_touch: account.last_touch.clone(),
         last_modified_gmt: account.last_modified_gmt.clone(),
@@ -548,6 +549,7 @@ fn parse_note_type(note: &str) -> NoteType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
 
     fn base_secure_note(note: &str) -> Account {
         Account {
@@ -562,17 +564,17 @@ mod tests {
             fullname: "note".to_string(),
             url: "http://sn".to_string(),
             url_encrypted: None,
-            username: "".to_string(),
+            username: Zeroizing::new("".to_string()),
             username_encrypted: None,
-            password: "".to_string(),
+            password: Zeroizing::new("".to_string()),
             password_encrypted: None,
-            note: note.to_string(),
+            note: Zeroizing::new(note.to_string()),
             note_encrypted: None,
             last_touch: "".to_string(),
             last_modified_gmt: "".to_string(),
             fav: false,
             pwprotect: false,
-            attachkey: "".to_string(),
+            attachkey: Zeroizing::new("".to_string()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),
@@ -584,8 +586,8 @@ mod tests {
         let note = "NoteType: Server\nHostname: foo\nUsername: user\nPassword: pass";
         let account = base_secure_note(note);
         let expanded = expand_notes(&account).expect("expanded");
-        assert_eq!(expanded.username, " user");
-        assert_eq!(expanded.password, " pass");
+        assert_eq!(*expanded.username, " user");
+        assert_eq!(*expanded.password, " pass");
         assert_eq!(expanded.fields.len(), 2);
         assert_eq!(expanded.fields[0].name, "Hostname");
         assert_eq!(expanded.fields[1].name, "NoteType");
@@ -596,7 +598,7 @@ mod tests {
         let note = "NoteType: Secure\nNotes: line1\nline2\nUsername: ignored";
         let account = base_secure_note(note);
         let expanded = expand_notes(&account).expect("expanded");
-        assert_eq!(expanded.note, " line1\nline2\nUsername: ignored");
+        assert_eq!(*expanded.note, " line1\nline2\nUsername: ignored");
     }
 
     #[test]
@@ -680,10 +682,10 @@ mod tests {
             value_encrypted: None,
             checked: false,
         });
-        account.username = " alice ".to_string();
-        account.password = " secret ".to_string();
+        account.username = Zeroizing::new(" alice ".to_string());
+        account.password = Zeroizing::new(" secret ".to_string());
         account.url = " https://example.com ".to_string();
-        account.note = " memo ".to_string();
+        account.note = Zeroizing::new(" memo ".to_string());
 
         let collapsed = collapse_notes(&account);
         assert_eq!(collapsed.url, "http://sn");

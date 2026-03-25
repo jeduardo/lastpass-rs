@@ -5,16 +5,15 @@
 
 An unofficial Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
 
-  ⚠️ **WARNING** ⚠️ **Alpha software:** 
-  This project is under heavy active development.
-  Expect breaking changes between commits, missing features, and partial behavior parity.
-  Do not rely on it as your only way to access production vault data yet.
-  This code was not audited for security.
-  **Use at your own risk**
+  ⚠️ **WARNING** ⚠️ **Beta software:**
+  This project has reached feature parity with the original C client,
+  but may still contain bugs or edge cases.
+  It was built with the help of [Codex](https://openai.com/index/codex/) and security reviewed with [Claude Code](https://claude.ai/claude-code).
+  **Use at your own risk.**
 
 ## Status
 
-This project is in active development. The goal is:
+This project has reached feature parity with the C client. The goal is:
 
 - full feature parity with `lastpass-cli`
 - same command interface (flags/options)
@@ -309,7 +308,7 @@ When running under local `act`, the coverage workflow generates the LCOV artifac
 
 ## AI-assisted development
 
-This project is built with support from AI tooling as part of the development workflow. All generated changes are reviewed and validated with compilation and tests.
+This project is built with support from AI tooling as part of the development workflow. Feature development uses [Codex](https://openai.com/index/codex/) and [Claude Code](https://claude.ai/claude-code). Security review was performed with Claude Code (see `docs/security-review-2026-03-25.md`). All generated changes are reviewed and validated with compilation and tests.
 
 ## Credits
 
