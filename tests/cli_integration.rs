@@ -10,6 +10,7 @@ use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::{KDF_HASH_LEN, kdf_decryption_key};
 use lpass_core::session::{Session, session_save_with_store};
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
 
@@ -44,17 +45,17 @@ fn account(id: &str, name: &str, group: &str) -> Account {
         fullname,
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -148,17 +149,17 @@ fn write_session_and_blob(home: &Path, key: &[u8; KDF_HASH_LEN]) {
         fullname: "team/entry".to_string(),
         url: "https://example.com".to_string(),
         url_encrypted: None,
-        username: "user".to_string(),
+        username: Zeroizing::new("user".to_string()),
         username_encrypted: None,
-        password: "secret".to_string(),
+        password: Zeroizing::new("secret".to_string()),
         password_encrypted: None,
-        note: "note".to_string(),
+        note: Zeroizing::new("note".to_string()),
         note_encrypted: None,
         last_touch: "now".to_string(),
         last_modified_gmt: "now".to_string(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -480,8 +481,8 @@ fn generate_updates_secure_note_fields() {
     let mut secure_note = account("0001", "server-note", "team");
     secure_note.url = "http://sn".to_string();
     secure_note.note =
-        "NoteType: Server\nHostname:server.example.com\nUsername:old-user\nPassword:old-pass"
-            .to_string();
+        Zeroizing::new("NoteType: Server\nHostname:server.example.com\nUsername:old-user\nPassword:old-pass"
+            .to_string());
     let blob = Blob {
         version: 1,
         local_version: false,
@@ -583,8 +584,8 @@ fn import_from_stdin_reports_removed_duplicates_in_mock_mode() {
     let key = [9u8; KDF_HASH_LEN];
     let mut existing = account("0001", "entry", "");
     existing.url = "https://example.com".to_string();
-    existing.username = "alice".to_string();
-    existing.password = "secret".to_string();
+    existing.username = Zeroizing::new("alice".to_string());
+    existing.password = Zeroizing::new("secret".to_string());
     let blob = Blob {
         version: 1,
         local_version: false,
@@ -926,17 +927,17 @@ fn export_sync_no_skips_access_log_queue_and_sync_still_succeeds() {
             fullname: "team/entry".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "user".to_string(),
+            username: Zeroizing::new("user".to_string()),
             username_encrypted: None,
-            password: "secret".to_string(),
+            password: Zeroizing::new("secret".to_string()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: "now".to_string(),
             last_modified_gmt: "now".to_string(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

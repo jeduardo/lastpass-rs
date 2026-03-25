@@ -6,6 +6,7 @@ use crate::crypto::{
 use crate::error::{LpassError, Result};
 use crate::kdf::KDF_HASH_LEN;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Field {
@@ -32,17 +33,17 @@ pub struct Account {
     pub fullname: String,
     pub url: String,
     pub url_encrypted: Option<String>,
-    pub username: String,
+    pub username: Zeroizing<String>,
     pub username_encrypted: Option<String>,
-    pub password: String,
+    pub password: Zeroizing<String>,
     pub password_encrypted: Option<String>,
-    pub note: String,
+    pub note: Zeroizing<String>,
     pub note_encrypted: Option<String>,
     pub last_touch: String,
     pub last_modified_gmt: String,
     pub fav: bool,
     pub pwprotect: bool,
-    pub attachkey: String,
+    pub attachkey: Zeroizing<String>,
     pub attachkey_encrypted: Option<String>,
     pub attachpresent: bool,
     pub fields: Vec<Field>,
@@ -293,17 +294,17 @@ fn parse_account(chunk: &mut ChunkCursor<'_>, key: &[u8; KDF_HASH_LEN]) -> Resul
         fullname: String::new(),
         url,
         url_encrypted,
-        username,
+        username: Zeroizing::new(username),
         username_encrypted,
-        password,
+        password: Zeroizing::new(password),
         password_encrypted,
-        note,
+        note: Zeroizing::new(note),
         note_encrypted,
         last_touch,
         last_modified_gmt,
         fav,
         pwprotect,
-        attachkey,
+        attachkey: Zeroizing::new(attachkey),
         attachkey_encrypted: if attachkey_encrypted.is_empty() {
             None
         } else {
@@ -456,7 +457,7 @@ fn read_plain_string(chunk: &mut ChunkCursor<'_>) -> Result<String> {
     if item.is_empty() {
         return Ok(String::new());
     }
-    Ok(String::from_utf8_lossy(item).to_string())
+    String::from_utf8(item.to_vec()).map_err(|_| LpassError::InvalidUtf8)
 }
 
 fn read_hex_string(chunk: &mut ChunkCursor<'_>) -> Result<String> {
@@ -465,7 +466,7 @@ fn read_hex_string(chunk: &mut ChunkCursor<'_>) -> Result<String> {
         return Ok(String::new());
     }
     let decoded = hex::decode(item).map_err(|_| LpassError::Crypto("hex decode failed"))?;
-    Ok(String::from_utf8_lossy(&decoded).to_string())
+    String::from_utf8(decoded).map_err(|_| LpassError::InvalidUtf8)
 }
 
 fn read_crypt_string(
@@ -479,7 +480,10 @@ fn read_crypt_string(
     }
 
     match aes_decrypt_lastpass(item, key) {
-        Ok(bytes) => Ok((String::from_utf8_lossy(&bytes).to_string(), Some(encrypted))),
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => Ok((text, Some(encrypted))),
+            Err(_) => Ok((String::new(), Some(encrypted))),
+        },
         Err(_) => Ok((String::new(), Some(encrypted))),
     }
 }
@@ -900,7 +904,7 @@ mod tests {
         assert_eq!(account.name, "");
         assert_eq!(account.group, "");
         assert_eq!(account.fullname, "");
-        assert_eq!(account.attachkey, "attach-secret");
+        assert_eq!(*account.attachkey, "attach-secret");
         assert_eq!(
             account.attachkey_encrypted.as_deref(),
             Some(attach_b64.as_str())

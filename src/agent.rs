@@ -35,13 +35,16 @@ pub fn maybe_run_agent(args: &[String]) -> Option<i32> {
 }
 
 pub fn agent_get_decryption_key() -> Result<[u8; KDF_HASH_LEN]> {
-    if let Some(buffer) = config_read_buffer("plaintext_key")? {
+    if let Some(mut buffer) = config_read_buffer("plaintext_key")? {
         if buffer.len() == KDF_HASH_LEN {
             let mut key = [0u8; KDF_HASH_LEN];
             key.copy_from_slice(&buffer);
+            buffer.zeroize();
             if verify_key(&key)? {
                 return Ok(key);
             }
+        } else {
+            buffer.zeroize();
         }
         let _ = config_unlink("plaintext_key");
     }

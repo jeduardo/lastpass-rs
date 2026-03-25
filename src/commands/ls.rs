@@ -8,6 +8,7 @@ use crate::commands::data::{SyncMode, load_blob};
 use crate::format::format_account;
 use crate::format::get_display_fullname;
 use crate::terminal::{self, BOLD, FG_BLUE, FG_CYAN, FG_GREEN, NO_BOLD, RESET};
+use zeroize::Zeroizing;
 
 pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
@@ -213,17 +214,17 @@ fn synthetic_share_account(share: &crate::blob::Share) -> Account {
         fullname: format!("{}/", share.name),
         url: "http://group".to_string(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -279,6 +280,7 @@ fn render_tree_lines_inner(node: &LsNode, format: &str, level: usize, out: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
 
     fn account(
         id: &str,
@@ -300,17 +302,17 @@ mod tests {
             fullname: fullname.to_string(),
             url: url.to_string(),
             url_encrypted: None,
-            username: String::new(),
+            username: Zeroizing::new(String::new()),
             username_encrypted: None,
-            password: String::new(),
+            password: Zeroizing::new(String::new()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

@@ -8,6 +8,8 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
 
+use zeroize::Zeroizing;
+
 use crate::blob::{Account, Blob};
 use crate::config::ConfigStore;
 use crate::crypto::{
@@ -396,15 +398,15 @@ impl MockTransport {
             }
             let username_key = format!("username{index}");
             if let Some(value) = map.get(&username_key) {
-                account.username = decrypt_mock_value(value, key);
+                account.username = Zeroizing::new(decrypt_mock_value(value, key));
             }
             let password_key = format!("password{index}");
             if let Some(value) = map.get(&password_key) {
-                account.password = decrypt_mock_value(value, key);
+                account.password = Zeroizing::new(decrypt_mock_value(value, key));
             }
             let extra_key = format!("extra{index}");
             if let Some(value) = map.get(&extra_key) {
-                account.note = decrypt_mock_value(value, key);
+                account.note = Zeroizing::new(decrypt_mock_value(value, key));
             }
             let fav_key = format!("fav{index}");
             if let Some(value) = map.get(&fav_key) {
@@ -477,13 +479,13 @@ impl MockTransport {
             account.group = decrypt_mock_value(value, &self.decryption_key);
         }
         if let Some(value) = map.get("username") {
-            account.username = decrypt_mock_value(value, &self.decryption_key);
+            account.username = Zeroizing::new(decrypt_mock_value(value, &self.decryption_key));
         }
         if let Some(value) = map.get("password") {
-            account.password = decrypt_mock_value(value, &self.decryption_key);
+            account.password = Zeroizing::new(decrypt_mock_value(value, &self.decryption_key));
         }
         if let Some(value) = map.get("extra") {
-            account.note = decrypt_mock_value(value, &self.decryption_key);
+            account.note = Zeroizing::new(decrypt_mock_value(value, &self.decryption_key));
         }
         if let Some(value) = map.get("url") {
             account.url = decode_mock_url(value, &self.decryption_key);
@@ -760,17 +762,17 @@ fn default_mock_account(
         fullname: format!("{group}/{name}"),
         url: url.to_string(),
         url_encrypted: None,
-        username: username.to_string(),
+        username: Zeroizing::new(username.to_string()),
         username_encrypted: None,
-        password: password.to_string(),
+        password: Zeroizing::new(password.to_string()),
         password_encrypted: None,
-        note: note.to_string(),
+        note: Zeroizing::new(note.to_string()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),

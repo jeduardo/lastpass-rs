@@ -8,6 +8,7 @@ use crate::config::{
 use crate::kdf::KDF_HASH_LEN;
 use crate::session::{Session, session_save};
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 fn account(id: &str, name: &str, fullname: &str, share_name: Option<&str>) -> Account {
     Account {
@@ -22,17 +23,17 @@ fn account(id: &str, name: &str, fullname: &str, share_name: Option<&str>) -> Ac
         fullname: fullname.to_string(),
         url: String::new(),
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -402,8 +403,8 @@ fn configure_logged_in_mock_home() -> (
             let mut acct = account("0001", "test-account", "test-group/test-account", None);
             acct.group = "test-group".to_string();
             acct.url = "https://example.com".to_string();
-            acct.username = "user".to_string();
-            acct.password = "secret".to_string();
+            acct.username = Zeroizing::new("user".to_string());
+            acct.password = Zeroizing::new("secret".to_string());
             acct
         }],
         attachments: Vec::new(),
@@ -418,9 +419,9 @@ fn mock_blob_with_shared_entry() -> crate::blob::Blob {
     account.share_id = Some("77".to_string());
     account.group = "apps".to_string();
     account.url = "https://example.com".to_string();
-    account.username = "user".to_string();
-    account.password = "pass".to_string();
-    account.note = "note".to_string();
+    account.username = Zeroizing::new("user".to_string());
+    account.password = Zeroizing::new("pass".to_string());
+    account.note = Zeroizing::new("note".to_string());
 
     crate::blob::Blob {
         version: 1,

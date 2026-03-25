@@ -248,55 +248,51 @@ Any same-user process can connect and retrieve the key without rate limiting or 
 
 ## 10. Mitigation Plan
 
-### Priority 1 -- Dependency vulnerabilities (fix immediately)
+### Priority 1 -- Dependency vulnerabilities (fix immediately) -- FIXED 2026-03-25
 
 **Action:** Run `cargo update` to pull patched transitive dependencies.
 
 Target fixes:
-- `aws-lc-sys` >= 0.39.0 (RUSTSEC-2026-0044, RUSTSEC-2026-0048)
-- `bytes` >= 1.11.1 (RUSTSEC-2026-0007)
-- `quinn-proto` >= 0.11.14 (RUSTSEC-2026-0037)
-- `rustls-webpki` >= 0.103.10 (RUSTSEC-2026-0049)
-- `time` >= 0.3.47 (RUSTSEC-2026-0009)
+- `aws-lc-sys` >= 0.39.0 (RUSTSEC-2026-0044, RUSTSEC-2026-0048) -- FIXED
+- `bytes` >= 1.11.1 (RUSTSEC-2026-0007) -- FIXED
+- `quinn-proto` >= 0.11.14 (RUSTSEC-2026-0037) -- FIXED
+- `rustls-webpki` >= 0.103.10 (RUSTSEC-2026-0049) -- FIXED
+- `time` >= 0.3.47 (RUSTSEC-2026-0009) -- FIXED
 
 **Cannot fix:** `rsa` 0.9.10 Marvin Attack (RUSTSEC-2023-0071) -- no patched version exists. Monitor for updates.
 
 **Effort:** Low (single `cargo update` + CI pass).
 
-### Priority 2 -- Memory hygiene for vault secrets (high impact)
+### Priority 2 -- Memory hygiene for vault secrets (high impact) -- FIXED 2026-03-25
 
 **Action:** Wrap sensitive `Account` fields in `Zeroizing<String>` from the `zeroize` crate (already a dependency).
 
-**Files to modify:**
-- `src/blob.rs` -- Change `password`, `username`, `note`, `attachkey` fields to `Zeroizing<String>`
+**Files modified:**
+- `Cargo.toml` -- Enabled `serde` feature on `zeroize`
+- `src/blob.rs` -- Changed `password`, `username`, `note`, `attachkey` fields to `Zeroizing<String>`
 - `src/agent.rs` -- Zeroize intermediate `Vec<u8>` buffers in `agent_get_decryption_key()` after copying to fixed-size array
+- All command files, test files, mock files updated to use `Zeroizing::new()` for struct construction
 
-**Effort:** Medium. Requires updating all consumers of `Account` fields. `Zeroizing<String>` implements `Deref<Target=String>`, so most call sites need minimal changes. Serde derives will need custom handling.
+**Effort:** Medium. Required updating all consumers of `Account` fields.
 
-### Priority 3 -- Replace `from_utf8_lossy` in re-upload paths (data safety)
+### Priority 3 -- Replace `from_utf8_lossy` in re-upload paths (data safety) -- FIXED 2026-03-25
 
-**Action:** In blob parsing paths where data may be re-uploaded to the server, replace `String::from_utf8_lossy` with `String::from_utf8` and propagate the error. Keep `from_utf8_lossy` only for display-only paths (e.g., password output in `decode_password_output`).
+**Action:** In blob parsing paths where data may be re-uploaded to the server, replaced `String::from_utf8_lossy` with `String::from_utf8` and propagated the error. Kept `from_utf8_lossy` only for display-only paths (version string, share name, chunk tags).
 
-**Files to modify:**
-- `src/blob.rs` -- `read_plain_string`, `read_hex_string`, `read_crypt_string`, `parse_share`
+**Files modified:**
+- `src/blob.rs` -- `read_plain_string` (returns `InvalidUtf8` error), `read_hex_string` (returns `InvalidUtf8` error), `read_crypt_string` (falls back to empty string on UTF-8 failure, preserving encrypted form for re-upload)
 
-**Effort:** Medium. Need to decide error behavior for each call site -- fail the parse or substitute an empty string.
+### Priority 4 -- Upgrade `rand` to 0.9.x (housekeeping) -- BLOCKED
 
-### Priority 4 -- Upgrade `rand` to 0.9.x (housekeeping)
+**Status:** Cannot upgrade. The `rsa` crate 0.9.x depends on `rand_core` 0.6, which is incompatible with `rand` 0.9 (which uses `rand_core` 0.9). `OsRng` from rand 0.9 does not implement the `CryptoRngCore` trait from rand_core 0.6 that `rsa` expects. No version of `rsa` currently supports rand 0.9. This upgrade is blocked until `rsa` releases a compatible version.
 
-**Action:** Update `rand` from 0.8 to 0.9. The `getrandom` feature syntax changed in 0.9 (uses `dep:` syntax). This also unblocks `cargo outdated`.
+**Effort:** N/A -- dependency conflict.
 
-**Files to modify:**
-- `Cargo.toml` -- Update `rand` version and features
-- Any files using deprecated `rand` 0.8 APIs
+### Priority 5 -- Upgrade `thiserror` to v2 (housekeeping) -- FIXED 2026-03-25
 
-**Effort:** Low-medium. API changes are minor (`OsRng` usage stays the same).
+**Action:** Updated `thiserror` from 1.x to 2.x in `Cargo.toml`. No code changes required -- fully backward compatible.
 
-### Priority 5 -- Upgrade `thiserror` to v2 (housekeeping)
-
-**Action:** Update `thiserror` from 1.x to 2.x.
-
-**Effort:** Low. v2 is largely backward compatible.
+**Effort:** Low.
 
 ### Not planned (matches C client by design)
 

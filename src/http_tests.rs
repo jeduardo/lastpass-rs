@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::VecDeque;
+use zeroize::Zeroizing;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -285,8 +286,8 @@ fn mock_show_website_persists_updates_for_following_getaccts_requests() {
         .iter()
         .find(|account| account.id == "0001")
         .expect("account");
-    assert_eq!(account.username, "updated-user");
-    assert_eq!(account.password, "updated-pass");
+    assert_eq!(account.username, Zeroizing::new("updated-user".to_string()));
+    assert_eq!(account.password, Zeroizing::new("updated-pass".to_string()));
     assert!(account.pwprotect);
 }
 
@@ -492,9 +493,9 @@ fn mock_uploadaccounts_persists_new_accounts_for_following_getaccts_requests() {
         .expect("imported account");
     assert_eq!(account.group, "team");
     assert_eq!(account.url, "https://imported.example/");
-    assert_eq!(account.username, "alice");
-    assert_eq!(account.password, "secret");
-    assert_eq!(account.note, "note");
+    assert_eq!(account.username, Zeroizing::new("alice".to_string()));
+    assert_eq!(account.password, Zeroizing::new("secret".to_string()));
+    assert_eq!(account.note, Zeroizing::new("note".to_string()));
 }
 
 #[test]
@@ -553,9 +554,9 @@ fn mock_uploadaccounts_updates_existing_account_when_aid_is_present() {
         .expect("updated account");
     assert_eq!(account.name, "renamed");
     assert_eq!(account.group, "ops");
-    assert_eq!(account.username, "bob");
-    assert_eq!(account.password, "updated");
-    assert_eq!(account.note, "note");
+    assert_eq!(account.username, Zeroizing::new("bob".to_string()));
+    assert_eq!(account.password, Zeroizing::new("updated".to_string()));
+    assert_eq!(account.note, Zeroizing::new("note".to_string()));
     assert_eq!(account.url, "https://renamed.example/");
     assert!(account.pwprotect);
 }
@@ -645,8 +646,8 @@ fn mock_uploadaccounts_uses_target_share_key_and_round_trips_shared_entries() {
     assert_eq!(account.share_id.as_deref(), Some("88"));
     assert_eq!(account.share_name.as_deref(), Some("Shared-other"));
     assert_eq!(account.fullname, "Shared-other/ops/entry");
-    assert_eq!(account.username, "alice");
-    assert_eq!(account.password, "secret");
+    assert_eq!(account.username, Zeroizing::new("alice".to_string()));
+    assert_eq!(account.password, Zeroizing::new("secret".to_string()));
     assert_eq!(account.url, "https://shared.example/");
 }
 
@@ -745,17 +746,17 @@ fn mock_transport_skips_shares_without_keys_when_building_blob_bytes() {
             fullname: "Shared-missing/entry".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "user".to_string(),
+            username: Zeroizing::new("user".to_string()),
             username_encrypted: None,
-            password: "pass".to_string(),
+            password: Zeroizing::new("pass".to_string()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

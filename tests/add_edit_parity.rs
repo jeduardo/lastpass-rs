@@ -8,6 +8,7 @@ use lpass_core::blob::{Account, Blob, Share};
 use lpass_core::config::{ConfigEnv, ConfigStore};
 use lpass_core::kdf::KDF_HASH_LEN;
 use lpass_core::session::{Session, session_save_with_store};
+use zeroize::Zeroizing;
 
 const MOCK_KEY: [u8; KDF_HASH_LEN] = [7u8; KDF_HASH_LEN];
 
@@ -185,17 +186,17 @@ fn plain_account(fullname: &str) -> Account {
         fullname: fullname.to_string(),
         url: "https://example.com".to_string(),
         url_encrypted: None,
-        username: "alice".to_string(),
+        username: Zeroizing::new("alice".to_string()),
         username_encrypted: None,
-        password: "secret".to_string(),
+        password: Zeroizing::new("secret".to_string()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: String::new(),
         last_modified_gmt: String::new(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),

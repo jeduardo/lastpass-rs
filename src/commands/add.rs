@@ -4,6 +4,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::process::Command;
 
+use zeroize::Zeroizing;
+
 use crate::blob::{Account, Field};
 use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
 use crate::notes::{
@@ -234,10 +236,10 @@ fn make_editor_initial_text(parsed: &AddArgs) -> String {
     let account = new_account(&parsed.name, parsed.choice, parsed.note_type, parsed.is_app);
     match parsed.choice {
         EditChoice::Any => render_account_file(&account, parsed.note_type, parsed.is_app),
-        EditChoice::Username => format!("{}\n", account.username),
-        EditChoice::Password => format!("{}\n", account.password),
+        EditChoice::Username => format!("{}\n", account.username.as_str()),
+        EditChoice::Password => format!("{}\n", account.password.as_str()),
         EditChoice::Url => format!("{}\n", account.url),
-        EditChoice::Notes => format!("{}\n", account.note),
+        EditChoice::Notes => format!("{}\n", account.note.as_str()),
         EditChoice::Field => format!(
             "{}\n",
             parsed
@@ -370,17 +372,17 @@ fn new_account(name: &str, choice: EditChoice, note_type: NoteType, is_app: bool
             String::new()
         },
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields,
@@ -394,10 +396,10 @@ fn apply_choice_value(
     value: &str,
 ) -> Result<(), String> {
     match choice {
-        EditChoice::Username => account.username = value.to_string(),
-        EditChoice::Password => account.password = value.to_string(),
+        EditChoice::Username => account.username = Zeroizing::new(value.to_string()),
+        EditChoice::Password => account.password = Zeroizing::new(value.to_string()),
         EditChoice::Url => account.url = value.to_string(),
-        EditChoice::Notes => account.note = value.to_string(),
+        EditChoice::Notes => account.note = Zeroizing::new(value.to_string()),
         EditChoice::Field => {
             if account.url != "http://sn" {
                 return Err(
@@ -570,17 +572,17 @@ fn build_account(parsed: &ParsedEntry, entry_name: &str) -> Account {
         fullname,
         url: parsed.url.clone().unwrap_or_default(),
         url_encrypted: None,
-        username: parsed.username.clone().unwrap_or_default(),
+        username: Zeroizing::new(parsed.username.clone().unwrap_or_default()),
         username_encrypted: None,
-        password: parsed.password.clone().unwrap_or_default(),
+        password: Zeroizing::new(parsed.password.clone().unwrap_or_default()),
         password_encrypted: None,
-        note: parsed.note.clone().unwrap_or_default(),
+        note: Zeroizing::new(parsed.note.clone().unwrap_or_default()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect: parsed.reprompt.unwrap_or(false),
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields,
@@ -702,10 +704,10 @@ mod tests {
         assert_eq!(account.group, "team");
         assert_eq!(account.name, "entry");
         assert_eq!(account.fullname, "team/entry");
-        assert_eq!(account.username, "alice");
-        assert_eq!(account.password, "p");
+        assert_eq!(*account.username, "alice");
+        assert_eq!(*account.password, "p");
         assert!(!account.pwprotect);
-        assert_eq!(account.note, "hello");
+        assert_eq!(*account.note, "hello");
     }
 
     #[test]
@@ -780,7 +782,7 @@ mod tests {
     fn apply_choice_value_updates_selected_targets() {
         let mut account = new_account("entry", EditChoice::Notes, NoteType::None, false);
         apply_choice_value(&mut account, EditChoice::Notes, None, "hello").expect("notes");
-        assert_eq!(account.note, "hello");
+        assert_eq!(*account.note, "hello");
 
         apply_choice_value(&mut account, EditChoice::Field, Some("Hostname"), "srv")
             .expect("field");

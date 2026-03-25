@@ -118,6 +118,7 @@ fn find_unique_account_index(accounts: &[Account], name: &str) -> Result<usize, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
 
     fn account(id: &str, name: &str, fullname: &str) -> Account {
         Account {
@@ -132,17 +133,17 @@ mod tests {
             fullname: fullname.to_string(),
             url: String::new(),
             url_encrypted: None,
-            username: String::new(),
+            username: Zeroizing::new(String::new()),
             username_encrypted: None,
-            password: String::new(),
+            password: Zeroizing::new(String::new()),
             password_encrypted: None,
-            note: String::new(),
+            note: Zeroizing::new(String::new()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: Vec::new(),

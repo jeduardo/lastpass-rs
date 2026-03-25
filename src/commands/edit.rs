@@ -4,6 +4,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::process::Command;
 
+use zeroize::Zeroizing;
+
 use crate::blob::{Account, Field};
 use crate::commands::data::{SyncMode, load_blob, maybe_push_account_update, save_blob};
 use crate::notes::{
@@ -281,10 +283,10 @@ fn make_editor_initial_text(
 ) -> String {
     match parsed.choice {
         EditChoice::Any => render_account_file(account),
-        EditChoice::Username => format!("{}\n", account.username),
-        EditChoice::Password => format!("{}\n", account.password),
+        EditChoice::Username => format!("{}\n", account.username.as_str()),
+        EditChoice::Password => format!("{}\n", account.password.as_str()),
         EditChoice::Url => format!("{}\n", account.url),
-        EditChoice::Notes => format!("{}\n", account.note),
+        EditChoice::Notes => format!("{}\n", account.note.as_str()),
         EditChoice::Name => format!("{}\n", account.fullname),
         EditChoice::Field => {
             if !secure_note_expanded {
@@ -404,17 +406,17 @@ fn new_account(fullname: &str, secure_note: bool) -> Account {
             String::new()
         },
         url_encrypted: None,
-        username: String::new(),
+        username: Zeroizing::new(String::new()),
         username_encrypted: None,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         password_encrypted: None,
-        note: String::new(),
+        note: Zeroizing::new(String::new()),
         note_encrypted: None,
         last_touch: "skipped".to_string(),
         last_modified_gmt: "skipped".to_string(),
         fav: false,
         pwprotect: false,
-        attachkey: String::new(),
+        attachkey: Zeroizing::new(String::new()),
         attachkey_encrypted: None,
         attachpresent: false,
         fields: Vec::new(),
@@ -447,11 +449,11 @@ fn apply_choice_value(
     secure_note_expanded: bool,
 ) -> Result<(), String> {
     match choice {
-        EditChoice::Username => account.username = value.to_string(),
-        EditChoice::Password => account.password = value.to_string(),
+        EditChoice::Username => account.username = Zeroizing::new(value.to_string()),
+        EditChoice::Password => account.password = Zeroizing::new(value.to_string()),
         EditChoice::Url => account.url = value.to_string(),
         EditChoice::Name => apply_fullname(account, value),
-        EditChoice::Notes => account.note = value.to_string(),
+        EditChoice::Notes => account.note = Zeroizing::new(value.to_string()),
         EditChoice::Field => {
             if !secure_note_expanded {
                 return Err(
@@ -573,16 +575,16 @@ fn account_note_type(account: &Account) -> NoteType {
 
 fn apply_update(account: &mut Account, update: &ParsedUpdate) {
     if let Some(value) = &update.username {
-        account.username = value.clone();
+        account.username = Zeroizing::new(value.clone());
     }
     if let Some(value) = &update.password {
-        account.password = value.clone();
+        account.password = Zeroizing::new(value.clone());
     }
     if let Some(value) = &update.url {
         account.url = value.clone();
     }
     if let Some(value) = &update.note {
-        account.note = value.clone();
+        account.note = Zeroizing::new(value.clone());
     }
     if let Some(value) = &update.fullname {
         apply_fullname(account, value);
@@ -647,6 +649,7 @@ mod tests {
     };
     use crate::kdf::KDF_HASH_LEN;
     use crate::session::{Session, session_save};
+    use zeroize::Zeroizing;
     use tempfile::TempDir;
 
     fn account() -> Account {
@@ -662,17 +665,17 @@ mod tests {
             fullname: "team/entry".to_string(),
             url: "https://example.com".to_string(),
             url_encrypted: None,
-            username: "alice".to_string(),
+            username: Zeroizing::new("alice".to_string()),
             username_encrypted: None,
-            password: "secret".to_string(),
+            password: Zeroizing::new("secret".to_string()),
             password_encrypted: None,
-            note: "note".to_string(),
+            note: Zeroizing::new("note".to_string()),
             note_encrypted: None,
             last_touch: String::new(),
             last_modified_gmt: String::new(),
             fav: false,
             pwprotect: false,
-            attachkey: String::new(),
+            attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
             fields: vec![Field {
@@ -874,10 +877,10 @@ mod tests {
         };
 
         apply_update(&mut acct, &update);
-        assert_eq!(acct.username, "bob");
-        assert_eq!(acct.password, "new-pass");
+        assert_eq!(*acct.username, "bob");
+        assert_eq!(*acct.password, "new-pass");
         assert_eq!(acct.url, "https://new.example.com");
-        assert_eq!(acct.note, "updated");
+        assert_eq!(*acct.note, "updated");
         assert_eq!(acct.fullname, "ops/db");
         assert!(acct.pwprotect);
         assert!(
@@ -1097,10 +1100,10 @@ mod tests {
         apply_choice_value(&mut target, EditChoice::Notes, None, "n2", false).expect("notes");
         apply_choice_value(&mut target, EditChoice::Name, None, "ops/db", false).expect("name");
         apply_choice_value(&mut target, EditChoice::Any, None, "ignored", false).expect("any");
-        assert_eq!(target.username, "u2");
-        assert_eq!(target.password, "p2");
+        assert_eq!(*target.username, "u2");
+        assert_eq!(*target.password, "p2");
         assert_eq!(target.url, "https://x");
-        assert_eq!(target.note, "n2");
+        assert_eq!(*target.note, "n2");
         assert_eq!(target.fullname, "ops/db");
 
         apply_fullname(&mut target, "   ");
