@@ -480,10 +480,10 @@ fn read_crypt_string(
     }
 
     match aes_decrypt_lastpass(item, key) {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(text) => Ok((text, Some(encrypted))),
-            Err(_) => Ok((String::new(), Some(encrypted))),
-        },
+        Ok(bytes) => Ok((
+            String::from_utf8_lossy(&bytes).into_owned(),
+            Some(encrypted),
+        )),
         Err(_) => Ok((String::new(), Some(encrypted))),
     }
 }
@@ -691,14 +691,17 @@ mod tests {
     }
 
     #[test]
-    fn read_crypt_string_returns_empty_on_invalid_utf8_decryption() {
+    fn read_crypt_string_uses_lossy_conversion_on_invalid_utf8_decryption() {
         let key = [4u8; 32];
         let mut body = Vec::new();
         let encrypted = aes_encrypt_lastpass(&[0xff, 0xfe], &key).expect("encrypt");
         push_item(&mut body, &encrypted);
         let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
         let (value, encrypted) = read_crypt_string(&mut chunk, &key).expect("crypt");
-        assert_eq!(value, "");
+        assert!(
+            value.contains('\u{FFFD}'),
+            "invalid UTF-8 bytes must be replaced, not blanked"
+        );
         assert!(encrypted.is_some());
     }
 

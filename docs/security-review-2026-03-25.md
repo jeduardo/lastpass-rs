@@ -280,7 +280,7 @@ Target fixes:
 **Action:** In blob parsing paths where data may be re-uploaded to the server, replaced `String::from_utf8_lossy` with `String::from_utf8` and propagated the error. Kept `from_utf8_lossy` only for display-only paths (version string, share name, chunk tags).
 
 **Files modified:**
-- `src/blob.rs` -- `read_plain_string` (returns `InvalidUtf8` error), `read_hex_string` (returns `InvalidUtf8` error), `read_crypt_string` (falls back to empty string on UTF-8 failure, preserving encrypted form for re-upload)
+- `src/blob.rs` -- `read_plain_string` (returns `InvalidUtf8` error), `read_hex_string` (returns `InvalidUtf8` error), `read_crypt_string` (uses `from_utf8_lossy` to preserve approximate data with replacement characters rather than blanking; the encrypted form is always preserved in `*_encrypted` fields)
 
 ### Priority 4 -- Upgrade `rand` to 0.9.x (housekeeping) -- BLOCKED
 
