@@ -672,6 +672,37 @@ mod tests {
     }
 
     #[test]
+    fn read_plain_string_rejects_invalid_utf8() {
+        let mut body = Vec::new();
+        push_item(&mut body, &[0xff, 0xfe]);
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        let err = read_plain_string(&mut chunk).expect_err("invalid utf8 must fail");
+        assert!(matches!(err, LpassError::InvalidUtf8));
+    }
+
+    #[test]
+    fn read_hex_string_rejects_invalid_utf8() {
+        // "fffe" is valid hex but decodes to bytes [0xff, 0xfe] which is invalid UTF-8
+        let mut body = Vec::new();
+        push_item(&mut body, b"fffe");
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        let err = read_hex_string(&mut chunk).expect_err("invalid utf8 must fail");
+        assert!(matches!(err, LpassError::InvalidUtf8));
+    }
+
+    #[test]
+    fn read_crypt_string_returns_empty_on_invalid_utf8_decryption() {
+        let key = [4u8; 32];
+        let mut body = Vec::new();
+        let encrypted = aes_encrypt_lastpass(&[0xff, 0xfe], &key).expect("encrypt");
+        push_item(&mut body, &encrypted);
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        let (value, encrypted) = read_crypt_string(&mut chunk, &key).expect("crypt");
+        assert_eq!(value, "");
+        assert!(encrypted.is_some());
+    }
+
+    #[test]
     fn crypt_helpers_cover_empty_and_detection_paths() {
         let key = [3u8; 32];
         let mut body = Vec::new();
