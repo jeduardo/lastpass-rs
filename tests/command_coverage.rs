@@ -498,6 +498,183 @@ fn mv_rm_import_and_sync_paths_work_with_mock_blob() {
     let _ = fs::remove_dir_all(&home);
 }
 
+#[test]
+fn add_app_flag_injects_application_field() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
+
+    // Covers add.rs lines 85-90: is_app path where Application field is auto-added
+    let add_out = run(
+        &home,
+        &[
+            "add",
+            "--sync=no",
+            "--non-interactive",
+            "--app",
+            "my-app",
+        ],
+        Some("URL: https://app.example.com\nUsername: admin\nPassword: secret\nNotes:\n"),
+    );
+    assert_eq!(
+        add_out.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add_out.stderr)
+    );
+
+    let show_field = run(
+        &home,
+        &["show", "--sync=no", "--field=Application", "my-app"],
+        None,
+    );
+    assert_eq!(show_field.status.code().unwrap_or(-1), 0);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn add_with_choice_flag_covers_non_any_branch() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
+
+    // Covers add.rs lines 94-97: non-Any choice path (--username)
+    let add_user = run(
+        &home,
+        &[
+            "add",
+            "--sync=no",
+            "--non-interactive",
+            "--username",
+            "choice-entry",
+        ],
+        Some("alice\n"),
+    );
+    assert_eq!(
+        add_user.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add_user.stderr)
+    );
+
+    let show_user = run(
+        &home,
+        &["show", "--sync=no", "--username", "choice-entry"],
+        None,
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&show_user.stdout).trim(),
+        "alice"
+    );
+
+    // Covers add.rs lines 98-105: choice path with NoteType in notes triggers collapse
+    let add_notes = run(
+        &home,
+        &[
+            "add",
+            "--sync=no",
+            "--non-interactive",
+            "--notes",
+            "note-entry",
+        ],
+        Some("NoteType: Server\nHostname: host1\n"),
+    );
+    assert_eq!(
+        add_notes.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&add_notes.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn show_all_emits_username_password_url() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
+
+    let add_in =
+        "URL: https://svc.example.com\nUsername: user-a\nPassword: pass-a\nNotes:\nnote text\n";
+    let add_out = run(
+        &home,
+        &["add", "--sync=no", "--non-interactive", "show-all-entry"],
+        Some(add_in),
+    );
+    assert_eq!(add_out.status.code().unwrap_or(-1), 0);
+
+    // Covers show.rs lines 209, 316, 326, 336: emit_all_output with non-empty
+    // Username, Password, and URL fields
+    let show_all = run(
+        &home,
+        &["show", "--sync=no", "--color=never", "show-all-entry"],
+        None,
+    );
+    assert_eq!(
+        show_all.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&show_all.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&show_all.stdout);
+    assert!(stdout.contains("user-a"), "missing username: {stdout}");
+    assert!(stdout.contains("pass-a"), "missing password: {stdout}");
+    assert!(
+        stdout.contains("https://svc.example.com"),
+        "missing url: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn edit_non_interactive_choice_covers_run_inner_branch() {
+    let home = unique_test_home();
+    fs::create_dir_all(&home).expect("create home");
+    write_empty_mock_blob(&home);
+
+    let add_in = "URL: https://example.com\nUsername: orig\nPassword: pw\nNotes:\n";
+    let add_out = run(
+        &home,
+        &["add", "--sync=no", "--non-interactive", "edit-choice"],
+        Some(add_in),
+    );
+    assert_eq!(add_out.status.code().unwrap_or(-1), 0);
+
+    // Covers edit.rs lines 103-104, 121: non-interactive choice path through run_inner
+    let edit_out = run(
+        &home,
+        &[
+            "edit",
+            "--sync=no",
+            "--non-interactive",
+            "--username",
+            "edit-choice",
+        ],
+        Some("updated-user\n"),
+    );
+    assert_eq!(
+        edit_out.status.code().unwrap_or(-1),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&edit_out.stderr)
+    );
+
+    let show_user = run(
+        &home,
+        &["show", "--sync=no", "--username", "edit-choice"],
+        None,
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&show_user.stdout).trim(),
+        "updated-user"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[cfg(unix)]
 #[test]
 fn sync_without_queue_succeeds_even_when_server_is_unreachable() {

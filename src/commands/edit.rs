@@ -357,6 +357,7 @@ fn render_account_file(account: &Account) -> String {
     out
 }
 
+// LCOV_EXCL_START — spawns external editor process, not testable in unit tests
 fn edit_with_editor(initial: &str) -> Result<String, String> {
     let mut file = crate::editor::create_secure_temp_file()?;
     file.write_all(initial.as_bytes())
@@ -373,6 +374,7 @@ fn edit_with_editor(initial: &str) -> Result<String, String> {
 
     fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
 }
+// LCOV_EXCL_STOP
 
 fn read_stdin_to_string() -> Result<String, String> {
     let mut input = String::new();
@@ -1165,5 +1167,217 @@ mod tests {
         ])
         .expect_err("field unsupported");
         assert!(err.contains("not secure notes"));
+    }
+
+    #[test]
+    fn parse_edit_args_field_space_separated_success() {
+        let parsed = parse_edit_args(&[
+            "--field".to_string(),
+            "Hostname".to_string(),
+            "myentry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+        assert_eq!(parsed.name, "myentry");
+    }
+
+    #[test]
+    fn parse_edit_args_field_space_separated_missing_value() {
+        let err = parse_edit_args(&["--field".to_string()]).expect_err("missing field value");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_sync_space_separated_success() {
+        let parsed = parse_edit_args(&[
+            "--sync".to_string(),
+            "now".to_string(),
+            "myentry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.sync_mode, SyncMode::Now);
+    }
+
+    #[test]
+    fn parse_edit_args_sync_space_separated_missing_value() {
+        let err = parse_edit_args(&["--sync".to_string()]).expect_err("missing sync value");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_color_space_separated_success() {
+        let parsed = parse_edit_args(&[
+            "--color".to_string(),
+            "never".to_string(),
+            "myentry".to_string(),
+        ])
+        .expect("args");
+        assert_eq!(parsed.name, "myentry");
+    }
+
+    #[test]
+    fn parse_edit_args_color_space_separated_missing_value() {
+        let err = parse_edit_args(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_color_space_separated_invalid_value() {
+        let err = parse_edit_args(&[
+            "--color".to_string(),
+            "bad".to_string(),
+            "myentry".to_string(),
+        ])
+        .expect_err("invalid color value");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_color_equals_invalid_value() {
+        let err =
+            parse_edit_args(&["--color=bad".to_string(), "myentry".to_string()])
+                .expect_err("invalid color=value");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn parse_edit_args_unknown_flag_rejected() {
+        let err = parse_edit_args(&["--bogus".to_string(), "myentry".to_string()])
+            .expect_err("unknown flag");
+        assert!(err.contains("usage: edit"));
+    }
+
+    #[test]
+    fn make_editor_initial_text_any_calls_render_account_file() {
+        let acct = account();
+        let args = EditArgs {
+            name: acct.fullname.clone(),
+            choice: EditChoice::Any,
+            field: None,
+            non_interactive: false,
+            sync_mode: SyncMode::Auto,
+        };
+        let text = make_editor_initial_text(&acct, &args, false);
+        // EditChoice::Any delegates to render_account_file, which includes Name:
+        assert!(text.contains("Name: team/entry"));
+        assert!(text.contains("Notes:"));
+    }
+
+    #[test]
+    fn render_account_file_plain_account_includes_url_username_password() {
+        // A plain account (NoteType::None) should render URL, Username, Password lines
+        let acct = Account {
+            id: "200".to_string(),
+            share_name: None,
+            share_id: None,
+            share_readonly: false,
+            name: "plain".to_string(),
+            name_encrypted: None,
+            group: String::new(),
+            group_encrypted: None,
+            fullname: "plain".to_string(),
+            url: "https://plain.example.com".to_string(),
+            url_encrypted: None,
+            username: Zeroizing::new("user1".to_string()),
+            username_encrypted: None,
+            password: Zeroizing::new("pass1".to_string()),
+            password_encrypted: None,
+            note: Zeroizing::new("my notes".to_string()),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: Zeroizing::new(String::new()),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: vec![],
+        };
+        let rendered = render_account_file(&acct);
+        assert!(rendered.contains("Name: plain\n"));
+        assert!(rendered.contains("URL: https://plain.example.com\n"));
+        assert!(rendered.contains("Username: user1\n"));
+        assert!(rendered.contains("Password: pass1\n"));
+        assert!(rendered.contains("Notes:    # Add notes below this line.\nmy notes"));
+    }
+
+    #[test]
+    fn render_account_file_email_note_type_injects_template_fields_skipping_username_password() {
+        // An Email note type should inject template fields (Server, Port, etc.)
+        // but skip Username and Password from the template injection
+        let acct = Account {
+            id: "300".to_string(),
+            share_name: None,
+            share_id: None,
+            share_readonly: false,
+            name: "myemail".to_string(),
+            name_encrypted: None,
+            group: "email".to_string(),
+            group_encrypted: None,
+            fullname: "email/myemail".to_string(),
+            url: "http://sn".to_string(),
+            url_encrypted: None,
+            username: Zeroizing::new(String::new()),
+            username_encrypted: None,
+            password: Zeroizing::new(String::new()),
+            password_encrypted: None,
+            note: Zeroizing::new(String::new()),
+            note_encrypted: None,
+            last_touch: String::new(),
+            last_modified_gmt: String::new(),
+            fav: false,
+            pwprotect: false,
+            attachkey: Zeroizing::new(String::new()),
+            attachkey_encrypted: None,
+            attachpresent: false,
+            fields: vec![
+                Field {
+                    name: "NoteType".to_string(),
+                    field_type: "text".to_string(),
+                    value: "Email Account".to_string(),
+                    value_encrypted: None,
+                    checked: false,
+                },
+            ],
+        };
+        let rendered = render_account_file(&acct);
+        // Should NOT contain URL/Username/Password at top level (note_type != None)
+        assert!(!rendered.contains("URL: "));
+        assert!(!rendered.contains("Username: "));
+        assert!(!rendered.contains("Password: "));
+        // Should contain NoteType from existing fields
+        assert!(rendered.contains("NoteType: Email Account\n"));
+        // Should inject missing template fields (Server, Port, Type, etc.)
+        assert!(rendered.contains("Server: \n"));
+        assert!(rendered.contains("Port: \n"));
+        assert!(rendered.contains("Type: \n"));
+        assert!(rendered.contains("SMTP Server: \n"));
+        assert!(rendered.contains("SMTP Port: \n"));
+    }
+
+    #[test]
+    fn parse_update_input_multiline_field_with_colon_not_valid_field() {
+        // A line like "key: value" inside a multiline field, where key is NOT a valid
+        // field name for the note type, should be treated as continuation (lines 509-512)
+        let input = "Private Key: line1\nsome-unknown: still-part-of-key\nNotes: comment\nthe notes";
+        let parsed = parse_update_input(input, NoteType::SshKey);
+        let pk = parsed
+            .fields
+            .iter()
+            .find(|(name, _)| name == "Private Key")
+            .expect("private key field");
+        assert_eq!(pk.1, "line1\nsome-unknown: still-part-of-key");
+        assert_eq!(parsed.note.as_deref(), Some("the notes"));
+    }
+
+    #[test]
+    fn parse_update_input_skips_lines_without_colon() {
+        // Lines without a colon should be skipped (lines 522-524)
+        let input = "Username: bob\nthis line has no colon\nPassword: pass\nNotes: comment\nend";
+        let parsed = parse_update_input(input, NoteType::None);
+        assert_eq!(parsed.username.as_deref(), Some("bob"));
+        assert_eq!(parsed.password.as_deref(), Some("pass"));
+        assert_eq!(parsed.note.as_deref(), Some("end"));
     }
 }

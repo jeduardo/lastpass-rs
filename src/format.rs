@@ -37,9 +37,11 @@ pub fn format_timestamp(timestamp: &str, utc: bool) -> String {
     let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]");
     match format {
         Ok(desc) => dt.format(&desc).unwrap_or_default(),
+        // LCOV_EXCL_START — unreachable: hardcoded format string is always valid
         Err(_) => dt
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -231,6 +233,14 @@ mod tests {
         assert_eq!(format_timestamp("", true), "");
         assert_eq!(format_timestamp("not-a-number", true), "");
         assert_eq!(format_timestamp("0", true), "");
+    }
+
+    #[test]
+    fn format_timestamp_handles_out_of_range_timestamp() {
+        // 999999999999999 seconds is beyond what OffsetDateTime can represent,
+        // triggering the Err(_) => return String::new() branch (line 27).
+        let result = format_timestamp("999999999999999", true);
+        assert_eq!(result, "");
     }
 
     #[test]

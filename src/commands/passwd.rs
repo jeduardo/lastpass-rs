@@ -173,7 +173,7 @@ where
     write_stdout_line(
         stdout,
         &format!("{FG_GREEN}{BOLD}Success{RESET}: Password changed and logged out."),
-    )?;
+    )?; // LCOV_EXCL_LINE — error path requires stdout write failure
     Ok(0)
 }
 

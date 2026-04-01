@@ -1015,4 +1015,318 @@ mod tests {
         assert_eq!(attachment.size, "4");
         assert_eq!(attachment.filename, "known.txt");
     }
+
+    #[test]
+    fn blob_parse_ignores_unknown_chunk_tags() {
+        let key = [1u8; KDF_HASH_LEN];
+        let mut blob_bytes = Vec::new();
+        push_chunk(&mut blob_bytes, "LPAV", b"2");
+        // Unknown chunk tag should be silently skipped
+        push_chunk(&mut blob_bytes, "ZZZZ", b"whatever");
+        let name = aes_encrypt_lastpass(b"entry", &key).expect("enc");
+        push_minimal_account_chunk(&mut blob_bytes, &key, &name);
+        let blob = blob_parse(&blob_bytes, &key, None).expect("blob");
+        assert_eq!(blob.version, 2);
+        assert_eq!(blob.accounts.len(), 1);
+    }
+
+    #[test]
+    fn blob_parse_ignores_field_chunk_without_preceding_account() {
+        let key = [1u8; KDF_HASH_LEN];
+        let mut blob_bytes = Vec::new();
+        push_chunk(&mut blob_bytes, "LPAV", b"3");
+
+        // Push ACFL before any ACCT - should be silently ignored
+        let mut field = Vec::new();
+        push_item(&mut field, b"orphan");
+        push_item(&mut field, b"text");
+        let value = aes_encrypt_lastpass(b"val", &key).expect("enc");
+        push_item(&mut field, &value);
+        push_item(&mut field, b"0");
+        push_chunk(&mut blob_bytes, "ACFL", &field);
+
+        let name = aes_encrypt_lastpass(b"entry", &key).expect("enc");
+        push_minimal_account_chunk(&mut blob_bytes, &key, &name);
+        let blob = blob_parse(&blob_bytes, &key, None).expect("blob");
+        assert_eq!(blob.accounts.len(), 1);
+        assert!(blob.accounts[0].fields.is_empty());
+    }
+
+    #[test]
+    fn account_is_group_returns_true_for_group_url() {
+        let account = Account {
+            url: "http://group".to_string(),
+            ..Account::default()
+        };
+        assert!(account_is_group(&account));
+
+        let account = Account {
+            url: "https://example.com".to_string(),
+            ..Account::default()
+        };
+        assert!(!account_is_group(&account));
+    }
+
+    #[test]
+    fn parse_account_group_url_sets_fullname_with_empty_name() {
+        // When name is empty but url is http://group, fullname = "group/"
+        let key = [10u8; KDF_HASH_LEN];
+        let mut acct = Vec::new();
+        push_item(&mut acct, b"9999");
+        // Name that decrypts to start with 0x10 so it gets blanked
+        let name = aes_encrypt_lastpass(&[16u8], &key).expect("name");
+        push_item(&mut acct, &name);
+        let group = aes_encrypt_lastpass(b"mygroup", &key).expect("group");
+        push_item(&mut acct, &group);
+        let url = aes_encrypt_lastpass(b"http://group", &key).expect("url");
+        push_item(&mut acct, &url);
+        let note = aes_encrypt_lastpass(b"", &key).expect("note");
+        push_item(&mut acct, &note);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        let user = aes_encrypt_lastpass(b"", &key).expect("user");
+        push_item(&mut acct, &user);
+        let pass = aes_encrypt_lastpass(b"", &key).expect("pass");
+        push_item(&mut acct, &pass);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+
+        let mut chunk = ChunkCursor::new("ACCT".to_string(), &acct);
+        let account = parse_account(&mut chunk, &key).expect("account");
+        assert_eq!(account.name, "");
+        assert_eq!(account.group, "mygroup");
+        // account_is_group is true, so fullname = "group/"
+        assert_eq!(account.fullname, "mygroup/");
+    }
+
+    #[test]
+    fn parse_share_empty_share_key_returns_none() {
+        let fake_private_key = b"some-key";
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, b""); // empty encrypted share key hex
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(fake_private_key)).expect("ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_share_invalid_hex_returns_none() {
+        let fake_private_key = b"some-key";
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, b"ZZZZ-not-hex!"); // invalid hex
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(fake_private_key)).expect("ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_share_rsa_decrypt_failure_returns_none() {
+        // Valid hex but not a valid RSA ciphertext - rsa_decrypt_oaep will fail
+        let valid_hex = hex::encode(vec![0u8; 256]);
+        let mut rng = thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa key");
+        let private_der = private_key
+            .to_pkcs1_der()
+            .expect("pkcs1 der")
+            .as_bytes()
+            .to_vec();
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, valid_hex.as_bytes());
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(&private_der)).expect("ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_share_wrong_length_share_key_returns_none() {
+        // Encrypt hex that decodes to wrong length (not 32 bytes)
+        let mut rng = thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa key");
+        let public_key = RsaPublicKey::from(&private_key);
+        let private_der = private_key
+            .to_pkcs1_der()
+            .expect("pkcs1 der")
+            .as_bytes()
+            .to_vec();
+
+        // 16 bytes = "00112233445566778899aabbccddeeff" (32 hex chars -> 16 bytes, not 32)
+        let short_key_hex = hex::encode([0x11u8; 16]);
+        let encrypted = public_key
+            .encrypt(&mut rng, Oaep::new::<Sha1>(), short_key_hex.as_bytes())
+            .expect("encrypt");
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, hex::encode(&encrypted).as_bytes());
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(&private_der)).expect("ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_share_invalid_inner_hex_returns_none() {
+        // RSA-encrypt something that is not valid hex after filtering
+        let mut rng = thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa key");
+        let public_key = RsaPublicKey::from(&private_key);
+        let private_der = private_key
+            .to_pkcs1_der()
+            .expect("pkcs1 der")
+            .as_bytes()
+            .to_vec();
+
+        // Encrypt "zz" - after filtering non-hex chars, this becomes empty which hex::decode("")
+        // returns Ok([]). Length 0 != 32 so it returns None at the length check.
+        // Instead, use an odd number of valid hex digits to cause hex::decode to fail.
+        let encrypted = public_key
+            .encrypt(&mut rng, Oaep::new::<Sha1>(), b"abc")
+            .expect("encrypt");
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, hex::encode(&encrypted).as_bytes());
+        push_item(&mut body, b"ignored");
+        push_item(&mut body, b"1");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(&private_der)).expect("ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_share_name_decrypt_failure_returns_empty_name() {
+        let mut rng = thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa key");
+        let public_key = RsaPublicKey::from(&private_key);
+        let private_der = private_key
+            .to_pkcs1_der()
+            .expect("pkcs1 der")
+            .as_bytes()
+            .to_vec();
+
+        let share_key = [7u8; KDF_HASH_LEN];
+        let encrypted_share_key = public_key
+            .encrypt(
+                &mut rng,
+                Oaep::new::<Sha1>(),
+                hex::encode(share_key).as_bytes(),
+            )
+            .expect("encrypt share key");
+
+        let mut body = Vec::new();
+        push_item(&mut body, b"share-id");
+        push_item(&mut body, hex::encode(&encrypted_share_key).as_bytes());
+        // Invalid base64 that will fail aes_decrypt_base64_lastpass
+        push_item(&mut body, b"not-valid-base64-ciphertext!!!");
+        push_item(&mut body, b"0");
+        let mut chunk = ChunkCursor::new("SHAR".to_string(), &body);
+        let result = parse_share(&mut chunk, Some(&private_der)).expect("ok");
+        let ctx = result.expect("should return Some");
+        assert_eq!(ctx.share.name, "");
+        assert_eq!(ctx.share.id, "share-id");
+        assert!(!ctx.share.readonly);
+    }
+
+    #[test]
+    fn parse_account_attachkey_decrypt_failure_returns_empty() {
+        let key = [3u8; KDF_HASH_LEN];
+        let mut acct = Vec::new();
+        push_item(&mut acct, b"5555");
+        let name = aes_encrypt_lastpass(b"test", &key).expect("name");
+        push_item(&mut acct, &name);
+        let group = aes_encrypt_lastpass(b"grp", &key).expect("group");
+        push_item(&mut acct, &group);
+        let url = aes_encrypt_lastpass(b"https://x.com", &key).expect("url");
+        push_item(&mut acct, &url);
+        let note = aes_encrypt_lastpass(b"", &key).expect("note");
+        push_item(&mut acct, &note);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        let user = aes_encrypt_lastpass(b"u", &key).expect("user");
+        push_item(&mut acct, &user);
+        let pass = aes_encrypt_lastpass(b"p", &key).expect("pass");
+        push_item(&mut acct, &pass);
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        for _ in 0..13 {
+            push_item(&mut acct, b"");
+        }
+        // Invalid base64 attachkey that will fail decryption
+        push_item(&mut acct, b"not-valid-ciphertext");
+        push_item(&mut acct, b"0");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+        push_item(&mut acct, b"");
+
+        let mut chunk = ChunkCursor::new("ACCT".to_string(), &acct);
+        let account = parse_account(&mut chunk, &key).expect("account");
+        assert_eq!(*account.attachkey, "");
+        assert_eq!(
+            account.attachkey_encrypted.as_deref(),
+            Some("not-valid-ciphertext")
+        );
+    }
+
+    #[test]
+    fn chunk_cursor_read_item_truncation_errors() {
+        // Fewer than 4 bytes remaining - can't read length
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &[0, 0]);
+        let err = chunk.read_item().expect_err("too short for length");
+        assert!(matches!(err, LpassError::Crypto("chunk truncated")));
+
+        // Length says 100 but only 1 byte of data after length
+        let data = [0u8, 0, 0, 100, 0xFF];
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &data);
+        let err = chunk.read_item().expect_err("data shorter than length");
+        assert!(matches!(err, LpassError::Crypto("chunk truncated")));
+    }
+
+    #[test]
+    fn peek_item_first_byte_zero_length_returns_none() {
+        // 5+ bytes remaining, but length field is 0
+        let data = [0u8, 0, 0, 0, 0xFF];
+        let chunk = ChunkCursor::new("TEST".to_string(), &data);
+        assert_eq!(chunk.peek_item_first_byte(), None);
+    }
+
+    #[test]
+    fn read_hex_string_empty_returns_empty() {
+        let mut body = Vec::new();
+        push_item(&mut body, b"");
+        let mut chunk = ChunkCursor::new("TEST".to_string(), &body);
+        assert_eq!(read_hex_string(&mut chunk).expect("empty hex"), "");
+    }
 }

@@ -881,6 +881,20 @@ mod tests {
         };
         maybe_attach_private_key(&mut session, &key);
         assert!(session.private_key.is_none());
+
+        // Cover the early return when private_key_enc is None (line 175)
+        let mut session = Session {
+            uid: "u".to_string(),
+            session_id: "s".to_string(),
+            token: "t".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        };
+        maybe_attach_private_key(&mut session, &key);
+        assert!(session.private_key.is_none());
     }
 
     #[test]

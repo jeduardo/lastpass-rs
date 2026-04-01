@@ -19,8 +19,10 @@ fn with_read_overrides<T>(f: impl FnOnce(&HashMap<OsString, OsString>) -> T) -> 
     match overrides().read() {
         Ok(guard) => f(&guard),
         Err(poisoned) => {
+            // LCOV_EXCL_START — only reachable if another thread panics while holding the lock
             let guard = poisoned.into_inner();
             f(&guard)
+            // LCOV_EXCL_STOP
         }
     }
 }
@@ -29,8 +31,10 @@ fn with_write_overrides(f: impl FnOnce(&mut HashMap<OsString, OsString>)) {
     match overrides().write() {
         Ok(mut guard) => f(&mut guard),
         Err(poisoned) => {
+            // LCOV_EXCL_START — only reachable if another thread panics while holding the lock
             let mut guard = poisoned.into_inner();
             f(&mut guard);
+            // LCOV_EXCL_STOP
         }
     }
 }
@@ -96,7 +100,7 @@ pub(crate) fn begin_test_overrides() -> TestOverrideGuard {
     let lock = TEST_OVERRIDE_LOCK.get_or_init(|| std::sync::Mutex::new(()));
     let guard = match lock.lock() {
         Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
+        Err(poisoned) => poisoned.into_inner(), // LCOV_EXCL_LINE — only reachable on lock poisoning
     };
     with_write_overrides(|map| map.clear());
     TestOverrideGuard(guard)

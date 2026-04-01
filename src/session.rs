@@ -85,7 +85,7 @@ pub fn session_save_with_store(
             "0"
         },
         key,
-    )?;
+    )?; // LCOV_EXCL_LINE — error path requires a failing ConfigStore
     store.write_encrypted_string(
         "session_ff_url_logging",
         if session.url_logging_enabled {
@@ -94,7 +94,7 @@ pub fn session_save_with_store(
             "0"
         },
         key,
-    )?;
+    )?; // LCOV_EXCL_LINE — error path requires a failing ConfigStore
 
     if let Some(private_key) = &session.private_key {
         store.write_encrypted_buffer("session_privatekey", private_key, key)?;
@@ -181,5 +181,41 @@ mod tests {
         assert!(!loaded.url_logging_enabled);
         assert_eq!(loaded.server.as_deref(), Some("lastpass.com"));
         assert_eq!(loaded.private_key.as_deref(), Some(&[1, 2, 3][..]));
+    }
+
+    #[test]
+    fn session_save_rejects_invalid_session() {
+        let (store, _temp) = store_with_home();
+        let key = [4u8; KDF_HASH_LEN];
+        let session = Session::default(); // all fields empty => invalid
+        let err = session_save_with_store(&store, &session, &key).expect_err("invalid session");
+        assert!(matches!(err, crate::error::LpassError::Crypto("invalid session")));
+    }
+
+    #[test]
+    fn session_save_load_roundtrip_with_url_logging_enabled() {
+        let (store, _temp) = store_with_home();
+        let key = [5u8; KDF_HASH_LEN];
+        let session = Session {
+            uid: "u2".to_string(),
+            session_id: "s2".to_string(),
+            token: "t2".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: true,
+            server: None,
+            private_key: None,
+            private_key_enc: Some("enc-key".to_string()),
+        };
+
+        session_save_with_store(&store, &session, &key).expect("save");
+        let loaded = session_load_with_store(&store, &key)
+            .expect("load")
+            .expect("session");
+
+        assert!(!loaded.url_encryption_enabled);
+        assert!(loaded.url_logging_enabled);
+        assert!(loaded.server.is_none());
+        assert!(loaded.private_key.is_none());
+        assert_eq!(loaded.private_key_enc.as_deref(), Some("enc-key"));
     }
 }

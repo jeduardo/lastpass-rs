@@ -616,6 +616,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_generate_args_username_space_separated() {
+        let parsed = parse_generate_args(&[
+            "--username".to_string(),
+            "bob".to_string(),
+            "entry".to_string(),
+            "24".to_string(),
+        ])
+        .expect("parse args");
+        assert_eq!(parsed.username.as_deref(), Some("bob"));
+    }
+
+    #[test]
     fn split_group_covers_root_and_nested_paths() {
         assert_eq!(
             split_group("team/alpha"),

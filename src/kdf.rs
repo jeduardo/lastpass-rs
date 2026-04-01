@@ -88,4 +88,13 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+
+    #[test]
+    fn kdf_decryption_key_rejects_low_iterations() {
+        let err = kdf_decryption_key("user", "pass", 1).expect_err("should fail");
+        match err {
+            LpassError::InvalidIterations(1) => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
 }
