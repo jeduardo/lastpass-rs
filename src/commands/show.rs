@@ -846,6 +846,7 @@ mod tests {
         config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
             .expect("verify");
         crate::config::config_write_string("username", "tester").expect("username");
+        crate::config::config_write_string("iterations", "100100").expect("iterations");
     }
 
     fn write_session(key: &[u8; KDF_HASH_LEN]) {
