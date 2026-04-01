@@ -846,6 +846,7 @@ mod tests {
         config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", key)
             .expect("verify");
         crate::config::config_write_string("username", "tester").expect("username");
+        crate::config::config_write_string("iterations", "100100").expect("iterations");
     }
 
     fn write_session(key: &[u8; KDF_HASH_LEN]) {
@@ -1378,5 +1379,55 @@ mod tests {
     #[test]
     fn ensure_current_key_matches_accepts_equal_keys() {
         assert!(ensure_current_key_matches([3u8; KDF_HASH_LEN], [3u8; KDF_HASH_LEN]).is_ok());
+    }
+
+    #[test]
+    fn run_inner_mock_all_clip_covers_emit_all_output_with_clipboard() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "cat > /dev/null");
+        crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
+        write_mock_blob_state();
+
+        // Covers line 209 (emit_all_output ? with clip=true),
+        // lines 316, 326, 336 (emit_line for Username, Password, URL in clip mode)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--all".to_string(),
+                "--clip".to_string(),
+                "test-group/test-account".to_string(),
+            ])
+            .expect("all clip"),
+            0
+        );
+    }
+
+    #[test]
+    fn emit_all_output_includes_username_password_url() {
+        let mut acct = account("1", "entry", "grp");
+        acct.username = Zeroizing::new("user1".to_string());
+        acct.password = Zeroizing::new("pass1".to_string());
+        acct.url = "https://example.com".to_string();
+        let mut buf = Vec::new();
+        emit_all_output(&acct, &[], "%an", "%fn: %fv", true, &mut buf).expect("emit");
+        let output = String::from_utf8_lossy(&buf);
+        assert!(output.contains("user1"), "missing username: {output}");
+        assert!(output.contains("pass1"), "missing password: {output}");
+        assert!(output.contains("https://example.com"), "missing url: {output}");
+    }
+
+    #[test]
+    fn find_matches_exact_with_name_zero_skips_id_search() {
+        // Covers line 486 (closing brace of `if name != "0"` — the else path)
+        let accounts = vec![
+            account("0001", "alpha", "team"),
+            account("0002", "0", ""),
+        ];
+        let result =
+            find_matches(&accounts, &["0".to_string()], SearchMode::Exact).expect("name 0");
+        assert_eq!(result, vec![1]);
     }
 }

@@ -546,6 +546,152 @@ fn run_inner_with_success_path_writes_messages_and_kills_session() {
 }
 
 #[test]
+fn reencrypt_rejects_missing_session_private_key() {
+    let current_key = [12u8; KDF_HASH_LEN];
+    let new_key = [13u8; KDF_HASH_LEN];
+    let private_key = b"server-private-key";
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: None,
+        private_key_enc: None,
+    };
+    let mut info = sample_info(&current_key, private_key, &[("alpha", false)]);
+    let err = reencrypt_with_writer(&session, &mut info, &current_key, &new_key, &mut Vec::new())
+        .expect_err("missing private key");
+    assert_eq!(
+        err,
+        "Server and session private key don't match! Try lpass sync first."
+    );
+}
+
+#[test]
+fn reencrypt_rejects_corrupt_server_private_key() {
+    let current_key = [14u8; KDF_HASH_LEN];
+    let new_key = [15u8; KDF_HASH_LEN];
+    let session = sample_session(b"local-private-key");
+    let mut info = PwChangeInfo {
+        reencrypt_id: "rid".to_string(),
+        token: "tok".to_string(),
+        privkey_encrypted: "not-valid-encrypted-data".to_string(),
+        new_privkey_encrypted: String::new(),
+        new_privkey_hash: String::new(),
+        new_key_hash: String::new(),
+        fields: Vec::new(),
+        su_keys: Vec::new(),
+    };
+    let err = reencrypt_with_writer(&session, &mut info, &current_key, &new_key, &mut Vec::new())
+        .expect_err("corrupt private key");
+    assert_eq!(
+        err,
+        "Server and session private key don't match! Try lpass sync first."
+    );
+}
+
+#[test]
+fn run_inner_with_propagates_reencrypt_failure() {
+    let client = HttpClient::mock();
+    let state = CommandState {
+        username: "user@example.com".to_string(),
+        current_key: [16u8; KDF_HASH_LEN],
+        session: Session {
+            uid: "u1".to_string(),
+            session_id: "s1".to_string(),
+            token: "t1".to_string(),
+            url_encryption_enabled: false,
+            url_logging_enabled: false,
+            server: None,
+            private_key: None,
+            private_key_enc: None,
+        },
+    };
+    let mut prompts = [
+        "123456".to_string(),
+        "abcdefgh".to_string(),
+        "abcdefgh".to_string(),
+    ]
+    .into_iter();
+    let info = PwChangeInfo::default();
+    let err = run_inner_with(
+        &[],
+        &client,
+        || Ok(state.clone()),
+        |_, _, _| Ok(prompts.next().expect("prompt")),
+        |_, _| Ok(1000),
+        move |_, _, _, _| Ok(info.clone()),
+        |_, _, _, _, _, _, _, _| Ok(()),
+        || Ok(()),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect_err("must fail");
+    assert!(err.contains("private key"));
+}
+
+#[test]
+fn load_command_state_fails_when_session_missing() {
+    let _override_guard = crate::lpenv::begin_test_overrides();
+    crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+    let temp = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+
+    let key = [32u8; KDF_HASH_LEN];
+    config_write_buffer("plaintext_key", &key).expect("write plaintext key");
+    config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+        .expect("write verify");
+    config_write_string("username", "user@example.com").expect("write username");
+    // Do not save a session
+
+    let err = load_command_state().expect_err("must fail");
+    assert!(
+        err.contains("Could not find session"),
+        "error: {err:?}"
+    );
+}
+
+#[test]
+fn load_command_state_fails_when_username_missing() {
+    let _override_guard = crate::lpenv::begin_test_overrides();
+    crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+    let temp = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
+
+    let key = [33u8; KDF_HASH_LEN];
+    config_write_buffer("plaintext_key", &key).expect("write plaintext key");
+    config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+        .expect("write verify");
+    // Do not write username
+
+    let session = Session {
+        uid: "u1".to_string(),
+        session_id: "s1".to_string(),
+        token: "t1".to_string(),
+        url_encryption_enabled: false,
+        url_logging_enabled: false,
+        server: None,
+        private_key: Some(vec![1, 2, 3]),
+        private_key_enc: None,
+    };
+    session_save(&session, &key).expect("save session");
+
+    let err = load_command_state().expect_err("must fail");
+    assert!(
+        err.contains("Could not find session"),
+        "error: {err:?}"
+    );
+}
+
+#[test]
 fn run_inner_with_propagates_complete_failure() {
     let client = HttpClient::mock();
     let state = ok_command_state();

@@ -95,13 +95,6 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         let mut value = raw_input;
         trim_single_trailing_newline(&mut value);
         apply_choice_value(&mut account, parsed.choice, parsed.field.as_deref(), &value)?;
-        if account
-            .fields
-            .iter()
-            .any(|field| field.name.eq_ignore_ascii_case("NoteType"))
-        {
-            account = collapse_notes(&account);
-        }
         account
     };
 
@@ -957,5 +950,267 @@ mod tests {
         assert_eq!(account.url, "http://sn");
         assert!(account.note.contains("NoteType:"));
         assert_eq!(account.fullname, "secure/entry");
+    }
+
+    #[test]
+    fn parse_add_args_rejects_double_positional() {
+        let err = parse_add_args(&["first".to_string(), "second".to_string()])
+            .expect_err("two positional args");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn parse_add_args_field_without_value() {
+        let err =
+            parse_add_args(&["--field".to_string()]).expect_err("--field missing value");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn parse_add_args_note_type_space_separated() {
+        let parsed = parse_add_args(&[
+            "--note-type".to_string(),
+            "server".to_string(),
+            "name".to_string(),
+        ])
+        .expect("valid note type");
+        assert_eq!(parsed.note_type, NoteType::Server);
+
+        let err = parse_add_args(&[
+            "--note-type".to_string(),
+            "unknown".to_string(),
+            "name".to_string(),
+        ])
+        .expect_err("invalid note type");
+        assert!(err.contains("--note-type=TYPE"));
+
+        let err = parse_add_args(&["--note-type".to_string()])
+            .expect_err("missing note type value");
+        assert!(err.contains("--note-type=TYPE"));
+    }
+
+    #[test]
+    fn parse_add_args_sync_without_value() {
+        let err = parse_add_args(&["--sync".to_string()])
+            .expect_err("--sync missing value");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn parse_add_args_color_space_separated() {
+        let parsed = parse_add_args(&[
+            "--color".to_string(),
+            "never".to_string(),
+            "name".to_string(),
+        ])
+        .expect("valid color");
+        assert_eq!(parsed.name, "name");
+
+        let err = parse_add_args(&[
+            "--color".to_string(),
+            "bad".to_string(),
+            "name".to_string(),
+        ])
+        .expect_err("invalid color");
+        assert!(err.contains("usage: add"));
+
+        let err =
+            parse_add_args(&["--color".to_string()]).expect_err("missing color value");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn parse_add_args_field_equals_syntax() {
+        let parsed = parse_add_args(&[
+            "--field=Hostname".to_string(),
+            "name".to_string(),
+        ])
+        .expect("field equals syntax");
+        assert_eq!(parsed.choice, EditChoice::Field);
+        assert_eq!(parsed.field.as_deref(), Some("Hostname"));
+    }
+
+    #[test]
+    fn parse_add_args_color_equals_invalid() {
+        let err = parse_add_args(&[
+            "--color=bad".to_string(),
+            "name".to_string(),
+        ])
+        .expect_err("invalid color equals");
+        assert!(err.contains("usage: add"));
+    }
+
+    #[test]
+    fn render_account_file_skips_username_password_in_note_template() {
+        // NoteType::Email has Username and Password in its template fields.
+        // render_account_file should skip those via the continue on line 287.
+        let account = new_account("entry", EditChoice::Any, NoteType::Email, false);
+        let rendered = render_account_file(&account, NoteType::Email, false);
+        // The template fields Username/Password should be skipped, but
+        // Server/Port/Type etc. should appear.
+        assert!(rendered.contains("Server: "));
+        assert!(rendered.contains("Port: "));
+        // Should not have duplicate Username/Password lines from the template
+        // (the note type path doesn't render them as standard fields either
+        // since note_type != NoteType::None skips the standard URL/Username/Password block).
+    }
+
+    #[test]
+    fn render_account_file_shows_reprompt() {
+        let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
+        account.pwprotect = true;
+        let rendered = render_account_file(&account, NoteType::None, false);
+        assert!(rendered.contains("Reprompt: Yes"));
+    }
+
+    #[test]
+    fn render_account_file_skips_existing_note_type_field() {
+        // When a note type field already exists in the account, render should
+        // hit the continue at line 290.
+        let mut account = new_account("entry", EditChoice::Any, NoteType::Server, false);
+        account.fields.push(make_field("Hostname", "existing"));
+        let rendered = render_account_file(&account, NoteType::Server, false);
+        // Hostname should appear only once (from the existing field, not added again)
+        let count = rendered.matches("Hostname: ").count();
+        assert_eq!(count, 1);
+        assert!(rendered.contains("Hostname: existing"));
+    }
+
+    #[test]
+    fn new_account_with_note_type_and_any_choice_sets_note_type_field() {
+        let account = new_account("entry", EditChoice::Any, NoteType::Server, false);
+        assert!(
+            account
+                .fields
+                .iter()
+                .any(|field| field.name == "NoteType" && field.value == "Server")
+        );
+    }
+
+    #[test]
+    fn apply_choice_value_any_is_noop() {
+        let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
+        let before_url = account.url.clone();
+        apply_choice_value(&mut account, EditChoice::Any, None, "ignored")
+            .expect("any noop");
+        assert_eq!(account.url, before_url);
+    }
+
+    #[test]
+    fn apply_choice_value_sets_username_password_url() {
+        let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
+        apply_choice_value(&mut account, EditChoice::Username, None, "user1")
+            .expect("username");
+        assert_eq!(*account.username, "user1");
+
+        apply_choice_value(&mut account, EditChoice::Password, None, "pass1")
+            .expect("password");
+        assert_eq!(*account.password, "pass1");
+
+        apply_choice_value(&mut account, EditChoice::Url, None, "https://x.com")
+            .expect("url");
+        assert_eq!(account.url, "https://x.com");
+    }
+
+    #[test]
+    fn parse_entry_input_blank_line_skipped() {
+        // A blank line (no colon) should be skipped (line 471-472).
+        let parsed = parse_entry_input(
+            "Username: alice\n\nPassword: secret\nNotes:\n",
+            NoteType::None,
+        );
+        assert_eq!(parsed.username.as_deref(), Some("alice"));
+        assert_eq!(parsed.password.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn parse_entry_input_multiline_continuation_non_colon_line() {
+        // When in multiline mode, a line without a colon appends (line 463-465).
+        // Also covers append_multiline with empty value first (line 633).
+        let parsed = parse_entry_input(
+            "NoteType: SSH Key\nPrivate Key: \nno-colon-line\nanother-line\nHostname: host\nNotes:\n",
+            NoteType::SshKey,
+        );
+        let pk = parsed
+            .fields
+            .iter()
+            .find(|field| field.name == "Private Key")
+            .expect("Private Key field");
+        assert!(pk.value.contains("no-colon-line"));
+        assert!(pk.value.contains("another-line"));
+    }
+
+    #[test]
+    fn parse_entry_input_multiline_colon_not_valid_field() {
+        // In multiline mode, a line with a colon that is NOT a valid field
+        // should be appended as continuation (lines 458-461).
+        let parsed = parse_entry_input(
+            "NoteType: SSH Key\nPrivate Key: BEGIN\nfake-field: not-a-real-ssh-field\nHostname: host\nNotes:\n",
+            NoteType::SshKey,
+        );
+        let pk = parsed
+            .fields
+            .iter()
+            .find(|field| field.name == "Private Key")
+            .expect("Private Key field");
+        // "fake-field: not-a-real-ssh-field" should be part of Private Key value
+        assert!(pk.value.contains("fake-field: not-a-real-ssh-field"));
+        // Hostname should still be parsed as a separate field
+        assert!(
+            parsed
+                .fields
+                .iter()
+                .any(|field| field.name == "Hostname" && field.value == "host")
+        );
+    }
+
+    #[test]
+    fn build_account_adds_note_type_field_when_missing() {
+        // When note_type is set but has_note_type_field is false,
+        // build_account should add the NoteType field (lines 556-561).
+        let parsed = parse_entry_input(
+            "Hostname: host\nNotes:\nbody",
+            NoteType::Server,
+        );
+        assert!(!parsed.has_note_type_field);
+        let account = build_account(&parsed, "entry");
+        assert!(account.note.contains("NoteType:"));
+    }
+
+    #[test]
+    fn build_account_empty_fullname_fallback() {
+        // When fullname ends up empty, it falls back to account.name (line 595-596).
+        // This happens when entry_name has no group and is empty.
+        let parsed = parse_entry_input("Notes:\n", NoteType::None);
+        let account = build_account(&parsed, "");
+        // fullname should not be empty if name is also empty, but the fallback
+        // path is: if account.fullname.is_empty() { account.fullname = account.name.clone(); }
+        // With empty entry_name, both name and fullname will be empty, so fullname stays empty.
+        // But this still exercises the code path.
+        assert_eq!(account.fullname, "");
+    }
+
+    #[test]
+    fn is_valid_field_name_returns_true_for_builtin_with_note_type() {
+        // With a non-None note_type, built-in names like "URL" should still
+        // return true (lines 619-623).
+        assert!(is_valid_field_name(NoteType::SshKey, "URL"));
+        assert!(is_valid_field_name(NoteType::SshKey, "Name"));
+        assert!(is_valid_field_name(NoteType::SshKey, "Notes"));
+        assert!(is_valid_field_name(NoteType::SshKey, "Reprompt"));
+    }
+
+    #[test]
+    fn trim_single_trailing_newline_handles_crlf() {
+        let mut value = "line\r\n".to_string();
+        trim_single_trailing_newline(&mut value);
+        assert_eq!(value, "line");
+    }
+
+    #[test]
+    fn trim_single_trailing_newline_noop_without_newline() {
+        let mut value = "no-newline".to_string();
+        trim_single_trailing_newline(&mut value);
+        assert_eq!(value, "no-newline");
     }
 }

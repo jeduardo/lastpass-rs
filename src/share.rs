@@ -238,6 +238,28 @@ mod tests {
     }
 
     #[test]
+    fn collect_shares_deduplicates_blob_shares_and_account_metadata() {
+        let mut existing = account("Shared-Team/item");
+        existing.share_name = Some("Shared-Team".to_string());
+        existing.share_id = Some("77".to_string());
+        existing.share_readonly = false;
+        let blob = Blob {
+            version: 1,
+            local_version: false,
+            shares: vec![share("77", "Shared-Team", false)],
+            accounts: vec![existing],
+            attachments: Vec::new(),
+        };
+
+        let shares = collect_shares(&blob);
+        let team_shares: Vec<_> = shares
+            .iter()
+            .filter(|s| s.name.eq_ignore_ascii_case("Shared-Team"))
+            .collect();
+        assert_eq!(team_shares.len(), 1);
+    }
+
+    #[test]
     fn assign_account_share_rejects_missing_shared_folder_names() {
         let blob = Blob {
             version: 1,

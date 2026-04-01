@@ -16,23 +16,13 @@ fn overrides() -> &'static RwLock<HashMap<OsString, OsString>> {
 }
 
 fn with_read_overrides<T>(f: impl FnOnce(&HashMap<OsString, OsString>) -> T) -> T {
-    match overrides().read() {
-        Ok(guard) => f(&guard),
-        Err(poisoned) => {
-            let guard = poisoned.into_inner();
-            f(&guard)
-        }
-    }
+    let guard = overrides().read().expect("override lock poisoned");
+    f(&guard)
 }
 
 fn with_write_overrides(f: impl FnOnce(&mut HashMap<OsString, OsString>)) {
-    match overrides().write() {
-        Ok(mut guard) => f(&mut guard),
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            f(&mut guard);
-        }
-    }
+    let mut guard = overrides().write().expect("override lock poisoned");
+    f(&mut guard);
 }
 
 pub fn var_os<K: AsRef<OsStr>>(name: K) -> Option<OsString> {

@@ -280,6 +280,11 @@ fn render_tree_lines_inner(node: &LsNode, format: &str, level: usize, out: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob::{Blob, Share};
+    use crate::config::{config_write_buffer, config_write_encrypted_string};
+    use crate::kdf::KDF_HASH_LEN;
+    use crate::session::{Session, session_save};
+    use tempfile::TempDir;
     use zeroize::Zeroizing;
 
     fn account(
@@ -414,6 +419,44 @@ mod tests {
     }
 
     #[test]
+    fn insert_account_with_share_name_matching_full_dirname() {
+        let mut root = LsNode::default();
+        let acct = account("1", Some("Team"), "", "entry", "Team/entry", "https://x");
+        insert_account(&mut root, &acct);
+
+        let lines = render_tree_lines(&root, "%an [id: %ai]");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], format!("{FG_CYAN}{BOLD}Team{RESET}"));
+        assert_eq!(lines[1], "    entry [id: 1]");
+    }
+
+    #[test]
+    fn render_tree_lines_skips_nameless_nodes() {
+        let root = LsNode {
+            name: None,
+            account: None,
+            shared: false,
+            children: vec![
+                LsNode {
+                    name: None,
+                    account: None,
+                    shared: false,
+                    children: Vec::new(),
+                },
+                LsNode {
+                    name: Some("visible".to_string()),
+                    account: None,
+                    shared: false,
+                    children: Vec::new(),
+                },
+            ],
+        };
+        let lines = render_tree_lines(&root, "%an");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("visible"));
+    }
+
+    #[test]
     fn run_inner_rejects_invalid_option_combinations() {
         let err = run_inner(&["--color".to_string()]).expect_err("missing color value");
         assert!(err.contains("usage: ls"));
@@ -432,5 +475,178 @@ mod tests {
 
         let err = run_inner(&["a".to_string(), "b".to_string()]).expect_err("two groups");
         assert!(err.contains("usage: ls"));
+    }
+
+    fn write_mock_state(_home: &TempDir, blob: &Blob) {
+        let key = [7u8; KDF_HASH_LEN];
+        config_write_buffer("plaintext_key", &key).expect("write key");
+        config_write_encrypted_string("verify", "`lpass` was written by LastPass.\n", &key)
+            .expect("write verify");
+        crate::config::config_write_string("username", "tester").expect("username");
+        session_save(
+            &Session {
+                uid: "u1".to_string(),
+                session_id: "s1".to_string(),
+                token: "t1".to_string(),
+                url_encryption_enabled: false,
+                url_logging_enabled: false,
+                server: None,
+                private_key: None,
+                private_key_enc: None,
+            },
+            &key,
+        )
+        .expect("session save");
+        crate::commands::data::save_blob(blob).expect("write blob");
+    }
+
+    fn make_test_blob() -> Blob {
+        Blob {
+            version: 1,
+            local_version: false,
+            shares: vec![Share {
+                id: "share1".to_string(),
+                name: "Shared".to_string(),
+                readonly: false,
+                key: None,
+            }],
+            accounts: vec![
+                account(
+                    "0001",
+                    None,
+                    "team",
+                    "server",
+                    "team/server",
+                    "https://example.com",
+                ),
+                account("0002", None, "", "plain-entry", "plain-entry", "https://x"),
+                {
+                    let mut acct = account(
+                        "0003",
+                        Some("Shared"),
+                        "ops",
+                        "shared-entry",
+                        "Shared/ops/shared-entry",
+                        "https://y",
+                    );
+                    acct.share_id = Some("share1".to_string());
+                    acct
+                },
+                {
+                    // Group marker for the share — dedup should skip synthetic account
+                    let mut marker = account(
+                        "0004",
+                        Some("Shared"),
+                        "",
+                        "",
+                        "Shared/",
+                        "http://group",
+                    );
+                    marker.share_id = Some("share1".to_string());
+                    marker
+                },
+            ],
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn run_inner_mock_m_flag_and_format_equals_syntax() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(&home, &make_test_blob());
+
+        // Covers lines 44-45 (-m flag) and 57-58 (--format= equals syntax)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "-m".to_string(),
+                "--format=%aN".to_string(),
+            ])
+            .expect("-m and --format="),
+            0
+        );
+    }
+
+    #[test]
+    fn run_inner_mock_color_space_separated() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(&home, &make_test_blob());
+
+        // Covers lines 62-63 (--color space-separated)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--color".to_string(),
+                "never".to_string(),
+            ])
+            .expect("--color never"),
+            0
+        );
+    }
+
+    #[test]
+    fn run_inner_mock_share_dedup_and_none_group() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(&home, &make_test_blob());
+
+        // Covers lines 87-89 (share dedup — the blob has a share and a group marker)
+        // and lines 98-99 ((none) group filter)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--color=never".to_string(),
+                "(none)".to_string(),
+            ])
+            .expect("(none) group"),
+            0
+        );
+    }
+
+    #[test]
+    fn run_inner_mock_tree_rendering_always_color() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(&home, &make_test_blob());
+
+        // Covers lines 115-124 (tree rendering path when color_mode is Always)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--color=always".to_string(),
+            ])
+            .expect("tree always"),
+            0
+        );
+    }
+
+    #[test]
+    fn run_inner_mock_non_tree_group_filter_skip() {
+        let _guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        write_mock_state(&home, &make_test_blob());
+
+        // Covers line 128 (continue in non-tree rendering with group filter)
+        assert_eq!(
+            run_inner(&[
+                "--sync=no".to_string(),
+                "--color=never".to_string(),
+                "team".to_string(),
+            ])
+            .expect("non-tree group filter"),
+            0
+        );
     }
 }
