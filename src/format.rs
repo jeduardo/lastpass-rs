@@ -34,15 +34,9 @@ pub fn format_timestamp(timestamp: &str, utc: bool) -> String {
         datetime.to_offset(offset)
     };
 
-    let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]");
-    match format {
-        Ok(desc) => dt.format(&desc).unwrap_or_default(),
-        // LCOV_EXCL_START — unreachable: hardcoded format string is always valid
-        Err(_) => dt
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default(),
-        // LCOV_EXCL_STOP
-    }
+    let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]")
+        .expect("hardcoded format string must be valid");
+    dt.format(&format).unwrap_or_default()
 }
 
 pub fn format_account(format_str: &str, account: &Account) -> String {

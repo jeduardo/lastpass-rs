@@ -269,7 +269,7 @@ pub fn note_has_field(note_type: NoteType, field: &str) -> bool {
     }
     let idx = note_type.to_index();
     let Some(template) = NOTE_TEMPLATES.get(idx) else {
-        return true; // LCOV_EXCL_LINE — unreachable: all NoteType variants map to valid indices
+        return true;
     };
     template.fields.iter().any(|name| name == &field)
 }
@@ -403,16 +403,6 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
         }
         let line = &account.note[start..end];
 
-        if line.is_empty() && current_field.is_none() {
-            // LCOV_EXCL_START — unreachable: NoteType: line always sets current_field first
-            if end == bytes.len() {
-                break;
-            }
-            start = end + 1;
-            continue;
-            // LCOV_EXCL_STOP
-        }
-
         if let Some(colon_pos) = line.find(':') {
             let name = &line[..colon_pos];
             let value = &line[colon_pos + 1..];
@@ -462,14 +452,7 @@ pub fn expand_notes(account: &Account) -> Option<Account> {
         start = end + 1;
     }
 
-    if expanded.note.is_empty()
-        && expanded.username.is_empty()
-        && expanded.password.is_empty()
-        && expanded.url.is_empty()
-        && expanded.fields.is_empty()
-    {
-        expanded.note = account.note.clone(); // LCOV_EXCL_LINE — unreachable: NoteType: line always creates a field
-    } else if expanded.note.is_empty() {
+    if expanded.note.is_empty() {
         expanded.note = Zeroizing::new(String::new());
     }
 

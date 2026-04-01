@@ -85,7 +85,7 @@ pub fn session_save_with_store(
             "0"
         },
         key,
-    )?; // LCOV_EXCL_LINE — error path requires a failing ConfigStore
+    )?;
     store.write_encrypted_string(
         "session_ff_url_logging",
         if session.url_logging_enabled {
@@ -94,7 +94,7 @@ pub fn session_save_with_store(
             "0"
         },
         key,
-    )?; // LCOV_EXCL_LINE — error path requires a failing ConfigStore
+    )?;
 
     if let Some(private_key) = &session.private_key {
         store.write_encrypted_buffer("session_privatekey", private_key, key)?;

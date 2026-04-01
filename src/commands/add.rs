@@ -95,13 +95,6 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         let mut value = raw_input;
         trim_single_trailing_newline(&mut value);
         apply_choice_value(&mut account, parsed.choice, parsed.field.as_deref(), &value)?;
-        if account
-            .fields
-            .iter()
-            .any(|field| field.name.eq_ignore_ascii_case("NoteType"))
-        {
-            account = collapse_notes(&account);
-        }
         account
     };
 

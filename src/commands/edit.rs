@@ -357,7 +357,6 @@ fn render_account_file(account: &Account) -> String {
     out
 }
 
-// LCOV_EXCL_START — spawns external editor process, not testable in unit tests
 fn edit_with_editor(initial: &str) -> Result<String, String> {
     let mut file = crate::editor::create_secure_temp_file()?;
     file.write_all(initial.as_bytes())
@@ -374,7 +373,6 @@ fn edit_with_editor(initial: &str) -> Result<String, String> {
 
     fs::read_to_string(&path).map_err(|err| format!("read: {err}"))
 }
-// LCOV_EXCL_STOP
 
 fn read_stdin_to_string() -> Result<String, String> {
     let mut input = String::new();
