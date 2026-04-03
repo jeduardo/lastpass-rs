@@ -1,6 +1,6 @@
 [package]
 name = "lastpass-cli"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
 license = "GPL-2.0-or-later"
 repository = "https://github.com/jeduardo/lastpass-rs"
@@ -32,7 +32,11 @@ hmac = "0.12"
 pbkdf2 = "0.12"
 rand = { version = "0.8", features = ["getrandom"] }
 quick-xml = "0.38"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "rustls-tls",
+  "gzip",
+] }
 rpassword = "7"
 rsa = "0.9"
 regex = "1"
