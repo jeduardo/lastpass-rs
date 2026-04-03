@@ -1,5 +1,4 @@
 use super::*;
-use zeroize::Zeroizing;
 use crate::config::{
     ConfigEnv, config_path, config_read_encrypted_buffer, config_unlink, config_write_buffer,
     config_write_encrypted_buffer, config_write_encrypted_string, config_write_string,
@@ -9,6 +8,7 @@ use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
 use crate::session::{session_load, session_save};
 use filetime::{FileTime, set_file_mtime};
 use tempfile::TempDir;
+use zeroize::Zeroizing;
 
 fn minimal_blob_bytes(version: u32) -> Vec<u8> {
     let version = version.to_string();

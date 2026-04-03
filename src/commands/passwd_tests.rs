@@ -650,10 +650,7 @@ fn load_command_state_fails_when_session_missing() {
     // Do not save a session
 
     let err = load_command_state().expect_err("must fail");
-    assert!(
-        err.contains("Could not find session"),
-        "error: {err:?}"
-    );
+    assert!(err.contains("Could not find session"), "error: {err:?}");
 }
 
 #[test]
@@ -685,10 +682,7 @@ fn load_command_state_fails_when_username_missing() {
     session_save(&session, &key).expect("save session");
 
     let err = load_command_state().expect_err("must fail");
-    assert!(
-        err.contains("Could not find session"),
-        "error: {err:?}"
-    );
+    assert!(err.contains("Could not find session"), "error: {err:?}");
 }
 
 #[test]

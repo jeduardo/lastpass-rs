@@ -507,13 +507,7 @@ fn add_app_flag_injects_application_field() {
     // Covers add.rs lines 85-90: is_app path where Application field is auto-added
     let add_out = run(
         &home,
-        &[
-            "add",
-            "--sync=no",
-            "--non-interactive",
-            "--app",
-            "my-app",
-        ],
+        &["add", "--sync=no", "--non-interactive", "--app", "my-app"],
         Some("URL: https://app.example.com\nUsername: admin\nPassword: secret\nNotes:\n"),
     );
     assert_eq!(
@@ -563,10 +557,7 @@ fn add_with_choice_flag_covers_non_any_branch() {
         &["show", "--sync=no", "--username", "choice-entry"],
         None,
     );
-    assert_eq!(
-        String::from_utf8_lossy(&show_user.stdout).trim(),
-        "alice"
-    );
+    assert_eq!(String::from_utf8_lossy(&show_user.stdout).trim(), "alice");
 
     // Covers add.rs lines 98-105: choice path with NoteType in notes triggers collapse
     let add_notes = run(

@@ -16,14 +16,15 @@ fn run(args: &[&str]) -> (i32, String, String) {
 fn version_flag_prints_version() {
     let (status, stdout, stderr) = run(&["--version"]);
     assert_eq!(status, 0, "stderr: {stderr}");
-    assert!(stdout.starts_with("LastPass CLI (Rust) v"));
+    let package_version = env!("CARGO_PKG_VERSION");
+    assert!(stdout.starts_with(&format!(
+        "LastPass CLI (Rust) v{package_version}"
+    )));
     let line = stdout.lines().next().expect("version line");
     let rest = line
         .strip_prefix("LastPass CLI (Rust) v")
         .expect("version prefix");
-    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
-    assert_eq!(digits.len(), 14, "line: {line}");
-    assert!(rest[digits.len()..].starts_with(" ("), "line: {line}");
+    assert!(rest.starts_with(&format!("{package_version} (")), "line: {line}");
     assert!(stdout.contains("based on lastpass-cli"));
     assert!(stdout.contains("rustc "));
     assert!(stdout.contains("https://github.com/jeduardo/lastpass-rs"));

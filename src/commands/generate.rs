@@ -589,8 +589,9 @@ mod tests {
     fn update_existing_account_round_trips_secure_notes() {
         let mut account = account("0001", "note", "team");
         account.url = "http://sn".to_string();
-        account.note =
-            Zeroizing::new("NoteType: Server\nHostname: srv\nUsername: old-user\nPassword: old-pass".to_string());
+        account.note = Zeroizing::new(
+            "NoteType: Server\nHostname: srv\nUsername: old-user\nPassword: old-pass".to_string(),
+        );
 
         let updated = update_existing_account(
             &mut account,

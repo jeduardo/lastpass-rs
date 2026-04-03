@@ -480,9 +480,10 @@ fn generate_updates_secure_note_fields() {
     let (temp, home) = unique_test_home();
     let mut secure_note = account("0001", "server-note", "team");
     secure_note.url = "http://sn".to_string();
-    secure_note.note =
-        Zeroizing::new("NoteType: Server\nHostname:server.example.com\nUsername:old-user\nPassword:old-pass"
-            .to_string());
+    secure_note.note = Zeroizing::new(
+        "NoteType: Server\nHostname:server.example.com\nUsername:old-user\nPassword:old-pass"
+            .to_string(),
+    );
     let blob = Blob {
         version: 1,
         local_version: false,
