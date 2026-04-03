@@ -6,14 +6,14 @@
 An unofficial Rust rewrite of the LastPass CLI (`lpass`), with a strong focus on drop-in compatibility with the original C client.
 
   ⚠️ **WARNING** ⚠️ **Beta software:**
-  This project has reached feature parity with the original C client,
+  This project has reached user-facing command feature parity with the original C client,
   but may still contain bugs or edge cases.
   It was built with the help of [Codex](https://openai.com/index/codex/) and security reviewed with [Claude Code](https://claude.ai/claude-code).
   **Use at your own risk.**
 
 ## Status
 
-This project has reached feature parity with the C client. The goal is:
+This project has reached user-facing command feature parity with the C client. The goal is:
 
 - full feature parity with `lastpass-cli`
 - same command interface (flags/options)
@@ -25,7 +25,7 @@ The original C implementation is kept in `lastpass-cli/` and is used as the refe
 
 ## Current command coverage
 
-Implemented (working, with ongoing parity improvements):
+Implemented (feature parity reached):
 
 - `login`
 - `logout`
@@ -46,6 +46,11 @@ Implemented (working, with ongoing parity improvements):
 
 Planned / not fully implemented yet:
 - none currently tracked in the parity backlog
+
+Documented intentional deviations from the C client:
+- Version metadata is intentionally different. Rust prints a generated timestamp-based version plus git SHA, rather than the C client's `git describe`-style version string.
+- The HTTP `User-Agent` and `hasplugin` protocol metadata use that Rust-generated version string rather than the C client's `LASTPASS_CLI_VERSION`.
+- `LPASS_HTTP_MOCK` is a Rust-only test-harness environment variable and is not part of the upstream CLI surface.
 
 ## Implementation status
 
@@ -74,7 +79,7 @@ Per-command checklist:
 
   - default flow and success color output: :white_check_mark:
   - `--color`: :white_check_mark:
-  - `--trust` (trusted ID persistence + login/trust params): :white_check_mark: (basic parity)
+  - `--trust` (trusted ID persistence + login/trust params): :white_check_mark:
   - `--plaintext-key` confirmation UX parity (`--force` behavior): :white_check_mark:
 
 - `status`
@@ -87,7 +92,7 @@ Per-command checklist:
   - default list output: :white_check_mark:
   - `--color`: :white_check_mark:
   - `--long/-l`, `-m`, `-u` exact behavior parity: :white_check_mark:
-  - `--format/-f`: :white_check_mark: (basic parity)
+  - `--format/-f`: :white_check_mark:
   - positional `GROUP` filtering (including `(none)`): :white_check_mark:
   - tree/shared-folder rendering parity with C client: :white_check_mark:
 
@@ -97,7 +102,7 @@ Per-command checklist:
   - `--color`: :white_check_mark:
   - `--attach`, `--clip`: :white_check_mark:
   - `--basic-regexp/-G`, `--fixed-strings/-F`, `--expand-multi/-x`: :white_check_mark:
-  - `--title-format/-t`, `--format/-o`: :white_check_mark: (basic parity)
+  - `--title-format/-t`, `--format/-o`: :white_check_mark:
   - strict multi-match behavior/output parity: :white_check_mark:
 
 - `logout`
@@ -129,7 +134,7 @@ Per-command checklist:
 
 - `duplicate`
 
-  - default behavior, `--sync`, `--color`: :white_check_mark: (basic parity)
+  - default behavior, `--sync`, `--color`: :white_check_mark:
 
 - `generate`
 
@@ -140,31 +145,31 @@ Per-command checklist:
 
 - `export`
 
-  - default export and `--fields`: :white_check_mark: (basic parity)
+  - default export and `--fields`: :white_check_mark:
   - `--fields` validation parity: :white_check_mark:
   - protected-entry reprompt/auth parity: :white_check_mark:
 
 - `mv`
 
-  - default move behavior by ID/name: :white_check_mark: (basic parity)
+  - default move behavior by ID/name: :white_check_mark:
   - `--sync`, `--color`: :white_check_mark:
   - shared-folder move semantics parity: :white_check_mark:
 
 - `rm`
 
-  - default remove behavior by ID/name: :white_check_mark: (basic parity)
+  - default remove behavior by ID/name: :white_check_mark:
   - `--sync`, `--color`: :white_check_mark:
   - readonly shared-entry delete parity: :white_check_mark:
 
 - `sync`
 
-  - default path and `--background/-b`: :white_check_mark: (basic parity)
+  - default path and `--background/-b`: :white_check_mark:
   - `--color`: :white_check_mark:
   - uploader/background queue parity with C client: :white_check_mark:
 
 - `import`
 
-  - stdin/file CSV input and `--keep-dupes`: :white_check_mark: (basic parity)
+  - stdin/file CSV input and `--keep-dupes`: :white_check_mark:
   - core header mapping (`url,username,password,extra,name,grouping,fav`): :white_check_mark:
   - full API/upload parity and CSV edge cases: :white_check_mark:
 
