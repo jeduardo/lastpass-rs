@@ -76,6 +76,13 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo llvm-cov --workspace --all-targets --features test-harness --lcov --output-path coverage/lcov.info --ignore-filename-regex 'src/bin/test-upstream.rs$'
 
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: error
+
       - name: Upload coverage to Codecov
         if: ${{ env.ACT != 'true' }}
         uses: codecov/codecov-action@v5
