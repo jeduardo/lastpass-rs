@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 #[cfg(unix)]
 use std::io::Write;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -19,8 +19,8 @@ use super::{
     prompt_password_with_pinentry, prompt_password_with_pinentry_child, take_pinentry_stdio,
     write_prompt_description,
 };
-#[cfg(target_os = "linux")]
-use super::tty_name_for_linux_stdin;
+#[cfg(unix)]
+use super::tty_name_from_lookup;
 use tempfile::TempDir;
 
 #[cfg(unix)]
@@ -99,23 +99,23 @@ fn pinentry_unescape_stops_on_truncated_sequence() {
 }
 
 #[test]
-#[cfg(target_os = "linux")]
-fn tty_name_for_linux_stdin_returns_none_when_not_a_tty() {
-    let value = tty_name_for_linux_stdin(false, || Ok(PathBuf::from("/dev/pts/1")));
+#[cfg(unix)]
+fn tty_name_from_lookup_returns_none_when_not_a_tty() {
+    let value = tty_name_from_lookup(false, || Ok::<_, std::io::Error>(PathBuf::from("/dev/pts/1")));
     assert_eq!(value, None);
 }
 
 #[test]
-#[cfg(target_os = "linux")]
-fn tty_name_for_linux_stdin_reads_proc_fd_symlink() {
-    let value = tty_name_for_linux_stdin(true, || Ok(PathBuf::from("/dev/pts/1")));
+#[cfg(unix)]
+fn tty_name_from_lookup_returns_terminal_path() {
+    let value = tty_name_from_lookup(true, || Ok::<_, std::io::Error>(PathBuf::from("/dev/pts/1")));
     assert_eq!(value.as_deref(), Some("/dev/pts/1"));
 }
 
 #[test]
-#[cfg(target_os = "linux")]
-fn tty_name_for_linux_stdin_returns_none_when_readlink_fails() {
-    let value = tty_name_for_linux_stdin(true, || Err(std::io::Error::other("no tty")));
+#[cfg(unix)]
+fn tty_name_from_lookup_returns_none_when_lookup_fails() {
+    let value = tty_name_from_lookup(true, || Err::<PathBuf, _>(std::io::Error::other("no tty")));
     assert_eq!(value, None);
 }
 

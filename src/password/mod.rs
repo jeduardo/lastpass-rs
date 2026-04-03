@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::io::{BufRead, BufReader, Write};
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -286,24 +286,11 @@ fn pinentry_unescape(value: &str) -> String {
 }
 
 fn tty_name_for_stdin() -> Option<String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
-        tty_name_for_linux_stdin(std::io::stdin().is_terminal(), || {
-            std::fs::read_link("/proc/self/fd/0")
+        tty_name_from_lookup(std::io::stdin().is_terminal(), || {
+            nix::unistd::ttyname(std::io::stdin())
         })
-    }
-    #[cfg(all(unix, not(target_os = "linux")))]
-    {
-        if !std::io::stdin().is_terminal() {
-            return None;
-        }
-        Command::new("tty")
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| decode_password_output(output.stdout))
-            .filter(|tty| !tty.is_empty() && tty != "not a tty")
     }
     #[cfg(not(unix))]
     {
@@ -311,15 +298,15 @@ fn tty_name_for_stdin() -> Option<String> {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn tty_name_for_linux_stdin<F>(is_terminal: bool, read_link: F) -> Option<String>
+#[cfg(unix)]
+fn tty_name_from_lookup<E, F>(is_terminal: bool, lookup: F) -> Option<String>
 where
-    F: FnOnce() -> std::io::Result<PathBuf>,
+    F: FnOnce() -> std::result::Result<PathBuf, E>,
 {
     if !is_terminal {
         return None;
     }
-    read_link().ok().map(|path| path.to_string_lossy().into_owned())
+    lookup().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
 fn write_prompt_description<W: Write>(
