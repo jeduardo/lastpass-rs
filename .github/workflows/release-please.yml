@@ -118,14 +118,26 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Resolve created release tag
+        id: release-tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          TAG_NAME="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '.[] | select(.target_commitish == "'"${GITHUB_SHA}"'") | .tag_name' | head -n1)"
+          if [ -z "$TAG_NAME" ]; then
+            echo "Unable to find release tag for commit ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload assets to GitHub release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          TAG_NAME: ${{ steps.release-tag.outputs.tag_name }}
         run: gh release upload "$TAG_NAME" dist/* --clobber
 
       - name: Mark release as latest
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          TAG_NAME: ${{ steps.release-tag.outputs.tag_name }}
         run: gh release edit "$TAG_NAME" --latest
