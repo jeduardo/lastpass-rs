@@ -1,10 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::ffi::OsString;
-use std::io::IsTerminal;
 use std::io::{BufRead, BufReader, Write};
-#[cfg(unix)]
-use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use crate::error::{LpassError, Result};
@@ -288,25 +285,14 @@ fn pinentry_unescape(value: &str) -> String {
 fn tty_name_for_stdin() -> Option<String> {
     #[cfg(unix)]
     {
-        tty_name_from_lookup(std::io::stdin().is_terminal(), || {
-            nix::unistd::ttyname(std::io::stdin())
-        })
+        nix::unistd::ttyname(std::io::stdin())
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned())
     }
     #[cfg(not(unix))]
     {
         None
     }
-}
-
-#[cfg(unix)]
-fn tty_name_from_lookup<E, F>(is_terminal: bool, lookup: F) -> Option<String>
-where
-    F: FnOnce() -> std::result::Result<PathBuf, E>,
-{
-    if !is_terminal {
-        return None;
-    }
-    lookup().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
 fn write_prompt_description<W: Write>(

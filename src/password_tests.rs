@@ -4,8 +4,6 @@ use std::io::IsTerminal;
 #[cfg(unix)]
 use std::io::Write;
 #[cfg(unix)]
-use std::path::PathBuf;
-#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::path::Path;
@@ -19,8 +17,6 @@ use super::{
     prompt_password_with_pinentry, prompt_password_with_pinentry_child, take_pinentry_stdio,
     write_prompt_description,
 };
-#[cfg(unix)]
-use super::tty_name_from_lookup;
 use tempfile::TempDir;
 
 #[cfg(unix)]
@@ -96,27 +92,6 @@ fn pinentry_unescape_decodes_utf8_escape_bytes() {
 #[test]
 fn pinentry_unescape_stops_on_truncated_sequence() {
     assert_eq!(pinentry_unescape("abc%"), "abc");
-}
-
-#[test]
-#[cfg(unix)]
-fn tty_name_from_lookup_returns_none_when_not_a_tty() {
-    let value = tty_name_from_lookup(false, || Ok::<_, std::io::Error>(PathBuf::from("/dev/pts/1")));
-    assert_eq!(value, None);
-}
-
-#[test]
-#[cfg(unix)]
-fn tty_name_from_lookup_returns_terminal_path() {
-    let value = tty_name_from_lookup(true, || Ok::<_, std::io::Error>(PathBuf::from("/dev/pts/1")));
-    assert_eq!(value.as_deref(), Some("/dev/pts/1"));
-}
-
-#[test]
-#[cfg(unix)]
-fn tty_name_from_lookup_returns_none_when_lookup_fails() {
-    let value = tty_name_from_lookup(true, || Err::<PathBuf, _>(std::io::Error::other("no tty")));
-    assert_eq!(value, None);
 }
 
 #[test]
