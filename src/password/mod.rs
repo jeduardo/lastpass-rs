@@ -3,6 +3,8 @@
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use crate::error::{LpassError, Result};
@@ -284,18 +286,17 @@ fn pinentry_unescape(value: &str) -> String {
 }
 
 fn tty_name_for_stdin() -> Option<String> {
-    if !std::io::stdin().is_terminal() {
-        return None;
-    }
-
     #[cfg(target_os = "linux")]
     {
-        std::fs::read_link("/proc/self/fd/0")
-            .ok()
-            .map(|path| path.to_string_lossy().into_owned())
+        tty_name_for_linux_stdin(std::io::stdin().is_terminal(), || {
+            std::fs::read_link("/proc/self/fd/0")
+        })
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {
+        if !std::io::stdin().is_terminal() {
+            return None;
+        }
         Command::new("tty")
             .stderr(Stdio::null())
             .output()
@@ -308,6 +309,17 @@ fn tty_name_for_stdin() -> Option<String> {
     {
         None
     }
+}
+
+#[cfg(target_os = "linux")]
+fn tty_name_for_linux_stdin<F>(is_terminal: bool, read_link: F) -> Option<String>
+where
+    F: FnOnce() -> std::io::Result<PathBuf>,
+{
+    if !is_terminal {
+        return None;
+    }
+    read_link().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
 fn write_prompt_description<W: Write>(
