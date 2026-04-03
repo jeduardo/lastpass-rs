@@ -173,7 +173,10 @@ mod tests {
     fn run_inner_without_session_reports_missing_key() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("tempdir");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
 
         let err = run_inner(&[]).expect_err("missing key");
         assert!(err.contains("Could not find decryption key"));
@@ -184,7 +187,6 @@ mod tests {
     fn run_inner_waits_for_existing_uploader_process() {
         let _override_guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("tempdir");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
         let _config_guard = set_test_env(ConfigEnv {
             lpass_home: Some(home.path().to_path_buf()),
             ..ConfigEnv::default()

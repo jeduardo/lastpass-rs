@@ -252,7 +252,10 @@ fn run_returns_zero_for_successful_plain_move() {
 fn run_inner_reports_load_blob_errors() {
     let _guard = crate::lpenv::begin_test_overrides();
     let home = TempDir::new().expect("temp home");
-    crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(home.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
 
     let err = run_inner(&["entry".to_string(), "ops".to_string()]).expect_err("load blob error");
     assert!(err.contains("Could not find decryption key"));
