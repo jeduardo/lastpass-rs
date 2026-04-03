@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.0...lastpass-cli-v0.1.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* pinentry login on macOS ([#24](https://github.com/jeduardo/lastpass-rs/issues/24)) ([731b95d](https://github.com/jeduardo/lastpass-rs/commit/731b95dbf4dd39be2c38e8224abf0e50303defc2))
+
 ## 0.1.0 (2026-04-03)
 
 
