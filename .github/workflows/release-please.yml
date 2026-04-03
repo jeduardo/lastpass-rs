@@ -28,7 +28,7 @@ jobs:
         id: release
         uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
@@ -120,12 +120,12 @@ jobs:
 
       - name: Upload assets to GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: gh release upload "$TAG_NAME" dist/* --clobber
 
       - name: Mark release as latest
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG_NAME" --latest
