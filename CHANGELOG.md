@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.0...lastpass-cli-v0.1.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* upload release artefacts to release ([50f53e9](https://github.com/jeduardo/lastpass-rs/commit/50f53e9dff4f7be50aca163c82349fe3c5752f01))
+
 ## 0.1.0 (2026-04-03)
 
 
