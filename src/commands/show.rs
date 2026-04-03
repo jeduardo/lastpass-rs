@@ -789,7 +789,9 @@ mod tests {
     use super::*;
     use crate::blob::Attachment;
     use crate::blob::Field;
-    use crate::config::{config_write_buffer, config_write_encrypted_string};
+    use crate::config::{
+        ConfigEnv, config_write_buffer, config_write_encrypted_string, set_test_env,
+    };
     use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
     use crate::session::{Session, session_save};
     use tempfile::TempDir;
@@ -1086,7 +1088,10 @@ mod tests {
     fn run_inner_with_mock_covers_common_choice_paths() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_blob_state();
 
@@ -1196,7 +1201,10 @@ mod tests {
     fn run_inner_mock_covers_all_json_clip_and_error_choices() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "cat > /dev/null");
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");
@@ -1246,7 +1254,10 @@ mod tests {
     fn run_inner_all_renders_fields_attachments_and_notes_in_mock_mode() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_blob_state();
 
@@ -1303,7 +1314,10 @@ mod tests {
     fn fetch_attachment_ciphertext_reports_missing_session_and_empty_variants() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
 
         let key = [7u8; KDF_HASH_LEN];
@@ -1385,7 +1399,10 @@ mod tests {
     fn run_inner_mock_all_clip_covers_emit_all_output_with_clipboard() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         crate::lpenv::set_override_for_tests("LPASS_CLIPBOARD_COMMAND", "cat > /dev/null");
         crate::lpenv::set_override_for_tests("SHELL", "/bin/sh");

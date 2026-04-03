@@ -281,7 +281,9 @@ fn render_tree_lines_inner(node: &LsNode, format: &str, level: usize, out: &mut 
 mod tests {
     use super::*;
     use crate::blob::{Blob, Share};
-    use crate::config::{config_write_buffer, config_write_encrypted_string};
+    use crate::config::{
+        ConfigEnv, config_write_buffer, config_write_encrypted_string, set_test_env,
+    };
     use crate::kdf::KDF_HASH_LEN;
     use crate::session::{Session, session_save};
     use tempfile::TempDir;
@@ -548,7 +550,10 @@ mod tests {
     fn run_inner_mock_m_flag_and_format_equals_syntax() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_state(&home, &make_test_blob());
 
@@ -568,7 +573,10 @@ mod tests {
     fn run_inner_mock_color_space_separated() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_state(&home, &make_test_blob());
 
@@ -588,7 +596,10 @@ mod tests {
     fn run_inner_mock_share_dedup_and_none_group() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_state(&home, &make_test_blob());
 
@@ -609,7 +620,10 @@ mod tests {
     fn run_inner_mock_tree_rendering_always_color() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_state(&home, &make_test_blob());
 
@@ -625,7 +639,10 @@ mod tests {
     fn run_inner_mock_non_tree_group_filter_skip() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         write_mock_state(&home, &make_test_blob());
 

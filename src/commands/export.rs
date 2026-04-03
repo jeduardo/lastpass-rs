@@ -299,7 +299,10 @@ mod tests {
     fn run_inner_accepts_color_and_exports_in_mock_mode() {
         let _guard = crate::lpenv::begin_test_overrides();
         let home = TempDir::new().expect("temp home");
-        crate::lpenv::set_override_for_tests("LPASS_HOME", &home.path().display().to_string());
+        let _config_guard = set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
         crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
         let key = [7u8; KDF_HASH_LEN];
         let blob = crate::blob::Blob {
