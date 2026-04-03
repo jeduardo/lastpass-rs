@@ -961,8 +961,7 @@ mod tests {
 
     #[test]
     fn parse_add_args_field_without_value() {
-        let err =
-            parse_add_args(&["--field".to_string()]).expect_err("--field missing value");
+        let err = parse_add_args(&["--field".to_string()]).expect_err("--field missing value");
         assert!(err.contains("usage: add"));
     }
 
@@ -984,15 +983,14 @@ mod tests {
         .expect_err("invalid note type");
         assert!(err.contains("--note-type=TYPE"));
 
-        let err = parse_add_args(&["--note-type".to_string()])
-            .expect_err("missing note type value");
+        let err =
+            parse_add_args(&["--note-type".to_string()]).expect_err("missing note type value");
         assert!(err.contains("--note-type=TYPE"));
     }
 
     #[test]
     fn parse_add_args_sync_without_value() {
-        let err = parse_add_args(&["--sync".to_string()])
-            .expect_err("--sync missing value");
+        let err = parse_add_args(&["--sync".to_string()]).expect_err("--sync missing value");
         assert!(err.contains("usage: add"));
     }
 
@@ -1006,37 +1004,26 @@ mod tests {
         .expect("valid color");
         assert_eq!(parsed.name, "name");
 
-        let err = parse_add_args(&[
-            "--color".to_string(),
-            "bad".to_string(),
-            "name".to_string(),
-        ])
-        .expect_err("invalid color");
+        let err = parse_add_args(&["--color".to_string(), "bad".to_string(), "name".to_string()])
+            .expect_err("invalid color");
         assert!(err.contains("usage: add"));
 
-        let err =
-            parse_add_args(&["--color".to_string()]).expect_err("missing color value");
+        let err = parse_add_args(&["--color".to_string()]).expect_err("missing color value");
         assert!(err.contains("usage: add"));
     }
 
     #[test]
     fn parse_add_args_field_equals_syntax() {
-        let parsed = parse_add_args(&[
-            "--field=Hostname".to_string(),
-            "name".to_string(),
-        ])
-        .expect("field equals syntax");
+        let parsed = parse_add_args(&["--field=Hostname".to_string(), "name".to_string()])
+            .expect("field equals syntax");
         assert_eq!(parsed.choice, EditChoice::Field);
         assert_eq!(parsed.field.as_deref(), Some("Hostname"));
     }
 
     #[test]
     fn parse_add_args_color_equals_invalid() {
-        let err = parse_add_args(&[
-            "--color=bad".to_string(),
-            "name".to_string(),
-        ])
-        .expect_err("invalid color equals");
+        let err = parse_add_args(&["--color=bad".to_string(), "name".to_string()])
+            .expect_err("invalid color equals");
         assert!(err.contains("usage: add"));
     }
 
@@ -1091,24 +1078,20 @@ mod tests {
     fn apply_choice_value_any_is_noop() {
         let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
         let before_url = account.url.clone();
-        apply_choice_value(&mut account, EditChoice::Any, None, "ignored")
-            .expect("any noop");
+        apply_choice_value(&mut account, EditChoice::Any, None, "ignored").expect("any noop");
         assert_eq!(account.url, before_url);
     }
 
     #[test]
     fn apply_choice_value_sets_username_password_url() {
         let mut account = new_account("entry", EditChoice::Any, NoteType::None, false);
-        apply_choice_value(&mut account, EditChoice::Username, None, "user1")
-            .expect("username");
+        apply_choice_value(&mut account, EditChoice::Username, None, "user1").expect("username");
         assert_eq!(*account.username, "user1");
 
-        apply_choice_value(&mut account, EditChoice::Password, None, "pass1")
-            .expect("password");
+        apply_choice_value(&mut account, EditChoice::Password, None, "pass1").expect("password");
         assert_eq!(*account.password, "pass1");
 
-        apply_choice_value(&mut account, EditChoice::Url, None, "https://x.com")
-            .expect("url");
+        apply_choice_value(&mut account, EditChoice::Url, None, "https://x.com").expect("url");
         assert_eq!(account.url, "https://x.com");
     }
 
@@ -1168,10 +1151,7 @@ mod tests {
     fn build_account_adds_note_type_field_when_missing() {
         // When note_type is set but has_note_type_field is false,
         // build_account should add the NoteType field (lines 556-561).
-        let parsed = parse_entry_input(
-            "Hostname: host\nNotes:\nbody",
-            NoteType::Server,
-        );
+        let parsed = parse_entry_input("Hostname: host\nNotes:\nbody", NoteType::Server);
         assert!(!parsed.has_note_type_field);
         let account = build_account(&parsed, "entry");
         assert!(account.note.contains("NoteType:"));

@@ -534,14 +534,8 @@ mod tests {
                 },
                 {
                     // Group marker for the share — dedup should skip synthetic account
-                    let mut marker = account(
-                        "0004",
-                        Some("Shared"),
-                        "",
-                        "",
-                        "Shared/",
-                        "http://group",
-                    );
+                    let mut marker =
+                        account("0004", Some("Shared"), "", "", "Shared/", "http://group");
                     marker.share_id = Some("share1".to_string());
                     marker
                 },
@@ -621,11 +615,8 @@ mod tests {
 
         // Covers lines 115-124 (tree rendering path when color_mode is Always)
         assert_eq!(
-            run_inner(&[
-                "--sync=no".to_string(),
-                "--color=always".to_string(),
-            ])
-            .expect("tree always"),
+            run_inner(&["--sync=no".to_string(), "--color=always".to_string(),])
+                .expect("tree always"),
             0
         );
     }

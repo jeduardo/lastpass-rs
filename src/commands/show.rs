@@ -1416,16 +1416,16 @@ mod tests {
         let output = String::from_utf8_lossy(&buf);
         assert!(output.contains("user1"), "missing username: {output}");
         assert!(output.contains("pass1"), "missing password: {output}");
-        assert!(output.contains("https://example.com"), "missing url: {output}");
+        assert!(
+            output.contains("https://example.com"),
+            "missing url: {output}"
+        );
     }
 
     #[test]
     fn find_matches_exact_with_name_zero_skips_id_search() {
         // Covers line 486 (closing brace of `if name != "0"` — the else path)
-        let accounts = vec![
-            account("0001", "alpha", "team"),
-            account("0002", "0", ""),
-        ];
+        let accounts = vec![account("0001", "alpha", "team"), account("0002", "0", "")];
         let result =
             find_matches(&accounts, &["0".to_string()], SearchMode::Exact).expect("name 0");
         assert_eq!(result, vec![1]);

@@ -1,11 +1,11 @@
 use super::*;
 use std::collections::VecDeque;
-use zeroize::Zeroizing;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
 use std::sync::{Arc, Once};
 use std::thread;
+use zeroize::Zeroizing;
 
 use crate::blob::Blob;
 use crate::config::{ConfigEnv, ConfigStore, set_test_env};

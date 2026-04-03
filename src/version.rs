@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub fn generated_version() -> &'static str {
-    env!("LPASS_RS_VERSION")
+    env!("CARGO_PKG_VERSION")
 }
 
 pub fn version_string() -> String {
@@ -39,16 +39,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_version_is_timestamp_shaped() {
-        let version = generated_version();
-        assert_eq!(version.len(), 14);
-        assert!(version.chars().all(|ch| ch.is_ascii_digit()));
+    fn generated_version_matches_package_version() {
+        assert_eq!(generated_version(), env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
-    fn format_version_string_places_timestamp_and_sha_separately() {
+    fn format_version_string_places_package_version_and_sha_separately() {
+        let package_version = env!("CARGO_PKG_VERSION");
         let out = format_version_string(
-            "20260312203849",
+            package_version,
             "abcdef123456",
             "v1.2.3",
             "123456abcdef",
@@ -56,7 +55,9 @@ mod tests {
             "https://example.invalid/repo",
         );
 
-        assert!(out.starts_with("LastPass CLI (Rust) v20260312203849 (abcdef123456)"));
+        assert!(out.starts_with(&format!(
+            "LastPass CLI (Rust) v{package_version} (abcdef123456)"
+        )));
         assert!(out.contains("based on lastpass-cli v1.2.3"));
         assert!(out.contains("upstream 123456abcdef"));
         assert!(out.contains("rustc 1.90.0"));

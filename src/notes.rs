@@ -722,21 +722,36 @@ mod tests {
             ("bank", NoteType::Bank, "Bank Account"),
             ("credit-card", NoteType::Credit, "Credit Card"),
             ("database", NoteType::Database, "Database"),
-            ("drivers-license", NoteType::DriversLicense, "Driver's License"),
+            (
+                "drivers-license",
+                NoteType::DriversLicense,
+                "Driver's License",
+            ),
             ("email", NoteType::Email, "Email Account"),
-            ("health-insurance", NoteType::HealthInsurance, "Health Insurance"),
+            (
+                "health-insurance",
+                NoteType::HealthInsurance,
+                "Health Insurance",
+            ),
             ("im", NoteType::Im, "Instant Messenger"),
             ("insurance", NoteType::Insurance, "Insurance"),
             ("mastercard", NoteType::Mastercard, "Mastercard"),
             ("membership", NoteType::Membership, "Membership"),
             ("passport", NoteType::Passport, "Passport"),
-            ("software-license", NoteType::SoftwareLicense, "Software License"),
+            (
+                "software-license",
+                NoteType::SoftwareLicense,
+                "Software License",
+            ),
             ("visa", NoteType::Visa, "VISA"),
             ("wifi", NoteType::Wifi, "Wi-Fi Password"),
         ];
         for (shortname, expected_type, expected_name) in all {
             let note_type = note_type_by_shortname(shortname);
-            assert_eq!(note_type, expected_type, "from_index mismatch for {shortname}");
+            assert_eq!(
+                note_type, expected_type,
+                "from_index mismatch for {shortname}"
+            );
             assert_eq!(
                 note_type_display_name(note_type),
                 Some(expected_name),
@@ -753,7 +768,11 @@ mod tests {
         let account = base_secure_note(note);
         let expanded = expand_notes(&account).expect("expanded");
         assert_eq!(*expanded.username, "admin");
-        let hostname = expanded.fields.iter().find(|f| f.name == "Hostname").expect("hostname");
+        let hostname = expanded
+            .fields
+            .iter()
+            .find(|f| f.name == "Hostname")
+            .expect("hostname");
         assert_eq!(hostname.value, "box1");
     }
 
@@ -778,5 +797,4 @@ mod tests {
         let result = parse_note_type("Just a plain note without NoteType header");
         assert_eq!(result, NoteType::None);
     }
-
 }

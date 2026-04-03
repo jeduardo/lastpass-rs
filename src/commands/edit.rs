@@ -649,8 +649,8 @@ mod tests {
     };
     use crate::kdf::KDF_HASH_LEN;
     use crate::session::{Session, session_save};
-    use zeroize::Zeroizing;
     use tempfile::TempDir;
+    use zeroize::Zeroizing;
 
     fn account() -> Account {
         Account {
@@ -1233,9 +1233,8 @@ mod tests {
 
     #[test]
     fn parse_edit_args_color_equals_invalid_value() {
-        let err =
-            parse_edit_args(&["--color=bad".to_string(), "myentry".to_string()])
-                .expect_err("invalid color=value");
+        let err = parse_edit_args(&["--color=bad".to_string(), "myentry".to_string()])
+            .expect_err("invalid color=value");
         assert!(err.contains("usage: edit"));
     }
 
@@ -1329,15 +1328,13 @@ mod tests {
             attachkey: Zeroizing::new(String::new()),
             attachkey_encrypted: None,
             attachpresent: false,
-            fields: vec![
-                Field {
-                    name: "NoteType".to_string(),
-                    field_type: "text".to_string(),
-                    value: "Email Account".to_string(),
-                    value_encrypted: None,
-                    checked: false,
-                },
-            ],
+            fields: vec![Field {
+                name: "NoteType".to_string(),
+                field_type: "text".to_string(),
+                value: "Email Account".to_string(),
+                value_encrypted: None,
+                checked: false,
+            }],
         };
         let rendered = render_account_file(&acct);
         // Should NOT contain URL/Username/Password at top level (note_type != None)
@@ -1358,7 +1355,8 @@ mod tests {
     fn parse_update_input_multiline_field_with_colon_not_valid_field() {
         // A line like "key: value" inside a multiline field, where key is NOT a valid
         // field name for the note type, should be treated as continuation (lines 509-512)
-        let input = "Private Key: line1\nsome-unknown: still-part-of-key\nNotes: comment\nthe notes";
+        let input =
+            "Private Key: line1\nsome-unknown: still-part-of-key\nNotes: comment\nthe notes";
         let parsed = parse_update_input(input, NoteType::SshKey);
         let pk = parsed
             .fields

@@ -189,7 +189,10 @@ mod tests {
         let key = [4u8; KDF_HASH_LEN];
         let session = Session::default(); // all fields empty => invalid
         let err = session_save_with_store(&store, &session, &key).expect_err("invalid session");
-        assert!(matches!(err, crate::error::LpassError::Crypto("invalid session")));
+        assert!(matches!(
+            err,
+            crate::error::LpassError::Crypto("invalid session")
+        ));
     }
 
     #[test]
