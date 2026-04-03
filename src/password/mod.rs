@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use std::ffi::OsString;
-#[cfg(target_os = "linux")]
 use std::io::IsTerminal;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -285,16 +284,27 @@ fn pinentry_unescape(value: &str) -> String {
 }
 
 fn tty_name_for_stdin() -> Option<String> {
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+
     #[cfg(target_os = "linux")]
     {
-        if !std::io::stdin().is_terminal() {
-            return None;
-        }
         std::fs::read_link("/proc/self/fd/0")
             .ok()
             .map(|path| path.to_string_lossy().into_owned())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        Command::new("tty")
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| decode_password_output(output.stdout))
+            .filter(|tty| !tty.is_empty() && tty != "not a tty")
+    }
+    #[cfg(not(unix))]
     {
         None
     }

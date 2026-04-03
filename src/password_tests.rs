@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::io::IsTerminal;
 #[cfg(unix)]
 use std::io::Write;
@@ -273,7 +273,7 @@ fn prompt_password_with_pinentry_sends_expected_option_commands() {
     assert!(transcript.contains("SETDESC Prompt description"));
     assert!(transcript.contains("OPTION ttytype=xterm-256color"));
     assert!(transcript.contains("OPTION display=:99"));
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         if std::io::stdin().is_terminal() {
             assert!(transcript.contains("OPTION ttyname="));
@@ -281,8 +281,6 @@ fn prompt_password_with_pinentry_sends_expected_option_commands() {
             assert!(!transcript.contains("OPTION ttyname="));
         }
     }
-    #[cfg(not(target_os = "linux"))]
-    assert!(!transcript.contains("OPTION ttyname="));
     assert!(transcript.contains("GETPIN"));
     assert!(transcript.contains("BYE"));
 }
