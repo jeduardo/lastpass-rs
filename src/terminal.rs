@@ -2,7 +2,7 @@
 
 use std::env;
 use std::io::IsTerminal;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::cell::Cell;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ColorMode {
@@ -11,7 +11,9 @@ pub enum ColorMode {
     Always = 2,
 }
 
-static COLOR_MODE: AtomicU8 = AtomicU8::new(ColorMode::Auto as u8);
+thread_local! {
+    static COLOR_MODE: Cell<u8> = const { Cell::new(ColorMode::Auto as u8) };
+}
 
 pub const FG_RED: &str = "\x1b[31m";
 pub const FG_GREEN: &str = "\x1b[32m";
@@ -24,7 +26,7 @@ pub const UNDERLINE: &str = "\x1b[4m";
 pub const RESET: &str = "\x1b[0m";
 
 pub fn set_color_mode(mode: ColorMode) {
-    COLOR_MODE.store(mode as u8, Ordering::Relaxed);
+    COLOR_MODE.with(|value| value.set(mode as u8));
 }
 
 pub fn parse_color_mode(value: &str) -> Option<ColorMode> {
@@ -69,11 +71,7 @@ pub fn cli_failure_text(message: &str) -> String {
 }
 
 fn render(text: &str, is_tty: bool) -> String {
-    let mode = match COLOR_MODE.load(Ordering::Relaxed) {
-        1 => ColorMode::Never,
-        2 => ColorMode::Always,
-        _ => ColorMode::Auto,
-    };
+    let mode = current_mode();
 
     let use_color = match mode {
         ColorMode::Always => true,
@@ -126,11 +124,11 @@ fn format_cli_usage(program_path: &str, usage: &str, is_tty: bool) -> String {
 }
 
 fn current_mode() -> ColorMode {
-    match COLOR_MODE.load(Ordering::Relaxed) {
+    COLOR_MODE.with(|value| match value.get() {
         1 => ColorMode::Never,
         2 => ColorMode::Always,
         _ => ColorMode::Auto,
-    }
+    })
 }
 
 fn render_with_mode(text: &str, is_tty: bool, mode: ColorMode) -> String {

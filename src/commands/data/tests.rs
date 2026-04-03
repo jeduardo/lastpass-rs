@@ -1302,6 +1302,11 @@ fn is_secure_note_checks_sn_url_only() {
 
 #[test]
 fn load_queue_credentials_reports_missing_key_without_session() {
+    let temp = TempDir::new().expect("tempdir");
+    let _config_guard = set_test_env(ConfigEnv {
+        lpass_home: Some(temp.path().to_path_buf()),
+        ..ConfigEnv::default()
+    });
     let err = load_queue_credentials().expect_err("missing key");
     assert!(matches!(err, LpassError::User(_)));
 }
