@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufRead, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::agent_save;
 use crate::config::config_unlink;
@@ -472,6 +474,32 @@ fn outofband_login(
     params: &mut Vec<(String, String)>,
     challenge: &LoginChallenge,
 ) -> Result<OutOfBandResult> {
+    let interrupt = challenge
+        .capabilities
+        .as_deref()
+        .filter(|capabilities| {
+            let capabilities = capabilities.split(',').collect::<Vec<_>>();
+            capabilities.contains(&"outofband") && capabilities.contains(&"passcode")
+        })
+        .map(|_| SigintFlag::new())
+        .transpose()
+        .map_err(|error| crate::error::LpassError::io("registering Ctrl+C handler", error))?;
+
+    outofband_login_with_interrupt_check(client, server, params, challenge, || {
+        interrupt.as_ref().is_some_and(SigintFlag::is_interrupted)
+    })
+}
+
+fn outofband_login_with_interrupt_check<F>(
+    client: &HttpClient,
+    server: &str,
+    params: &mut Vec<(String, String)>,
+    challenge: &LoginChallenge,
+    mut was_interrupted: F,
+) -> Result<OutOfBandResult>
+where
+    F: FnMut() -> bool,
+{
     let Some(name) = challenge.outofband_name.as_deref() else {
         return Err(crate::error::LpassError::User(
             "Could not determine out-of-band type.",
@@ -492,12 +520,26 @@ fn outofband_login(
         "{}",
         terminal::render_stderr(&format!(
             "{FG_YELLOW}{BOLD}Waiting for approval of out-of-band \
-             {name} login{RESET}..."
+             {name} login{}{RESET}...",
+            if can_use_passcode {
+                ", or press Ctrl+C to enter a passcode"
+            } else {
+                ""
+            }
         ))
     );
     set_login_param(params, "outofbandrequest", "1".to_string());
     loop {
-        match post_login_form(client, server, params) {
+        if can_use_passcode && was_interrupted() {
+            eprintln!();
+            return Ok(oob_passcode_fallback(params, name));
+        }
+        let response = post_login_form(client, server, params);
+        if can_use_passcode && was_interrupted() {
+            eprintln!();
+            return Ok(oob_passcode_fallback(params, name));
+        }
+        match response {
             Err(_) if can_use_passcode => {
                 eprintln!();
                 return Ok(oob_passcode_fallback(params, name));
@@ -538,6 +580,33 @@ fn oob_passcode_fallback(params: &mut Vec<(String, String)>, name: &str) -> OutO
     set_login_param(params, "outofbandretry", "0".to_string());
     set_login_param(params, "outofbandretryid", String::new());
     OutOfBandResult::Passcode(format!("{name} OTP"))
+}
+
+struct SigintFlag {
+    interrupted: Arc<AtomicBool>,
+    signal_id: signal_hook::SigId,
+}
+
+impl SigintFlag {
+    fn new() -> io::Result<Self> {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let signal_id =
+            signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted))?;
+        Ok(Self {
+            interrupted,
+            signal_id,
+        })
+    }
+
+    fn is_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for SigintFlag {
+    fn drop(&mut self) {
+        signal_hook::low_level::unregister(self.signal_id);
+    }
 }
 
 fn filter_error_message(message: &str) -> &'static str {
@@ -1194,6 +1263,57 @@ mod tests {
             requests[2].params.get("otp").map(String::as_str),
             Some("654321")
         );
+    }
+
+    #[test]
+    fn outofband_login_falls_back_to_passcode_when_poll_is_interrupted() {
+        let client = HttpClient::mock();
+        let challenge = LoginChallenge {
+            cause: "outofbandrequired".to_string(),
+            message: None,
+            server: None,
+            outofband_name: Some("Email".to_string()),
+            capabilities: Some("outofband,passcode".to_string()),
+            retry_id: None,
+        };
+        let mut params = vec![("username".to_string(), "user@example.com".to_string())];
+        let mut checks = 0;
+
+        let result = outofband_login_with_interrupt_check(
+            &client,
+            "lastpass.com",
+            &mut params,
+            &challenge,
+            || {
+                checks += 1;
+                checks == 2
+            },
+        )
+        .expect("interrupt should select passcode fallback");
+
+        assert!(matches!(result, OutOfBandResult::Passcode(ref name) if name == "Email OTP"));
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandrequest"),
+            Some(&("outofbandrequest".to_string(), "0".to_string()))
+        );
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandretry"),
+            Some(&("outofbandretry".to_string(), "0".to_string()))
+        );
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandretryid"),
+            Some(&("outofbandretryid".to_string(), String::new()))
+        );
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 1);
+    }
+
+    #[test]
+    fn sigint_flag_records_ctrl_c() {
+        let interrupt = SigintFlag::new().expect("register SIGINT handler");
+
+        signal_hook::low_level::raise(signal_hook::consts::SIGINT).expect("raise SIGINT");
+
+        assert!(interrupt.is_interrupted());
     }
 
     #[test]
