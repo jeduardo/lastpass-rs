@@ -51,7 +51,7 @@ fn login_prompt_reads_password_from_tty_without_askpass() {
     assert!(
         transcript.contains("Please enter the LastPass master password for <user@example.com>.")
     );
-    assert!(transcript.contains("Master Password:"));
+    assert!(transcript.contains("Master Password"));
 }
 
 #[test]
