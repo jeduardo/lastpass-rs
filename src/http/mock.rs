@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 #[cfg(test)]
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
@@ -31,6 +31,13 @@ const MOCK_PWCHANGE_TOKEN: &str = "mock-pwchange-token";
 const MOCK_BLOB_VERSION: &str = "123";
 pub(crate) const MOCK_REMOTE_BLOB_NAME: &str = "mock-remote-blob.json";
 
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct MockRequest {
+    pub(crate) page: String,
+    pub(crate) params: HashMap<String, String>,
+}
+
 pub(crate) struct MockTransport {
     username: String,
     login_hash: String,
@@ -41,6 +48,12 @@ pub(crate) struct MockTransport {
     sharing_public_key_hex: String,
     #[cfg(test)]
     pub(crate) overrides: std::sync::Mutex<HashMap<String, VecDeque<HttpResponse>>>,
+    #[cfg(test)]
+    requests: std::sync::Mutex<Vec<MockRequest>>,
+    #[cfg(test)]
+    request_counts: std::sync::Mutex<HashMap<String, usize>>,
+    #[cfg(test)]
+    failures: std::sync::Mutex<HashSet<(String, usize)>>,
 }
 
 #[cfg(test)]
@@ -78,6 +91,12 @@ impl MockTransport {
             sharing_public_key_hex,
             #[cfg(test)]
             overrides: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            requests: std::sync::Mutex::new(Vec::new()),
+            #[cfg(test)]
+            request_counts: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            failures: std::sync::Mutex::new(HashSet::new()),
         }
     }
 
@@ -98,6 +117,21 @@ impl MockTransport {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_overrides_and_failure(
+        overrides: &[(&str, u16, &str)],
+        page: &str,
+        call: usize,
+    ) -> Self {
+        let transport = Self::with_overrides(overrides);
+        transport
+            .failures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert((page.to_string(), call));
+        transport
+    }
+
+    #[cfg(test)]
     pub(crate) fn override_response(&self, page: &str) -> Option<HttpResponse> {
         let mut map = lock_overrides(self.overrides.lock());
         let responses = map.get_mut(page)?;
@@ -108,10 +142,51 @@ impl MockTransport {
         response
     }
 
-    pub(crate) fn respond(&self, page: &str, params: &[(&str, &str)]) -> HttpResponse {
+    #[cfg(test)]
+    pub(crate) fn requests(&self) -> Vec<MockRequest> {
+        self.requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn respond(
+        &self,
+        page: &str,
+        params: &[(&str, &str)],
+    ) -> crate::error::Result<HttpResponse> {
         #[cfg(test)]
-        if let Some(response) = self.override_response(page) {
-            return response;
+        {
+            self.requests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(MockRequest {
+                    page: page.to_string(),
+                    params: params_to_map(params),
+                });
+            let call = {
+                let mut counts = self
+                    .request_counts
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let count = counts.entry(page.to_string()).or_default();
+                *count += 1;
+                *count
+            };
+            if self
+                .failures
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&(page.to_string(), call))
+            {
+                return Err(crate::error::LpassError::io(
+                    "http post",
+                    std::io::Error::other("mock request failed"),
+                ));
+            }
+            if let Some(response) = self.override_response(page) {
+                return Ok(response);
+            }
         }
 
         let map = params_to_map(params);
@@ -148,10 +223,10 @@ impl MockTransport {
             },
             "getattach.php" => {
                 let Some(storage_key) = map.get("getattach") else {
-                    return HttpResponse {
+                    return Ok(HttpResponse {
                         status: 200,
                         body: String::new(),
-                    };
+                    });
                 };
                 if storage_key == MOCK_ATTACH_STORAGE_KEY_TEXT {
                     mock_attachment_ciphertext(b"demo")
@@ -167,7 +242,7 @@ impl MockTransport {
             _ => "<response><error message=\"unimplemented\"/></response>".to_string(),
         };
 
-        HttpResponse { status: 200, body }
+        Ok(HttpResponse { status: 200, body })
     }
 
     pub(crate) fn respond_bytes(&self, page: &str, params: &[(&str, &str)]) -> HttpResponseBytes {
@@ -185,7 +260,9 @@ impl MockTransport {
                 body: self.mock_blob_bytes(),
             };
         }
-        let response = self.respond(page, params);
+        let response = self
+            .respond(page, params)
+            .expect("byte mock requests do not inject transport errors");
         HttpResponseBytes {
             status: response.status,
             body: response.body.into_bytes(),

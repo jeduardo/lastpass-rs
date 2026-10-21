@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufRead, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::agent_save;
 use crate::config::config_unlink;
@@ -9,9 +11,9 @@ use crate::crypto::decrypt_private_key;
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::kdf::{KDF_HASH_LEN, kdf_decryption_key, kdf_login_key};
-use crate::password::prompt_password;
+use crate::password::{prompt_password, prompt_password_with_description};
 use crate::session::{Session, session_save};
-use crate::terminal::{self, BOLD, FG_GREEN, RESET, UNDERLINE};
+use crate::terminal::{self, BOLD, FG_GREEN, FG_YELLOW, RESET, UNDERLINE};
 use crate::xml::{parse_error_cause, parse_ok_session};
 use rand::Rng;
 use zeroize::Zeroize;
@@ -224,42 +226,387 @@ fn lastpass_login_with_client(
     trusted_id: Option<&str>,
     trust_label: Option<&str>,
 ) -> Result<Session> {
-    let user_lower = username.to_ascii_lowercase();
-    let iterations_str = iterations.to_string();
-
-    let mut params = vec![
-        ("xml", "2"),
-        ("username", user_lower.as_str()),
-        ("hash", hash),
-        ("iterations", iterations_str.as_str()),
-        ("includeprivatekeyenc", "1"),
-        ("method", "cli"),
-        ("outofbandsupported", "1"),
-    ];
-    if let Some(uuid) = trusted_id {
-        params.push(("uuid", uuid));
-    }
-    if let Some(label) = trust_label {
-        params.push(("trustlabel", label));
-    }
-
-    let response = client.post_lastpass(None, "login.php", None, &params)?;
-    parse_login_response(&response.body)
+    lastpass_login_with_client_and_prompt(
+        client,
+        username,
+        hash,
+        iterations,
+        trusted_id,
+        trust_label,
+        &mut |prompt, error, description| {
+            prompt_password_with_description(prompt, error, description)
+        },
+    )
 }
 
-fn parse_login_response(body: &str) -> Result<Session> {
+#[derive(Debug, Clone)]
+enum LoginResponse {
+    Session(Session),
+    Challenge(LoginChallenge),
+    Failure(&'static str),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct LoginChallenge {
+    cause: String,
+    message: Option<String>,
+    server: Option<String>,
+    outofband_name: Option<String>,
+    capabilities: Option<String>,
+    retry_id: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+struct MultifactorType {
+    name: &'static str,
+    failure_cause: &'static str,
+    post_param: &'static str,
+}
+
+#[derive(Debug)]
+enum OutOfBandResult {
+    Session(Session),
+    Passcode(String),
+}
+
+fn lastpass_login_with_client_and_prompt<F>(
+    client: &HttpClient,
+    username: &str,
+    hash: &str,
+    iterations: u32,
+    trusted_id: Option<&str>,
+    trust_label: Option<&str>,
+    prompt: &mut F,
+) -> Result<Session>
+where
+    F: FnMut(&str, Option<&str>, &str) -> Result<String>,
+{
+    let user_lower = username.to_ascii_lowercase();
+    let iterations_str = iterations.to_string();
+    let mut params = vec![
+        ("xml".to_string(), "2".to_string()),
+        ("username".to_string(), user_lower.clone()),
+        ("hash".to_string(), hash.to_string()),
+        ("iterations".to_string(), iterations_str),
+        ("includeprivatekeyenc".to_string(), "1".to_string()),
+        ("method".to_string(), "cli".to_string()),
+        ("outofbandsupported".to_string(), "1".to_string()),
+    ];
+    if let Some(uuid) = trusted_id {
+        set_login_param(&mut params, "uuid", uuid.to_string());
+    }
+
+    let mut server = crate::http::LASTPASS_SERVER.to_string();
+    let mut response = post_login_form(client, &server, &params)?;
+    if let LoginResponse::Challenge(challenge) = &response
+        && challenge.server.as_deref() == Some("lastpass.eu")
+        && server != "lastpass.eu"
+    {
+        server = "lastpass.eu".to_string();
+        response = post_login_form(client, &server, &params)?;
+    }
+
+    if let Some(label) = trust_label
+        && !matches!(response, LoginResponse::Session(_))
+    {
+        set_login_param(&mut params, "trustlabel", label.to_string());
+    }
+
+    match response {
+        LoginResponse::Session(session) => Ok(session),
+        LoginResponse::Failure(message) => Err(crate::error::LpassError::User(message)),
+        LoginResponse::Challenge(challenge) => {
+            let response = if challenge.cause == "outofbandrequired" {
+                match outofband_login(client, &server, &mut params, &challenge)? {
+                    OutOfBandResult::Session(session) => return Ok(session),
+                    OutOfBandResult::Passcode(name) => LoginChallenge {
+                        outofband_name: Some(name),
+                        ..challenge
+                    },
+                }
+            } else {
+                challenge
+            };
+            let Some(multifactor) = multifactor_type(&response.cause) else {
+                let message = response
+                    .message
+                    .as_deref()
+                    .map(filter_error_message)
+                    .unwrap_or("login failed");
+                return Err(crate::error::LpassError::User(message));
+            };
+            otp_login(
+                client,
+                &server,
+                &mut params,
+                &user_lower,
+                response.outofband_name.as_deref(),
+                multifactor,
+                prompt,
+            )
+        }
+    }
+}
+
+fn post_login_form(
+    client: &HttpClient,
+    server: &str,
+    params: &[(String, String)],
+) -> Result<LoginResponse> {
+    let form = params
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let response = client.post_lastpass(Some(server), "login.php", None, &form)?;
+    Ok(parse_login_response(&response.body, server))
+}
+
+fn set_login_param(params: &mut Vec<(String, String)>, name: &str, value: String) {
+    if let Some((_, existing_value)) = params.iter_mut().find(|(key, _)| key == name) {
+        *existing_value = value;
+    } else {
+        params.push((name.to_string(), value));
+    }
+}
+
+fn parse_login_response(body: &str, server: &str) -> LoginResponse {
     if let Some(mut session) = parse_ok_session(body) {
-        session.server = Some(crate::http::LASTPASS_SERVER.to_string());
-        return Ok(session);
+        session.server = Some(server.to_string());
+        return LoginResponse::Session(session);
+    }
+
+    let cause = parse_error_cause(body, "cause");
+    let server_redirect = parse_error_cause(body, "server");
+    if cause.is_some() || server_redirect.is_some() {
+        return LoginResponse::Challenge(LoginChallenge {
+            cause: cause.unwrap_or_default(),
+            message: parse_error_cause(body, "message"),
+            server: server_redirect,
+            outofband_name: parse_error_cause(body, "outofbandname"),
+            capabilities: parse_error_cause(body, "capabilities"),
+            retry_id: parse_error_cause(body, "retryid"),
+        });
     }
 
     if let Some(message) = parse_error_cause(body, "message") {
-        return Err(crate::error::LpassError::User(filter_error_message(
-            &message,
-        )));
+        return LoginResponse::Failure(filter_error_message(&message));
     }
 
-    Err(crate::error::LpassError::Crypto("login failed"))
+    LoginResponse::Failure("login failed")
+}
+
+fn multifactor_type(cause: &str) -> Option<MultifactorType> {
+    match cause {
+        "googleauthrequired" => Some(MultifactorType {
+            name: "Google Authenticator Code",
+            failure_cause: "googleauthfailed",
+            post_param: "otp",
+        }),
+        "otprequired" => Some(MultifactorType {
+            name: "YubiKey OTP",
+            failure_cause: "otpfailed",
+            post_param: "otp",
+        }),
+        "sesameotprequired" => Some(MultifactorType {
+            name: "Sesame OTP",
+            failure_cause: "sesameotpfailed",
+            post_param: "sesameotp",
+        }),
+        "outofbandrequired" => Some(MultifactorType {
+            name: "Out-of-Band OTP",
+            failure_cause: "multifactorresponsefailed",
+            post_param: "otp",
+        }),
+        "microsoftauthrequired" => Some(MultifactorType {
+            name: "Microsoft Authenticator Code",
+            failure_cause: "microsoftauthfailed",
+            post_param: "otp",
+        }),
+        _ => None,
+    }
+}
+
+fn otp_login<F>(
+    client: &HttpClient,
+    server: &str,
+    params: &mut Vec<(String, String)>,
+    username: &str,
+    outofband_name: Option<&str>,
+    multifactor: MultifactorType,
+    prompt: &mut F,
+) -> Result<Session>
+where
+    F: FnMut(&str, Option<&str>, &str) -> Result<String>,
+{
+    let mut prompt_error: Option<String> = None;
+    loop {
+        let prompt_name = outofband_name.unwrap_or(multifactor.name);
+        let description = format!(
+            "Please enter your {prompt_name} for \
+             <{username}>."
+        );
+        let code = prompt("Code", prompt_error.as_deref(), &description)?;
+        set_login_param(params, multifactor.post_param, code);
+
+        match post_login_form(client, server, params)? {
+            LoginResponse::Session(session) => return Ok(session),
+            LoginResponse::Challenge(challenge) if challenge.cause == multifactor.failure_cause => {
+                prompt_error = Some("Invalid multifactor code; please try again.".to_string());
+            }
+            LoginResponse::Challenge(challenge) => {
+                let message = challenge
+                    .message
+                    .as_deref()
+                    .map(filter_error_message)
+                    .unwrap_or("Multifactor authentication failed");
+                return Err(crate::error::LpassError::User(message));
+            }
+            LoginResponse::Failure(message) => {
+                return Err(crate::error::LpassError::User(message));
+            }
+        }
+    }
+}
+
+fn outofband_login(
+    client: &HttpClient,
+    server: &str,
+    params: &mut Vec<(String, String)>,
+    challenge: &LoginChallenge,
+) -> Result<OutOfBandResult> {
+    let interrupt = challenge
+        .capabilities
+        .as_deref()
+        .filter(|capabilities| {
+            let capabilities = capabilities.split(',').collect::<Vec<_>>();
+            capabilities.contains(&"outofband") && capabilities.contains(&"passcode")
+        })
+        .map(|_| SigintFlag::new())
+        .transpose()
+        .map_err(|error| crate::error::LpassError::io("registering Ctrl+C handler", error))?;
+
+    outofband_login_with_interrupt_check(client, server, params, challenge, || {
+        interrupt.as_ref().is_some_and(SigintFlag::is_interrupted)
+    })
+}
+
+fn outofband_login_with_interrupt_check<F>(
+    client: &HttpClient,
+    server: &str,
+    params: &mut Vec<(String, String)>,
+    challenge: &LoginChallenge,
+    mut was_interrupted: F,
+) -> Result<OutOfBandResult>
+where
+    F: FnMut() -> bool,
+{
+    let Some(name) = challenge.outofband_name.as_deref() else {
+        return Err(crate::error::LpassError::User(
+            "Could not determine out-of-band type.",
+        ));
+    };
+    let Some(capabilities) = challenge.capabilities.as_deref() else {
+        return Err(crate::error::LpassError::User(
+            "Could not determine out-of-band type.",
+        ));
+    };
+    let capabilities = capabilities.split(',').collect::<Vec<_>>();
+    let can_use_passcode = capabilities.contains(&"passcode");
+    if can_use_passcode && !capabilities.contains(&"outofband") {
+        return Ok(OutOfBandResult::Passcode(format!("{name} OTP")));
+    }
+
+    eprint!(
+        "{}",
+        terminal::render_stderr(&format!(
+            "{FG_YELLOW}{BOLD}Waiting for approval of out-of-band \
+             {name} login{}{RESET}...",
+            if can_use_passcode {
+                ", or press Ctrl+C to enter a passcode"
+            } else {
+                ""
+            }
+        ))
+    );
+    set_login_param(params, "outofbandrequest", "1".to_string());
+    loop {
+        if can_use_passcode && was_interrupted() {
+            eprintln!();
+            return Ok(oob_passcode_fallback(params, name));
+        }
+        let response = post_login_form(client, server, params);
+        if can_use_passcode && was_interrupted() {
+            eprintln!();
+            return Ok(oob_passcode_fallback(params, name));
+        }
+        match response {
+            Err(_) if can_use_passcode => {
+                eprintln!();
+                return Ok(oob_passcode_fallback(params, name));
+            }
+            Err(error) => {
+                eprintln!();
+                return Err(error);
+            }
+            Ok(LoginResponse::Session(session)) => {
+                eprintln!();
+                return Ok(OutOfBandResult::Session(session));
+            }
+            Ok(LoginResponse::Challenge(response)) if response.cause == "outofbandrequired" => {
+                let retry_id = response.retry_id.unwrap_or_default();
+                set_login_param(params, "outofbandretry", "1".to_string());
+                set_login_param(params, "outofbandretryid", retry_id.clone());
+                eprint!(".");
+            }
+            Ok(LoginResponse::Challenge(response)) => {
+                eprintln!();
+                let message = response
+                    .message
+                    .as_deref()
+                    .map(filter_error_message)
+                    .unwrap_or("login failed");
+                return Err(crate::error::LpassError::User(message));
+            }
+            Ok(LoginResponse::Failure(message)) => {
+                eprintln!();
+                return Err(crate::error::LpassError::User(message));
+            }
+        }
+    }
+}
+
+fn oob_passcode_fallback(params: &mut Vec<(String, String)>, name: &str) -> OutOfBandResult {
+    set_login_param(params, "outofbandrequest", "0".to_string());
+    set_login_param(params, "outofbandretry", "0".to_string());
+    set_login_param(params, "outofbandretryid", String::new());
+    OutOfBandResult::Passcode(format!("{name} OTP"))
+}
+
+struct SigintFlag {
+    interrupted: Arc<AtomicBool>,
+    signal_id: signal_hook::SigId,
+}
+
+impl SigintFlag {
+    fn new() -> io::Result<Self> {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let signal_id =
+            signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted))?;
+        Ok(Self {
+            interrupted,
+            signal_id,
+        })
+    }
+
+    fn is_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for SigintFlag {
+    fn drop(&mut self) {
+        signal_hook::low_level::unregister(self.signal_id);
+    }
 }
 
 fn filter_error_message(message: &str) -> &'static str {
@@ -470,7 +817,7 @@ mod tests {
     use crate::config::ConfigEnv;
     use crate::crypto::{aes_encrypt_lastpass, base64_lastpass_encode};
     use crate::http::HttpClient;
-    use crate::kdf::kdf_login_key;
+    use crate::kdf::{kdf_decryption_key, kdf_login_key};
     use tempfile::TempDir;
 
     #[test]
@@ -497,6 +844,71 @@ mod tests {
         let err = run_inner(&["--color=rainbow".to_string(), "a@example.com".to_string()])
             .expect_err("invalid color mode must fail");
         assert!(err.contains("usage: login"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_inner_completes_trusted_plaintext_key_login_in_mock_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        let home = TempDir::new().expect("temp home");
+        let _config_guard = crate::config::set_test_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        let askpass = home.path().join("askpass");
+        std::fs::write(&askpass, "#!/bin/sh\nprintf '123456\\n'\n").expect("write askpass");
+        let mut permissions = std::fs::metadata(&askpass)
+            .expect("askpass metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&askpass, permissions).expect("chmod askpass");
+        crate::lpenv::set_override_for_tests("LPASS_ASKPASS", askpass.to_string_lossy().as_ref());
+        crate::lpenv::set_override_for_tests("LPASS_HTTP_MOCK", "1");
+        crate::lpenv::set_override_for_tests("LPASS_AGENT_DISABLE", "1");
+
+        let result = run_inner(&[
+            "--trust".to_string(),
+            "--plaintext-key".to_string(),
+            "--force".to_string(),
+            "user@example.com".to_string(),
+        ])
+        .expect("login succeeds");
+
+        assert_eq!(result, 0);
+        let store = ConfigStore::with_env(ConfigEnv {
+            lpass_home: Some(home.path().to_path_buf()),
+            ..ConfigEnv::default()
+        });
+        assert_eq!(
+            store
+                .read_string("username")
+                .expect("read username")
+                .as_deref(),
+            Some("user@example.com")
+        );
+        assert_eq!(
+            store
+                .read_buffer("plaintext_key")
+                .expect("read key")
+                .expect("plaintext key was saved")
+                .len(),
+            KDF_HASH_LEN
+        );
+        assert!(
+            store
+                .read_string("trusted_id")
+                .expect("trusted id")
+                .is_some()
+        );
+        let key = kdf_decryption_key("user@example.com", "123456", 1000).expect("key");
+        assert!(
+            store
+                .read_encrypted_buffer("blob", &key)
+                .expect("read blob")
+                .is_some()
+        );
     }
 
     #[test]
@@ -560,6 +972,745 @@ mod tests {
         let err = lastpass_login_with_client_basic(&client, "user@example.com", "bad", 1000)
             .expect_err("bad login must fail");
         assert!(matches!(err, crate::error::LpassError::User(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lastpass_login_submits_google_auth_code_after_challenge() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env_guard = crate::lpenv::begin_test_overrides();
+        let temp = TempDir::new().expect("tempdir");
+        let askpass = temp.path().join("askpass");
+        let prompt_log = temp.path().join("prompts");
+        std::fs::write(
+            &askpass,
+            format!(
+                concat!(
+                    "#!/bin/sh\n",
+                    "printf '%s\\n' \"$1\" >> '{}'\n",
+                    "printf '123456\\n'\n",
+                ),
+                prompt_log.display()
+            ),
+        )
+        .expect("write askpass");
+        let mut permissions = std::fs::metadata(&askpass)
+            .expect("askpass metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&askpass, permissions).expect("chmod askpass");
+        crate::lpenv::set_override_for_tests("LPASS_ASKPASS", askpass.to_string_lossy().as_ref());
+
+        let client = HttpClient::mock_with_overrides(&[(
+            "login.php",
+            200,
+            "<response><error cause=\"googleauthrequired\"/></response>",
+        )]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let session = lastpass_login_with_client_basic(&client, "user@example.com", &hash, 1000)
+            .expect("login succeeds after OTP");
+
+        assert_eq!(session.uid, "57747756");
+        assert_eq!(
+            std::fs::read_to_string(prompt_log).expect("prompt log"),
+            "Code\n"
+        );
+        let login_requests = client
+            .mock_requests()
+            .expect("mock requests")
+            .into_iter()
+            .filter(|request| request.page == "login.php")
+            .collect::<Vec<_>>();
+        assert_eq!(login_requests.len(), 2);
+        assert_eq!(
+            login_requests[1].params.get("otp").map(String::as_str),
+            Some("123456")
+        );
+    }
+
+    #[test]
+    fn lastpass_login_retries_google_auth_code_after_invalid_code() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                "<response><error cause=\"googleauthrequired\"/></response>",
+            ),
+            (
+                "login.php",
+                200,
+                "<response><error cause=\"googleauthfailed\"/></response>",
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompts = Vec::new();
+        let mut prompt = |name: &str, error: Option<&str>, _description: &str| {
+            prompts.push((name.to_string(), error.map(str::to_string)));
+            Ok("654321".to_string())
+        };
+
+        let session = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect("valid second OTP succeeds");
+
+        assert_eq!(session.uid, "57747756");
+        assert_eq!(
+            prompts,
+            vec![
+                ("Code".to_string(), None),
+                (
+                    "Code".to_string(),
+                    Some("Invalid multifactor code; please try again.".to_string(),),
+                ),
+            ]
+        );
+        let requests = client.mock_requests().expect("mock requests");
+        let otp_requests = requests
+            .iter()
+            .filter(|request| request.page == "login.php")
+            .collect::<Vec<_>>();
+        assert_eq!(otp_requests.len(), 3);
+        assert_eq!(
+            otp_requests[1].params.get("otp").map(String::as_str),
+            Some("654321")
+        );
+        assert_eq!(
+            otp_requests[2].params.get("otp").map(String::as_str),
+            Some("654321")
+        );
+    }
+
+    #[test]
+    fn lastpass_login_polls_out_of_band_approval() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"LastPass Authenticator\" ",
+                    "capabilities=\"outofband,passcode\"/></response>"
+                ),
+            ),
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "retryid=\"retry-2\"/></response>"
+                ),
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            panic!("out-of-band approval should not prompt for a code");
+        };
+
+        let session = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect("approval succeeds");
+
+        assert_eq!(session.uid, "57747756");
+        let requests = client.mock_requests().expect("mock requests");
+        let login_requests = requests
+            .iter()
+            .filter(|request| request.page == "login.php")
+            .collect::<Vec<_>>();
+        assert_eq!(login_requests.len(), 3);
+        assert_eq!(
+            login_requests[1]
+                .params
+                .get("outofbandrequest")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            login_requests[2]
+                .params
+                .get("outofbandretry")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            login_requests[2]
+                .params
+                .get("outofbandretryid")
+                .map(String::as_str),
+            Some("retry-2")
+        );
+    }
+
+    #[test]
+    fn lastpass_login_uses_passcode_when_out_of_band_is_unavailable() {
+        let client = HttpClient::mock_with_overrides(&[(
+            "login.php",
+            200,
+            concat!(
+                "<response><error cause=\"outofbandrequired\" ",
+                "outofbandname=\"Email\" capabilities=\"passcode\"/>",
+                "</response>"
+            ),
+        )]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt_details = None;
+        let mut prompt = |name: &str, _error: Option<&str>, description: &str| {
+            prompt_details = Some((name.to_string(), description.to_string()));
+            Ok("654321".to_string())
+        };
+
+        let session = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect("passcode succeeds");
+
+        assert_eq!(session.uid, "57747756");
+        assert_eq!(
+            prompt_details,
+            Some((
+                "Code".to_string(),
+                concat!("Please enter your Email OTP for ", "<user@example.com>.").to_string(),
+            ))
+        );
+        let login_requests = client
+            .mock_requests()
+            .expect("mock requests")
+            .into_iter()
+            .filter(|request| request.page == "login.php")
+            .collect::<Vec<_>>();
+        assert_eq!(login_requests.len(), 2);
+        assert_eq!(
+            login_requests[1].params.get("otp").map(String::as_str),
+            Some("654321")
+        );
+    }
+
+    #[test]
+    fn lastpass_login_falls_back_to_passcode_when_polling_fails() {
+        let client = HttpClient::mock_with_overrides_and_failure(
+            &[(
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"Email\" ",
+                    "capabilities=\"outofband,passcode\"/></response>"
+                ),
+            )],
+            "login.php",
+            2,
+        );
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt_description = None;
+        let mut prompt = |_name: &str, _error: Option<&str>, description: &str| {
+            prompt_description = Some(description.to_string());
+            Ok("654321".to_string())
+        };
+
+        lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect("passcode fallback succeeds");
+
+        assert_eq!(
+            prompt_description.as_deref(),
+            Some("Please enter your Email OTP for <user@example.com>.")
+        );
+        let requests = client.mock_requests().expect("mock requests");
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2]
+                .params
+                .get("outofbandrequest")
+                .map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            requests[2].params.get("outofbandretry").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            requests[2].params.get("outofbandretryid"),
+            Some(&String::new())
+        );
+        assert_eq!(
+            requests[2].params.get("otp").map(String::as_str),
+            Some("654321")
+        );
+    }
+
+    #[test]
+    fn outofband_login_falls_back_to_passcode_when_poll_is_interrupted() {
+        let client = HttpClient::mock();
+        let challenge = LoginChallenge {
+            cause: "outofbandrequired".to_string(),
+            message: None,
+            server: None,
+            outofband_name: Some("Email".to_string()),
+            capabilities: Some("outofband,passcode".to_string()),
+            retry_id: None,
+        };
+        let mut params = vec![("username".to_string(), "user@example.com".to_string())];
+        let mut checks = 0;
+
+        let result = outofband_login_with_interrupt_check(
+            &client,
+            "lastpass.com",
+            &mut params,
+            &challenge,
+            || {
+                checks += 1;
+                checks == 2
+            },
+        )
+        .expect("interrupt should select passcode fallback");
+
+        assert!(matches!(result, OutOfBandResult::Passcode(ref name) if name == "Email OTP"));
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandrequest"),
+            Some(&("outofbandrequest".to_string(), "0".to_string()))
+        );
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandretry"),
+            Some(&("outofbandretry".to_string(), "0".to_string()))
+        );
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandretryid"),
+            Some(&("outofbandretryid".to_string(), String::new()))
+        );
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 1);
+    }
+
+    #[test]
+    fn outofband_login_falls_back_before_first_poll_when_interrupted() {
+        let client = HttpClient::mock();
+        let challenge = LoginChallenge {
+            cause: "outofbandrequired".to_string(),
+            message: None,
+            server: None,
+            outofband_name: Some("Email".to_string()),
+            capabilities: Some("outofband,passcode".to_string()),
+            retry_id: None,
+        };
+        let mut params = vec![("username".to_string(), "user@example.com".to_string())];
+
+        let result = outofband_login_with_interrupt_check(
+            &client,
+            "lastpass.com",
+            &mut params,
+            &challenge,
+            || true,
+        )
+        .expect("interrupt should select passcode fallback before polling");
+
+        assert!(matches!(result, OutOfBandResult::Passcode(ref name) if name == "Email OTP"));
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 0);
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandrequest"),
+            Some(&("outofbandrequest".to_string(), "0".to_string()))
+        );
+    }
+
+    #[test]
+    fn sigint_flag_records_ctrl_c() {
+        let interrupt = SigintFlag::new().expect("register SIGINT handler");
+
+        signal_hook::low_level::raise(signal_hook::consts::SIGINT).expect("raise SIGINT");
+
+        assert!(interrupt.is_interrupted());
+    }
+
+    #[test]
+    fn lastpass_login_propagates_out_of_band_poll_failure_without_passcode() {
+        let client = HttpClient::mock_with_overrides_and_failure(
+            &[(
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"LastPass Authenticator\" ",
+                    "capabilities=\"outofband\"/></response>"
+                ),
+            )],
+            "login.php",
+            2,
+        );
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            panic!("a poll failure without passcode support must not prompt");
+        };
+
+        let err = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("polling failure should be returned");
+
+        assert!(format!("{err}").contains("mock request failed"));
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 2);
+    }
+
+    #[test]
+    fn lastpass_login_rejects_out_of_band_challenges_missing_metadata() {
+        for challenge in [
+            concat!(
+                "<response><error cause=\"outofbandrequired\" ",
+                "capabilities=\"passcode\"/></response>"
+            ),
+            concat!(
+                "<response><error cause=\"outofbandrequired\" ",
+                "outofbandname=\"Email\"/></response>"
+            ),
+        ] {
+            let client = HttpClient::mock_with_overrides(&[("login.php", 200, challenge)]);
+            let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+            let mut prompt =
+                |_name: &str, _error: Option<&str>, _description: &str| Ok("654321".to_string());
+
+            let error = lastpass_login_with_client_and_prompt(
+                &client,
+                "user@example.com",
+                &hash,
+                1000,
+                None,
+                None,
+                &mut prompt,
+            )
+            .expect_err("incomplete out-of-band challenge must fail");
+
+            assert_eq!(error.to_string(), "Could not determine out-of-band type.");
+        }
+    }
+
+    #[test]
+    fn lastpass_login_propagates_otp_prompt_errors() {
+        let client = HttpClient::mock_with_overrides(&[(
+            "login.php",
+            200,
+            "<response><error cause=\"googleauthrequired\"/></response>",
+        )]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            Err(crate::error::LpassError::User("prompt cancelled"))
+        };
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("prompt error should stop MFA login");
+
+        assert_eq!(error.to_string(), "prompt cancelled");
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 1);
+    }
+
+    #[test]
+    fn lastpass_login_reports_non_retryable_mfa_failure() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                "<response><error cause=\"googleauthrequired\"/></response>",
+            ),
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"authfailed\" ",
+                    "message=\"invalid password\"/></response>"
+                ),
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt =
+            |_name: &str, _error: Option<&str>, _description: &str| Ok("654321".to_string());
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("non-retryable MFA failure should stop login");
+
+        assert_eq!(error.to_string(), "Invalid password");
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 2);
+    }
+
+    #[test]
+    fn lastpass_login_submits_each_non_google_mfa_factor() {
+        let cases = [
+            ("<response><error cause=\"otprequired\"/></response>", "otp"),
+            (
+                "<response><error cause=\"sesameotprequired\"/></response>",
+                "sesameotp",
+            ),
+            (
+                "<response><error cause=\"microsoftauthrequired\"/></response>",
+                "otp",
+            ),
+            (
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"Email\" capabilities=\"passcode\"/>",
+                    "</response>"
+                ),
+                "otp",
+            ),
+        ];
+
+        for (challenge, expected_param) in cases {
+            let client = HttpClient::mock_with_overrides(&[("login.php", 200, challenge)]);
+            let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+            let mut prompt =
+                |_name: &str, _error: Option<&str>, _description: &str| Ok("654321".to_string());
+
+            lastpass_login_with_client_and_prompt(
+                &client,
+                "user@example.com",
+                &hash,
+                1000,
+                None,
+                Some("trusted-label"),
+                &mut prompt,
+            )
+            .expect("MFA login succeeds");
+
+            let requests = client.mock_requests().expect("mock requests");
+            assert_eq!(requests.len(), 2);
+            assert_eq!(
+                requests[0].params.get("trustlabel"),
+                None,
+                "trust label is added after the initial challenge"
+            );
+            assert_eq!(
+                requests[1].params.get("trustlabel").map(String::as_str),
+                Some("trusted-label")
+            );
+            assert_eq!(
+                requests[1].params.get(expected_param).map(String::as_str),
+                Some("654321")
+            );
+        }
+    }
+
+    #[test]
+    fn lastpass_login_rejects_unrecognized_mfa_challenge() {
+        let client = HttpClient::mock_with_overrides(&[(
+            "login.php",
+            200,
+            concat!(
+                "<response><error cause=\"unknownfactorrequired\" ",
+                "message=\"multifactor denied\"/></response>"
+            ),
+        )]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            panic!("unsupported MFA factor should not prompt");
+        };
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("unknown MFA factor must fail");
+
+        assert_eq!(error.to_string(), "Multifactor authentication failed");
+    }
+
+    #[test]
+    fn lastpass_login_reports_mfa_response_without_challenge_cause() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                "<response><error cause=\"googleauthrequired\"/></response>",
+            ),
+            (
+                "login.php",
+                200,
+                "<response><error message=\"multifactor denied\"/></response>",
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt =
+            |_name: &str, _error: Option<&str>, _description: &str| Ok("654321".to_string());
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("MFA failure response must stop login");
+
+        assert_eq!(error.to_string(), "Multifactor authentication failed");
+    }
+
+    #[test]
+    fn lastpass_login_reports_out_of_band_denial_without_passcode_support() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"Authenticator\" ",
+                    "capabilities=\"outofband\"/></response>"
+                ),
+            ),
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandfailed\" ",
+                    "message=\"multifactor denied\"/></response>"
+                ),
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            panic!("denied push should not prompt for a code");
+        };
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("out-of-band denial should fail login");
+
+        assert_eq!(error.to_string(), "Multifactor authentication failed");
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 2);
+    }
+
+    #[test]
+    fn lastpass_login_reports_out_of_band_failure_without_challenge_cause() {
+        let client = HttpClient::mock_with_overrides(&[
+            (
+                "login.php",
+                200,
+                concat!(
+                    "<response><error cause=\"outofbandrequired\" ",
+                    "outofbandname=\"Authenticator\" ",
+                    "capabilities=\"outofband\"/></response>"
+                ),
+            ),
+            (
+                "login.php",
+                200,
+                "<response><error message=\"multifactor denied\"/></response>",
+            ),
+        ]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+        let mut prompt = |_name: &str, _error: Option<&str>, _description: &str| {
+            panic!("failed push should not prompt for a code");
+        };
+
+        let error = lastpass_login_with_client_and_prompt(
+            &client,
+            "user@example.com",
+            &hash,
+            1000,
+            None,
+            None,
+            &mut prompt,
+        )
+        .expect_err("out-of-band failure must stop login");
+
+        assert_eq!(error.to_string(), "Multifactor authentication failed");
+    }
+
+    #[test]
+    fn lastpass_login_redirects_to_lastpass_eu() {
+        let client = HttpClient::mock_with_overrides(&[(
+            "login.php",
+            200,
+            concat!("<response><error ", "server=\"lastpass.eu\"/></response>"),
+        )]);
+        let hash = kdf_login_key("user@example.com", "123456", 1000).expect("hash");
+
+        let session = lastpass_login_with_client_basic(&client, "user@example.com", &hash, 1000)
+            .expect("redirected login");
+
+        assert_eq!(session.server.as_deref(), Some("lastpass.eu"));
+        assert_eq!(
+            client
+                .mock_requests()
+                .expect("mock requests")
+                .iter()
+                .filter(|request| request.page == "login.php")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn multifactor_types_match_upstream_post_fields() {
+        let cases = [
+            ("googleauthrequired", "googleauthfailed", "otp"),
+            ("otprequired", "otpfailed", "otp"),
+            ("sesameotprequired", "sesameotpfailed", "sesameotp"),
+            ("outofbandrequired", "multifactorresponsefailed", "otp"),
+            ("microsoftauthrequired", "microsoftauthfailed", "otp"),
+        ];
+        for (cause, failure_cause, post_param) in cases {
+            let multifactor = multifactor_type(cause).expect("supported MFA cause");
+            assert_eq!(multifactor.failure_cause, failure_cause);
+            assert_eq!(multifactor.post_param, post_param);
+        }
+        assert!(multifactor_type("unrecognized").is_none());
     }
 
     #[test]
@@ -899,11 +2050,25 @@ mod tests {
 
     #[test]
     fn parse_login_response_reports_generic_error_when_message_is_missing() {
-        let err = parse_login_response("<response><error/></response>").expect_err("must fail");
         assert!(matches!(
-            err,
-            crate::error::LpassError::Crypto("login failed")
+            parse_login_response(
+                "<response><error/></response>",
+                crate::http::LASTPASS_SERVER
+            ),
+            LoginResponse::Failure("login failed")
         ));
+    }
+
+    #[test]
+    fn parse_login_response_identifies_google_auth_challenge() {
+        let response = parse_login_response(
+            "<response><error cause=\"googleauthrequired\"/></response>",
+            crate::http::LASTPASS_SERVER,
+        );
+        let LoginResponse::Challenge(challenge) = response else {
+            panic!("MFA response should be parsed as a challenge");
+        };
+        assert_eq!(challenge.cause, "googleauthrequired");
     }
 
     #[test]

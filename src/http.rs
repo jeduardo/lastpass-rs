@@ -10,6 +10,8 @@ pub const LASTPASS_SERVER: &str = "lastpass.com";
 #[cfg(any(test, feature = "test-harness"))]
 #[path = "http/mock.rs"]
 mod mock;
+#[cfg(test)]
+pub(crate) use self::mock::MockRequest;
 #[cfg(any(test, feature = "test-harness"))]
 pub(crate) use self::mock::MockTransport;
 #[cfg(test)]
@@ -77,9 +79,30 @@ impl HttpClient {
     }
 
     #[cfg(test)]
+    pub(crate) fn mock_requests(&self) -> Option<Vec<MockRequest>> {
+        match &self.transport {
+            Transport::Mock(mock) => Some(mock.requests()),
+            Transport::Real(_) => None,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn mock_with_overrides(overrides: &[(&str, u16, &str)]) -> Self {
         Self {
             transport: Transport::Mock(MockTransport::with_overrides(overrides)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mock_with_overrides_and_failure(
+        overrides: &[(&str, u16, &str)],
+        page: &str,
+        call: usize,
+    ) -> Self {
+        Self {
+            transport: Transport::Mock(MockTransport::with_overrides_and_failure(
+                overrides, page, call,
+            )),
         }
     }
 
@@ -94,7 +117,7 @@ impl HttpClient {
         match &self.transport {
             Transport::Real(client) => post_real(client, server, page, session, params),
             #[cfg(any(test, feature = "test-harness"))]
-            Transport::Mock(mock) => Ok(mock.respond(page, params)),
+            Transport::Mock(mock) => mock.respond(page, params),
         }
     }
 

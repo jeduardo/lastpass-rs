@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use crate::error::{LpassError, Result};
+use crate::terminal::{self, BOLD, FG_RED, FG_YELLOW, RESET};
 
 type PromptFn<'a> = dyn FnMut(String) -> std::io::Result<String> + 'a;
 
@@ -75,7 +76,8 @@ fn prompt_password_from_tty_with(
 ) -> Result<String> {
     write_prompt_description(&mut std::io::stderr().lock(), description, error)
         .map_err(|err| LpassError::io("password prompt", err))?;
-    prompt_fn(format!("{prompt}: ")).map_err(|err| LpassError::io("password prompt", err))
+    let tty_prompt = terminal::render_stderr(&format!("{BOLD}{prompt}{RESET}: "));
+    prompt_fn(tty_prompt).map_err(|err| LpassError::io("password prompt", err))
 }
 
 fn prompt_password_with_pinentry(
@@ -300,9 +302,10 @@ fn write_prompt_description<W: Write>(
     description: &str,
     error: Option<&str>,
 ) -> std::io::Result<()> {
-    writeln!(writer, "{description}")?;
-    writeln!(writer)?;
+    let description = terminal::render_stderr(&format!("{FG_YELLOW}{BOLD}{description}{RESET}"));
+    writeln!(writer, "{description}\n")?;
     if let Some(error) = error {
+        let error = terminal::render_stderr(&format!("{FG_RED}{BOLD}{error}{RESET}"));
         writeln!(writer, "{error}")?;
     }
     writer.flush()

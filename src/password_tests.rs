@@ -95,6 +95,11 @@ fn pinentry_unescape_stops_on_truncated_sequence() {
 }
 
 #[test]
+fn pinentry_unescape_stops_on_invalid_hex_sequence() {
+    assert_eq!(pinentry_unescape("before%zzafter"), "before");
+}
+
+#[test]
 fn write_prompt_description_includes_optional_error() {
     let mut output = Vec::new();
     write_prompt_description(
@@ -108,6 +113,20 @@ fn write_prompt_description_includes_optional_error() {
     assert_eq!(
         text,
         "Please enter the LastPass master password for <user@example.com>.\n\ninvalid password\n"
+    );
+}
+
+#[test]
+fn write_prompt_description_matches_c_prompt_colors() {
+    crate::terminal::set_color_mode(crate::terminal::ColorMode::Always);
+    let mut output = Vec::new();
+    write_prompt_description(&mut output, "Description", Some("Invalid code"))
+        .expect("write colored prompt");
+    crate::terminal::set_color_mode(crate::terminal::ColorMode::Auto);
+
+    assert_eq!(
+        String::from_utf8(output).expect("utf8"),
+        "\x1b[33m\x1b[1mDescription\x1b[0m\n\n\x1b[31m\x1b[1mInvalid code\x1b[0m\n"
     );
 }
 
@@ -126,6 +145,20 @@ fn prompt_password_from_tty_with_writes_description_and_returns_value() {
     .expect("prompt");
 
     assert_eq!(value, "from-tty");
+}
+
+#[test]
+fn prompt_password_from_tty_bolds_prompt_label() {
+    crate::terminal::set_color_mode(crate::terminal::ColorMode::Always);
+    let mut prompt = |prompt| {
+        assert_eq!(prompt, "\x1b[1mCode\x1b[0m: ");
+        Ok("123456".to_string())
+    };
+    let value = prompt_password_from_tty_with("Code", None, "Description", &mut prompt)
+        .expect("OTP prompt");
+    crate::terminal::set_color_mode(crate::terminal::ColorMode::Auto);
+
+    assert_eq!(value, "123456");
 }
 
 #[test]
@@ -161,6 +194,16 @@ fn prompt_password_reports_askpass_failure() {
 
     let err = prompt_password("user@example.com").expect_err("askpass must fail");
     assert!(format!("{err}").contains("askpass failed"));
+}
+
+#[test]
+#[cfg(unix)]
+fn prompt_password_reports_askpass_spawn_error() {
+    let _guard = crate::lpenv::begin_test_overrides();
+    crate::lpenv::set_override_for_tests("LPASS_ASKPASS", "/path/that/does/not/exist");
+
+    let err = prompt_password("user@example.com").expect_err("missing askpass must fail");
+    assert!(format!("{err}").contains("askpass"));
 }
 
 #[test]
@@ -238,6 +281,27 @@ fn prompt_password_with_pinentry_reads_password() {
     .expect("pinentry password");
 
     assert_eq!(password, "from\npinentry");
+}
+
+#[test]
+#[cfg(unix)]
+fn prompt_password_with_pinentry_concatenates_data_lines_without_error_prompt() {
+    let temp = TempDir::new().expect("tempdir");
+    let script = temp.path().join("pinentry-multiline.sh");
+    write_script(
+        &script,
+        "#!/bin/sh\nprintf 'OK ready\\n'\nwhile IFS= read -r line; do\n  case \"$line\" in\n    GETPIN) printf 'D first-%%25\\nD second\\nOK\\n' ;;\n    BYE) printf 'OK\\n'; exit 0 ;;\n    *) printf 'OK\\n' ;;\n  esac\ndone\n",
+    );
+
+    let password = prompt_password_with_pinentry(
+        &script.display().to_string(),
+        "Code",
+        None,
+        "OTP description",
+    )
+    .expect("pinentry code");
+
+    assert_eq!(password, "first-%second");
 }
 
 #[test]
