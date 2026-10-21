@@ -1308,6 +1308,36 @@ mod tests {
     }
 
     #[test]
+    fn outofband_login_falls_back_before_first_poll_when_interrupted() {
+        let client = HttpClient::mock();
+        let challenge = LoginChallenge {
+            cause: "outofbandrequired".to_string(),
+            message: None,
+            server: None,
+            outofband_name: Some("Email".to_string()),
+            capabilities: Some("outofband,passcode".to_string()),
+            retry_id: None,
+        };
+        let mut params = vec![("username".to_string(), "user@example.com".to_string())];
+
+        let result = outofband_login_with_interrupt_check(
+            &client,
+            "lastpass.com",
+            &mut params,
+            &challenge,
+            || true,
+        )
+        .expect("interrupt should select passcode fallback before polling");
+
+        assert!(matches!(result, OutOfBandResult::Passcode(ref name) if name == "Email OTP"));
+        assert_eq!(client.mock_requests().expect("mock requests").len(), 0);
+        assert_eq!(
+            params.iter().find(|(key, _)| key == "outofbandrequest"),
+            Some(&("outofbandrequest".to_string(), "0".to_string()))
+        );
+    }
+
+    #[test]
     fn sigint_flag_records_ctrl_c() {
         let interrupt = SigintFlag::new().expect("register SIGINT handler");
 
