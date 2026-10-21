@@ -179,6 +179,135 @@ fn mock_share_fallback_paths_cover_unimplemented_and_missing_uid() {
 }
 
 #[test]
+fn mock_share_routes_cover_info_keys_limits_and_mutations() {
+    let client = HttpClient::mock();
+
+    let info = client
+        .post_lastpass(None, "share.php", None, &[("getinfo", "1")])
+        .expect("share info");
+    assert!(info.body.contains("<realname>Test User</realname>"));
+    assert!(info.body.contains("<username>group-team</username>"));
+
+    let own_key = client
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getpubkey", "1"), ("uid", "{\"USER@example.com\":{}}")],
+        )
+        .expect("own public key");
+    assert!(own_key.body.contains("<pubkey0>"));
+
+    let group = client
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getpubkey", "1"), ("uid", "{\"GROUP-TEAM\":{}}")],
+        )
+        .expect("group key");
+    assert!(group.body.contains("<cgid0>cg-991</cgid0>"));
+
+    let other = client
+        .post_lastpass(
+            None,
+            "share.php",
+            None,
+            &[("getpubkey", "1"), ("uid", "{\"other@example.com\":{}}")],
+        )
+        .expect("other public key");
+    assert!(
+        other
+            .body
+            .contains("<username0>other@example.com</username0>")
+    );
+
+    let limits = client
+        .post_lastpass(None, "share.php", None, &[("limit", "1")])
+        .expect("share limits");
+    assert!(limits.body.contains("<hidebydefault>0</hidebydefault>"));
+    let edit_limits = client
+        .post_lastpass(None, "share.php", None, &[("limit", "1"), ("edit", "1")])
+        .expect("edit limits");
+    assert!(edit_limits.body.contains("<success>1</success>"));
+
+    for action in ["delete", "update", "up"] {
+        let response = client
+            .post_lastpass(None, "share.php", None, &[(action, "1")])
+            .expect("share mutation");
+        assert!(response.body.contains("<success>1</success>"));
+    }
+}
+
+#[test]
+fn mock_password_change_routes_validate_credentials_and_payload() {
+    let client = HttpClient::mock();
+    let hash = kdf_login_key("user@example.com", "123456", 1000).expect("login hash");
+
+    let invalid = client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "getacctschangepw"),
+                ("username", "user@example.com"),
+            ],
+        )
+        .expect("invalid password change request");
+    assert!(invalid.body.contains("rc=\"FAIL\""));
+
+    let start = client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "getacctschangepw"),
+                ("username", "user@example.com"),
+                ("hash", &hash),
+            ],
+        )
+        .expect("password change start");
+    assert!(start.body.contains("mock-pwchange-token"));
+
+    let complete = client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[
+                ("cmd", "updatepassword"),
+                ("pwupdate", "1"),
+                ("email", "user@example.com"),
+                ("token", "mock-pwchange-token"),
+                ("reencrypt", "mock-reencrypt-id\nfields"),
+                ("newprivatekeyenc", "key"),
+                ("newuserkeyhexhash", "hash"),
+                ("newprivatekeyenchexhash", "hash"),
+                ("newpasswordhash", "hash"),
+                ("encrypted_username", "username"),
+                ("origusername", "username"),
+                ("wxhash", "hash"),
+                ("key_iterations", "1000"),
+                ("sukeycnt", "1"),
+            ],
+        )
+        .expect("password change completion");
+    assert_eq!(complete.body, "pwchangeok");
+
+    let incomplete = client
+        .post_lastpass(
+            None,
+            "lastpass/api.php",
+            None,
+            &[("cmd", "updatepassword"), ("pwupdate", "1")],
+        )
+        .expect("incomplete password change completion");
+    assert!(incomplete.body.contains("rc=\"FAIL\""));
+}
+
+#[test]
 fn post_lastpass_bytes_returns_raw_body() {
     let client = HttpClient::mock();
     let response = client
