@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.1...lastpass-cli-v0.1.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* support MFA login challenges ([#32](https://github.com/jeduardo/lastpass-rs/issues/32)) ([6d2d111](https://github.com/jeduardo/lastpass-rs/commit/6d2d1118996a3a9e1373373797d7a0bd33188821))
+
 ## [0.1.1](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.0...lastpass-cli-v0.1.1) (2026-04-03)
 
 
