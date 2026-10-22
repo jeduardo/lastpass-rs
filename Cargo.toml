@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "gzip",
 ] }
-rpassword = "7"
+rpassword = "7.5.1"
 rsa = "0.9"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
