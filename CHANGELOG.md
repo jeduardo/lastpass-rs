@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.2...lastpass-cli-v0.1.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* update rpassword for macOS builds ([71e20f8](https://github.com/jeduardo/lastpass-rs/commit/71e20f802a3e03819378803888c0c26ace33b4b9))
+
 ## [0.1.2](https://github.com/jeduardo/lastpass-rs/compare/lastpass-cli-v0.1.1...lastpass-cli-v0.1.2) (2026-10-21)
 
 
